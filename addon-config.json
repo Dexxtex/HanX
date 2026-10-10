@@ -2,7 +2,7 @@
     "addonName": "HanX",
     "addonId": "org.stremio.hanx",
     "addonDescription": "HanX addon con AnimeUnity, AnimeSaturn, AnimeWorld",
-    "addonVersion": "1",
+    "addonVersion": "1.0.0",
     "addonLogo": "https://imgur.com/a/OjaFu9f",
     "addonFavicon": "https://raw.githubusercontent.com/Dexxtex/HanX/refs/heads/main/public/icon.png"
 }
