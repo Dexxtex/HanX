@@ -11,6 +11,8 @@ services:
       # Opzionale: MediaFlow Proxy
       # - MFP_URL=http://localhost:3000
       # - MFP_PSW=your_password
+      # Opzionale: URL base addon per evitare loop con VixSrc
+      # - ADDON_BASE_URL=https://tuo-dominio.com
       # Opzionale: abilita/disabilita provider
       # - ANIMEUNITY_ENABLED=true
       # - ANIMESATURN_ENABLED=true
