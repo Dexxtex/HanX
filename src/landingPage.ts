@@ -803,11 +803,12 @@ function landingTemplate(manifest: any) {
 	
 		<!-- Install diretto -->
 		<div style="text-align:center; margin:1.5rem 0;">
-			<a id="installLink" href="#" class="install-button" style="display:inline-block; padding:12px 24px; background:#8A5AAB; color:#fff; text-decoration:none; border-radius:8px; font-weight:700; font-size:1.1rem; margin-right:0.5rem;">🎬 Installa su Stremio</a>
-			<button id="copyManifestBtn" type="button" style="display:inline-block; padding:12px 24px; background:#1e3a8a; color:#fff; border:2px solid #60a5fa; border-radius:8px; font-weight:700; font-size:1.1rem; cursor:pointer;">📋 Copia URL Manifest</button>
+			<h2 style="color:#c9b3ff; margin-bottom:1rem;">📦 Installa su Stremio</h2>
+			<p style="color:#aaa; font-size:0.9rem; margin-bottom:1rem;">Copia l'URL qui sotto e incollalo in Stremio: <strong>Home → Aggiungi addon → Installa da URL</strong></p>
+			<button id="copyManifestBtn" type="button" style="display:inline-block; padding:12px 24px; background:#8A5AAB; color:#fff; border:none; border-radius:8px; font-weight:700; font-size:1.1rem; cursor:pointer;">📋 Copia URL Manifest</button>
 		</div>
-		<div id="manifestUrlBox" style="text-align:center; margin:0.5rem 0 1.5rem 0; display:none;">
-			<input id="manifestUrlInput" type="text" readonly style="width:80%; max-width:500px; padding:0.5rem; background:rgba(0,0,0,0.3); border:1px solid rgba(140,82,255,0.5); border-radius:6px; color:#c9b3ff; font-family:monospace; font-size:0.85rem;">
+		<div id="manifestUrlBox" style="text-align:center; margin:0.5rem 0 1.5rem 0;">
+			<input id="manifestUrlInput" type="text" readonly value="" style="width:80%; max-width:500px; padding:0.75rem; background:rgba(0,0,0,0.3); border:1px solid rgba(140,82,255,0.5); border-radius:6px; color:#c9b3ff; font-family:monospace; font-size:0.9rem;">
 		</div>
 	
 		${contactHTML}
@@ -816,37 +817,33 @@ function landingTemplate(manifest: any) {
 			${formHTML}
 		</div>
 		<script>
-			// Install link diretto + copia URL
+			// Mostra e copia URL manifest
 			(function() {
-				var installLink = document.getElementById('installLink');
 				var copyBtn = document.getElementById('copyManifestBtn');
-				var urlBox = document.getElementById('manifestUrlBox');
 				var urlInput = document.getElementById('manifestUrlInput');
 				var manifestUrl = window.location.protocol + '//' + window.location.host + '/manifest.json';
 			
-				if (installLink) {
-					installLink.href = 'stremio://install-addon/' + encodeURIComponent(manifestUrl);
+				// Imposta l'URL nell'input
+				if (urlInput) {
+					urlInput.value = manifestUrl;
+					urlInput.select();
 				}
 			
 				if (copyBtn) {
 					copyBtn.addEventListener('click', function() {
-						if (!urlBox) {
-							urlBox = document.getElementById('manifestUrlBox');
-							urlInput = document.getElementById('manifestUrlInput');
-						}
-						if (urlBox && urlInput) {
-							urlBox.style.display = 'block';
-							urlInput.value = manifestUrl;
+						if (urlInput) {
 							urlInput.select();
 							try {
 								document.execCommand('copy');
-								copyBtn.textContent = '✅ Copiato!';
-								setTimeout(function() { copyBtn.textContent = '📋 Copia URL Manifest'; }, 1500);
+								copyBtn.textContent = '✅ URL Copiato!';
+								copyBtn.style.background = '#00c16e';
+								setTimeout(function() {
+									copyBtn.textContent = '📋 Copia URL Manifest';
+									copyBtn.style.background = '#8A5AAB';
+								}, 1500);
 							} catch(e) {
-								copyBtn.textContent = 'URL: ' + manifestUrl;
+								alert('Copia manualmente: ' + manifestUrl);
 							}
-						} else {
-							alert('URL Manifest: ' + manifestUrl);
 						}
 					});
 				}
