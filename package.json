@@ -4,6 +4,12 @@
   "description": "HanX - addon Stremio/NUVIO esclusivo per anime (AnimeUnity, AnimeSaturn, AnimeWorld)",
   "main": "dist/addon.js",
   "packageManager": "pnpm@12.10.1",
+  "resolutions": {
+    "tar": "^7.5.21",
+    "path-to-regexp": "^0.1.12",
+    "braces": "^3.0.3",
+    "@keyv/sqlite": "^6.1.0"
+  },
   "scripts": {
     "build": "tsc && npx shx mkdir -p dist/config && npx shx cp -r config dist/ && npx shx cp src/config/*.json dist/config/",
     "start": "node dist/addon.js",
@@ -11,7 +17,7 @@
     "check:domains": "node scripts/check_domains.js"
   },
   "dependencies": {
-    "@keyv/sqlite": "^4.0.5",
+    "@keyv/sqlite": "^6.1.0",
     "async-mutex": "^0.5.0",
     "axios": "^1.20.0",
     "axios-cookiejar-support": "^6.0.4",
