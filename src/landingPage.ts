@@ -803,7 +803,11 @@ function landingTemplate(manifest: any) {
 	
 		<!-- Install diretto -->
 		<div style="text-align:center; margin:1.5rem 0;">
-			<a id="installLink" href="#" class="install-button" style="display:inline-block; padding:12px 24px; background:#8A5AAB; color:#fff; text-decoration:none; border-radius:8px; font-weight:700; font-size:1.1rem;">🎬 Installa su Stremio</a>
+			<a id="installLink" href="#" class="install-button" style="display:inline-block; padding:12px 24px; background:#8A5AAB; color:#fff; text-decoration:none; border-radius:8px; font-weight:700; font-size:1.1rem; margin-right:0.5rem;">🎬 Installa su Stremio</a>
+			<button id="copyManifestBtn" type="button" style="display:inline-block; padding:12px 24px; background:#1e3a8a; color:#fff; border:2px solid #60a5fa; border-radius:8px; font-weight:700; font-size:1.1rem; cursor:pointer;">📋 Copia URL Manifest</button>
+		</div>
+		<div id="manifestUrlBox" style="text-align:center; margin:0.5rem 0 1.5rem 0; display:none;">
+			<input id="manifestUrlInput" type="text" readonly style="width:80%; max-width:500px; padding:0.5rem; background:rgba(0,0,0,0.3); border:1px solid rgba(140,82,255,0.5); border-radius:6px; color:#c9b3ff; font-family:monospace; font-size:0.85rem;">
 		</div>
 	
 		${contactHTML}
@@ -812,12 +816,39 @@ function landingTemplate(manifest: any) {
 			${formHTML}
 		</div>
 		<script>
-			// Install link diretto
+			// Install link diretto + copia URL
 			(function() {
 				var installLink = document.getElementById('installLink');
+				var copyBtn = document.getElementById('copyManifestBtn');
+				var urlBox = document.getElementById('manifestUrlBox');
+				var urlInput = document.getElementById('manifestUrlInput');
+				var manifestUrl = window.location.protocol + '//' + window.location.host + '/manifest.json';
+			
 				if (installLink) {
-					var manifestUrl = window.location.protocol + '//' + window.location.host + '/manifest.json';
 					installLink.href = 'stremio://install-addon/' + encodeURIComponent(manifestUrl);
+				}
+			
+				if (copyBtn) {
+					copyBtn.addEventListener('click', function() {
+						if (!urlBox) {
+							urlBox = document.getElementById('manifestUrlBox');
+							urlInput = document.getElementById('manifestUrlInput');
+						}
+						if (urlBox && urlInput) {
+							urlBox.style.display = 'block';
+							urlInput.value = manifestUrl;
+							urlInput.select();
+							try {
+								document.execCommand('copy');
+								copyBtn.textContent = '✅ Copiato!';
+								setTimeout(function() { copyBtn.textContent = '📋 Copia URL Manifest'; }, 1500);
+							} catch(e) {
+								copyBtn.textContent = 'URL: ' + manifestUrl;
+							}
+						} else {
+							alert('URL Manifest: ' + manifestUrl);
+						}
+					});
 				}
 			})();
 			${script}
