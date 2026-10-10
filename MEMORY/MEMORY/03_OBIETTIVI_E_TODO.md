@@ -6,7 +6,7 @@
 
 ## ✅ OBIETTIVO RAGGIUNTO
 
-Anify è ora un addon **esclusivo per gli anime** con supporto per:
+HanX è ora un addon **esclusivo per gli anime** con supporto per:
 - **AnimeUnity**
 - **AnimeSaturn**
 - **AnimeWorld**
@@ -58,4 +58,4 @@ Tutto il codice non-anime è stato rimosso (~8500+ righe eliminate).
 
 ---
 
-**Anify** — Il tuo addon anime per Stremio/NUVIO.
+**HanX** — Il tuo addon anime per Stremio/NUVIO.

@@ -82,8 +82,7 @@ Stremio Request → addon.ts (router anime)
 | `PORT` | Porta server (default: 7000) |
 | `TMDB_API_KEY` | Metadati anime |
 | `MFP_URL`, `MFP_PSW` | MediaFlow proxy |
-| `USE_MEDIA_FLOW` | Toggle proxy backend |
-| `ANIMEUNITY/SATURN/WORLD_ENABLED` | Toggle provider |
+| `ANIME_GATE_ENABLED` | Gate verifica anime |
 | `DEBUG_LOG` | Debug logging |
 
 ### Config fields (baseManifest)

@@ -25,9 +25,9 @@
 
 | Cartella | Scopo |
 |----------|-------|
-| `memoria/MEMORY/` | Documentazione tecnica (max 3 file) |
-| `memoria/BACKUP_STORICO/` | Storico cambiamenti (dimensione libera) |
-| `memoria/ERROR_TRACKING/` | Registro errori e lezioni |
+| `MEMORY/MEMORY/` | Documentazione tecnica (max 3 file) |
+| `MEMORY/BACKUP_STORICO/` | Storico cambiamenti (dimensione libera) |
+| `MEMORY/ERROR_TRACKING/` | Registro errori e lezioni |
 
 **File MEMORY:**
 - `01_STRUTTURA_E_ARCHITETTURA.md` — Architettura e componenti
