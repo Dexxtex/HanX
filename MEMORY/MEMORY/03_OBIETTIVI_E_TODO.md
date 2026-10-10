@@ -7,15 +7,15 @@
 
 ### 📋 Panoramica Migrazioni
 
-| # | Migrazione | Lavoro richiesto | Rischio |
-|---|-----------|-----------------|---------|
-| 1 | tough-cookie 4 → 6 | Test cookie jar/parsing | Medio |
-| 2 | jsdom 26 → 30 | Test scraping/parsing | Medio |
-| 3 | Proxy agent 7/8 → 9/10 | Conversione ESM o dynamic import | Medio |
-| 4 | node-fetch 2 → 3 | ESM-only + API changes | Alto |
-| 5 | express 4 → 5 + @types/express 5 | Routing, middleware, error handling | Alto |
-| 6 | Node 24 → 26 + @types/node 26 | Docker base image e test | Basso/medio |
-| 7 | TypeScript 5.9 → 7 | Solo dopo verifica toolchain | Medio/alto |
+| # | Migrazione | Stato | Rischio |
+|---|-----------|-------|---------|
+| 1 | tough-cookie 4 → 6 | ✅ Completato | Medio |
+| 2 | jsdom 26 → 30 | ✅ Completato | Medio |
+| 3 | Proxy agent 7/8 → 9/10 | ⬜ Da fare | Medio |
+| 4 | node-fetch 2 → 3 | ⬜ Da fare | Alto |
+| 5 | express 4 → 5 + @types/express 5 | ⬜ Da fare | Alto |
+| 6 | Node 24 → 26 + @types/node 26 | ⬜ Da fare | Basso/medio |
+| 7 | TypeScript 5.9 → 7 | ⬜ Da fare | Medio/alto |
 
 ### 🔑 Prerequisito: ESM o Dual-Mode
 
@@ -96,8 +96,8 @@ rg -n "app\.(get|use|all)\(['\"][^'\"]*\*" src
 
 ### 🍪 tough-cookie + jsdom
 
-- **tough-cookie@6.0.2**: testare compatibilità con `axios-cookiejar-support`
-- **jsdom@30.1.2**: aggiornare solo se usato a runtime; se solo per test, impatto produttivo nullo
+- **tough-cookie@6.0.2**: ✅ testato, build OK, `@types/tough-cookie` rimosso (tipi integrati)
+- **jsdom@30.1.2**: ✅ testato, build OK
 
 ### 🐳 Node 26 + Docker
 
