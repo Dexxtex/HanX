@@ -19,6 +19,9 @@ RUN npm install -g pnpm@8.15.5
 # Copia i file del progetto nella directory di lavoro
 COPY . .
 
+# Fissa i permessi per l'utente node
+RUN chown -R node:node /usr/src/app
+
 # Torna all'utente node per le operazioni di pnpm e l'esecuzione dell'app
 USER node
 
