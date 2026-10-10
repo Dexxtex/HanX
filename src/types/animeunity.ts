@@ -2,6 +2,7 @@ export interface AnimeUnityConfig {
   mfpUrl: string;
   mfpPassword: string;
   enabled: boolean;
+  useMediaFlow?: boolean;        // false/undefined = EasyProxy, true = MediaFlow
   tmdbApiKey?: string;
   addonBase?: string; // URL base addon per endpoint sintetici (vixsynthetic.m3u8)
   animeunityDirect?: boolean;    // Direct master playlist (solo locale, IP-bound)
@@ -58,6 +59,7 @@ export interface AnimeSaturnConfig {
   mfpProxyUrl: string;  // Aggiunto per supportare m3u8 proxy
   mfpProxyPassword: string;  // Aggiunto per supportare m3u8 proxy
   enabled: boolean;
+  useMediaFlow?: boolean;        // false/undefined = EasyProxy, true = MediaFlow
   tmdbApiKey?: string;
 }
 
@@ -76,6 +78,7 @@ export interface AnimeWorldConfig {
   mfpUrl: string;
   mfpPassword: string;
   enabled: boolean;
+  useMediaFlow?: boolean;        // false/undefined = EasyProxy, true = MediaFlow
   tmdbApiKey?: string;
 }
 
