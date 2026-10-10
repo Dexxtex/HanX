@@ -1,48 +1,42 @@
-# StreamViX
+# HanX
 
-**Addon Stremio/NUVIO esclusivo per anime** — Streaming da AnimeUnity, AnimeSaturn e AnimeWorld.
+**Addon Stremio/NUVIO dedicato agli anime** — aggrega stream da AnimeUnity, AnimeSaturn e AnimeWorld in un'unica interfaccia.
 
 ![Version](https://img.shields.io/badge/version-12.4.23-blue)
 ![Node](https://img.shields.io/badge/node-%3E%3D20-green)
 ![Docker](https://img.shields.io/badge/docker-ready-blue)
+![TypeScript](https://img.shields.io/badge/typescript-%3E5.0-blue)
 
-## 🎯 Caratteristiche
+## ⚡ Cosa fa
 
-- **Multi-Provider**: AnimeUnity, AnimeSaturn, AnimeWorld
-- **MediaFlow Proxy**: Supporto per proxy avanzato (EasyProxy/MediaFlow)
-- **HLS Streaming**: Compatibile con player moderni
-- **Docker Ready**: Build e deploy semplificati
-- **Configurazione Web**: Interfaccia di configurazione integrata
+HanX è un addon per [Stremio](https://stremio.com) e [NUVIO](https://nuvio.app) che cerca e aggrega link di streaming per anime da tre fonti italiane:
+
+- **AnimeUnity** — streaming diretto e proxy
+- **AnimeSaturn** — streaming diretto e proxy
+- **AnimeWorld** — streaming diretto e proxy
+
+Supporta identificatori da **MyAnimeList**, **Kitsu**, **IMDb** e **TMDB**.
+
+## ✨ Features
+
+- 🔍 Ricerca multi-provider con fallback automatico
+- 🌐 Supporto MediaFlow Proxy per streaming affidabile
+- 📺 HLS compatibile con player moderni
+- ⚙️ Configurazione web integrata (`/`)
+- 🐳 Docker ready con `docker compose`
+- 🛡️ Logging con Winston + caching con SQLite
 
 ## 📦 Installazione
 
-### Docker (Consigliato)
+### Docker (consigliato)
 
 ```bash
-# Clona il repository
-git clone https://github.com/TUO_USERNAME/streamvix-addon.git
-cd streamvix-addon
-
-# Crea il file .env
-nano .env
-
-# Avvia con docker-compose
-docker-compose up -d
+git clone https://github.com/Dexxtex/HanX.git
+cd HanX
+docker compose up -d
 ```
 
-### Variabili d'ambiente
-
-```env
-PORT=7000
-TMDB_API_KEY=la_tua_chiave
-ANIMEUNITY_ENABLED=true
-ANIMESATURN_ENABLED=true
-ANIMEWORLD_ENABLED=true
-MFP_URL=http://tuo-proxy:3000
-MFP_PSW=tua_password
-```
-
-### Build manuale
+### Manuale
 
 ```bash
 pnpm install
@@ -50,80 +44,60 @@ pnpm run build
 node dist/addon.js
 ```
 
-## 🔧 Configurazione
+## ⚙️ Configurazione
 
-Accedi all'interfaccia web: `http://localhost:7000/`
+Variabili d'ambiente (`.env` o `docker-compose.yml`):
 
-Dalla pagina di configurazione puoi:
-- Abilitare/disabilitare i provider
-- Configurare MediaFlow Proxy
-- Impostare la TMDB API Key
-- Scegliere tra modalità Direct o Proxy
+| Variabile | Descrizione | Default |
+|-----------|-------------|---------|
+| `PORT` | Porta del server | `7000` |
+| `TMDB_API_KEY` | Chiave API TMDB per metadata | — |
+| `ANIMEUNITY_ENABLED` | Abilita AnimeUnity | `true` |
+| `ANIMESATURN_ENABLED` | Abilita AnimeSaturn | `true` |
+| `ANIMEWORLD_ENABLED` | Abilita AnimeWorld | `true` |
+| `MFP_URL` | URL MediaFlow Proxy | — |
+| `MFP_PSW` | Password MediaFlow Proxy | — |
 
-## 🌐 API Endpoints
+Interfaccia web: `http://localhost:7000/`
+
+## 🔌 API
 
 | Endpoint | Descrizione |
 |----------|-------------|
-| `/stream/anime/{id}.json` | Cerca stream per anime |
-| `/stream/film/{id}.json` | Cerca stream per film |
-| `/stream/serie/{id}.json` | Cerca stream per serie |
+| `/stream/anime/{id}.json` | Stream per anime |
+| `/stream/film/{id}.json` | Stream per film |
+| `/stream/serie/{id}.json` | Stream per serie |
 
-**ID supportati:** `kitsu:123`, `mal:123`, `tt1234567`, `tmdb:12345`
+ID supportati: `mal:123`, `kitsu:123`, `tt1234567`, `tmdb:12345`
 
 ## 📁 Struttura
 
 ```
-streamvix-addon/
+HanX/
 ├── src/
-│   ├── addon.ts           # Entry point principale
-│   ├── landingPage.ts     # Interfaccia web
-│   └── providers/         # Provider anime
-│       ├── animeunity-provider.ts
-│       ├── animesaturn-provider.ts
-│       └── animeworld-provider.ts
-├── config/                # Configurazioni
+│   ├── addon.ts            # Entry point
+│   ├── landingPage.ts      # UI web
+│   └── providers/          # Provider anime
+├── config/                 # Configurazioni
 ├── Dockerfile
-├── docker-compose.yml
-└── package.json
+└── docker-compose.yml
 ```
 
-## 🐳 Docker
+## 🛠️ Sviluppo
 
-### Build immagine
 ```bash
-docker build -t streamvix:latest .
-```
-
-### Avvia container
-```bash
-docker-compose up -d
-```
-
-### Log
-```bash
-docker logs -f StreamVix
-```
-
-### Ferma
-```bash
-docker-compose down
+pnpm install
+pnpm run dev      # Avvio con hot-reload
+pnpm run build    # Compilazione TypeScript
+pnpm run check:domains  # Verifica domini provider
 ```
 
 ## ⚠️ Note
 
-- Richiede Node.js 20+
+- Richiede **Node.js 20+**
 - Le API esterne (Jikan, TMDB) devono essere raggiungibili dal server
-- MediaFlow Proxy è opzionale ma consigliato per migliori prestazioni
-
-## 📄 Licenza
-
-Questo progetto è sotto licenza proprietaria. Vedi `LICENSE.txt` per i dettagli.
-
-## 🔗 Link
-
-- **Repository**: https://github.com/TUO_USERNAME/streamvix-addon
-- **Issues**: https://github.com/TUO_USERNAME/streamvix-addon/issues
+- MediaFlow Proxy è opzionale ma consigliato
 
 ---
 
-**StreamViX** — Il tuo addon anime per Stremio/NUVIO.
+**HanX** — Anime streaming, semplificato.
