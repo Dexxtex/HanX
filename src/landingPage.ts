@@ -316,7 +316,7 @@ button:active {
 .preset-btn.active { background:#00c16e; border-color:#00c16e; box-shadow:0 0 10px rgba(0,193,110,0.7); }
 	/* (Removed floating AddonBase toast styles – inline badge used) */
 .help-btn.fast-inline {
-      margin-left: 0.75rem;
+	margin-left: 0.75rem;
 }
 .help-btn { background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.4); color:#fff; padding:0.35rem 0.9rem; border-radius:999px; letter-spacing:0.05em; cursor:pointer; transition:background 0.2s ease; }
 .help-btn:hover { background:rgba(255,255,255,0.2); }
@@ -324,7 +324,124 @@ button:active {
 .fast-toast.show { opacity:1; pointer-events:auto; }
 `
 
-const CLIENT_SCRIPT = "\n(function () {\n    'use strict';\n    var form = document.getElementById('mainForm');\n    var output = document.getElementById('manifestUrlInput');\n    var install = document.getElementById('installLink');\n    var status = document.getElementById('status');\n    var currentUrl = '';\n    function field(key) { return form.elements.namedItem(key); }\n    function message(text) { status.textContent = text; }\n    function configFromForm() {\n        var config = {};\n        form.querySelectorAll('[data-config-key]').forEach(function (el) {\n            var key = el.getAttribute('data-config-key');\n            if (key === 'personalTmdbKey' || key === 'mediaflowMaster') return;\n            config[key] = el.type === 'checkbox' ? el.checked :\n                (key === 'mediaFlowProxyPassword' ? el.value : el.value.trim());\n        });\n        var master = field('mediaflowMaster');\n        if (master && !master.checked) {\n            delete config.mediaFlowProxyUrl;\n            delete config.mediaFlowProxyPassword;\n            delete config.useMediaFlow;\n        }\n        return config;\n    }\n    function refresh() {\n        var config = configFromForm();\n        var base = new URL(document.baseURI);\n        base.search = ''; base.hash = '';\n        base.pathname = base.pathname.replace(/\\/(?:configure|index\\.html)\\/?$/, '').replace(/\\/+$/, '');\n        currentUrl = base.origin + base.pathname + '/' + encodeURIComponent(JSON.stringify(config)) + '/manifest.json';\n        output.value = currentUrl;\n        install.href = 'stremio://' + currentUrl.replace(/^https?:\\/\\//, '');\n        message('URL aggiornato. Contiene la configurazione selezionata.');\n        return config;\n    }\n    function validate() {\n        if (!form.reportValidity()) return false;\n        var config = configFromForm();\n        if (config.mediaFlowProxyUrl) {\n            try {\n                var proxy = new URL(config.mediaFlowProxyUrl);\n                if (!/^https?:$/.test(proxy.protocol)) throw new Error();\n            } catch (e) {\n                message('Inserisci un URL proxy valido, completo di http:// o https://.');\n                return false;\n            }\n        } else if (field('mediaflowMaster') && field('mediaflowMaster').checked) {\n            message('Proxy attivo: inserisci il suo URL.'); return false;\n        }\n        if (config.animeunityEnabled === false && config.animesaturnEnabled === false && config.animeworldEnabled === false) {\n            message('Attiva almeno un provider.'); return false;\n        }\n        return true;\n    }\n    form.addEventListener('submit', function(e) { e.preventDefault(); if (validate()) refresh(); });\n    form.addEventListener('input', refresh);\n    form.addEventListener('change', refresh);\n    document.querySelectorAll('[data-preset]').forEach(function(button) {\n        button.addEventListener('click', function() {\n            var proxy = button.getAttribute('data-preset') === 'proxy';\n            ['animeunityEnabled','animesaturnEnabled','animeworldEnabled'].forEach(function(key) { if (field(key)) field(key).checked = true; });\n            var flags = { mediaflowMaster: proxy, animeunityDirect: !proxy, animeunityDirectFhd: false, animeunityProxy: proxy };\n            Object.keys(flags).forEach(function(key) { if (field(key)) field(key).checked = flags[key]; });\n            refresh();\n        });\n    });\n    install.addEventListener('click', function(e) { if (!validate()) { e.preventDefault(); return; } refresh(); });\n    document.getElementById('copyManifestBtn').addEventListener('click', async function() {\n        if (!validate()) return;\n        refresh();\n        try {\n            if (!navigator.clipboard || !navigator.clipboard.writeText) throw new Error();\n            await navigator.clipboard.writeText(currentUrl);\n            message('URL configurato copiato. Incollalo in Stremio.');\n        } catch (e) {\n            output.focus(); output.select();\n            var copied = false;\n            try { copied = document.execCommand('copy'); } catch (_) {}\n            message(copied ? 'URL configurato copiato.' : 'Copia manualmente l\u2019URL selezionato.');\n        }\n    });\n    document.getElementById('checkManifestBtn').addEventListener('click', async function() {\n        if (!validate()) return;\n        refresh();\n        var urlToCheck = currentUrl;\n        var controller = new AbortController();\n        var timer = setTimeout(function() { controller.abort(); }, 15000);\n        message('Verifica del manifest in corso\u2026');\n        try {\n            var response = await fetch(urlToCheck, { signal: controller.signal, cache: 'no-store' });\n            if (!response.ok) throw new Error('HTTP ' + response.status);\n            var manifest = await response.json();\n            if (!manifest || typeof manifest.id !== 'string' || typeof manifest.name !== 'string' || typeof manifest.version !== 'string' || !Array.isArray(manifest.resources) || !Array.isArray(manifest.types) || !Array.isArray(manifest.catalogs)) {\n                throw new Error('La risposta non contiene i campi principali di un manifest Stremio.');\n            }\n            message('Manifest raggiungibile: ' + manifest.name + ' \u2014 ' + manifest.version + '. Il playback va verificato separatamente.');\n        } catch (e) {\n            message('Verifica fallita: ' + (e.name === 'AbortError' ? 'timeout' : e.message));\n        } finally { clearTimeout(timer); }\n    });\n    refresh();\n})();\n";
+const CLIENT_SCRIPT = `
+(function () {
+    'use strict';
+    var form = document.getElementById('mainForm');
+    var output = document.getElementById('manifestUrlInput');
+    var install = document.getElementById('installLink');
+    var status = document.getElementById('status');
+    var currentUrl = '';
+
+    function field(key) { return form.elements.namedItem(key); }
+    function message(text) { status.textContent = text; }
+
+    function configFromForm() {
+        var config = {};
+        form.querySelectorAll('[data-config-key]').forEach(function (el) {
+            var key = el.getAttribute('data-config-key');
+            if (key === 'personalTmdbKey' || key === 'mediaflowMaster') return;
+            config[key] = el.type === 'checkbox' ? el.checked :
+                (key === 'mediaFlowProxyPassword' ? el.value : el.value.trim());
+        });
+        var master = field('mediaflowMaster');
+        if (master && !master.checked) {
+            delete config.mediaFlowProxyUrl;
+            delete config.mediaFlowProxyPassword;
+            delete config.useMediaFlow;
+        }
+        return config;
+    }
+
+    function refresh() {
+        var config = configFromForm();
+        var base = new URL(document.baseURI);
+        base.search = ''; base.hash = '';
+        base.pathname = base.pathname.replace(/\\/(?:configure|index\\.html)?\\/?$/, '').replace(/\\/+$/, '');
+        var path = base.pathname.replace(/\\/+$/, '') || '';
+        currentUrl = base.origin + path + '/' + encodeURIComponent(JSON.stringify(config)) + '/manifest.json';
+        output.value = currentUrl;
+        install.href = 'stremio://' + currentUrl.replace(/^https?:\\/\\//, '');
+        message('URL aggiornato. Contiene la configurazione selezionata.');
+        return config;
+    }
+
+    function validate() {
+        if (!form.reportValidity()) return false;
+        var config = configFromForm();
+        if (config.mediaFlowProxyUrl) {
+            try {
+                var proxy = new URL(config.mediaFlowProxyUrl);
+                if (!/^https?:$/.test(proxy.protocol)) throw new Error();
+            } catch (e) {
+                message('Inserisci un URL proxy valido, completo di http:// o https://.');
+                return false;
+            }
+        } else if (field('mediaflowMaster') && field('mediaflowMaster').checked) {
+            message('Proxy attivo: inserisci il suo URL.');
+            return false;
+        }
+        if (config.animeunityEnabled === false && config.animesaturnEnabled === false && config.animeworldEnabled === false) {
+            message('Attiva almeno un provider.');
+            return false;
+        }
+        return true;
+    }
+
+    form.addEventListener('submit', function(e) { e.preventDefault(); if (validate()) refresh(); });
+    form.addEventListener('input', refresh);
+    form.addEventListener('change', refresh);
+
+    document.querySelectorAll('[data-preset]').forEach(function(button) {
+        button.addEventListener('click', function() {
+            var proxy = button.getAttribute('data-preset') === 'proxy';
+            ['animeunityEnabled','animesaturnEnabled','animeworldEnabled'].forEach(function(key) { if (field(key)) field(key).checked = true; });
+            var flags = { mediaflowMaster: proxy, animeunityDirect: !proxy, animeunityDirectFhd: false, animeunityProxy: proxy };
+            Object.keys(flags).forEach(function(key) { if (field(key)) field(key).checked = flags[key]; });
+            refresh();
+        });
+    });
+
+    install.addEventListener('click', function(e) { if (!validate()) { e.preventDefault(); return; } refresh(); });
+
+    document.getElementById('copyManifestBtn').addEventListener('click', async function() {
+        if (!validate()) return;
+        refresh();
+        try {
+            if (!navigator.clipboard || !navigator.clipboard.writeText) throw new Error();
+            await navigator.clipboard.writeText(currentUrl);
+            message('URL configurato copiato. Incollalo in Stremio.');
+        } catch (e) {
+            output.focus(); output.select();
+            var copied = false;
+            try { copied = document.execCommand('copy'); } catch (_) {}
+            message(copied ? 'URL configurato copiato.' : 'Copia manualmente l\u2019URL selezionato.');
+        }
+    });
+
+    document.getElementById('checkManifestBtn').addEventListener('click', async function() {
+        if (!validate()) return;
+        refresh();
+        var urlToCheck = currentUrl;
+        var controller = new AbortController();
+        var timer = setTimeout(function() { controller.abort(); }, 15000);
+        message('Verifica del manifest in corso\u2026');
+        try {
+            var response = await fetch(urlToCheck, { signal: controller.signal, cache: 'no-store' });
+            if (!response.ok) throw new Error('HTTP ' + response.status);
+            var manifest = await response.json();
+            if (!manifest || typeof manifest.id !== 'string' || typeof manifest.name !== 'string' || typeof manifest.version !== 'string' || !Array.isArray(manifest.resources) || !Array.isArray(manifest.types) || !Array.isArray(manifest.catalogs)) {
+                throw new Error('La risposta non contiene i campi principali di un manifest Stremio.');
+            }
+            message('Manifest raggiungibile: ' + manifest.name + ' \u2014 ' + manifest.version + '. Il playback va verificato separatamente.');
+        } catch (e) {
+            message('Verifica fallita: ' + (e.name === 'AbortError' ? 'timeout' : e.message));
+        } finally { clearTimeout(timer); }
+    });
+
+    refresh();
+})();
+`;
 
 function escapeHtml(value: unknown): string {
     return String(value ?? '').replace(/[&<>"']/g, (char) => {
@@ -365,12 +482,12 @@ input[type=checkbox]{display:inline-block;width:20px;height:20px;vertical-align:
 #manifestUrlInput{width:100%;font-size:14px}#status{margin:16px 0;overflow-wrap:anywhere}.actions-row{margin:18px 0}
 </style></head>
 <body><main class="panel"><h1>${escapeHtml(manifest.name || 'HanX')}</h1><p>${escapeHtml(manifest.description || '')}</p>
-<h2 style="margin:20px 0">Configura e copia l’URL per Stremio</h2>
+<h2 style="margin:20px 0">Configura e copia l'URL per Stremio</h2>
 <div class="actions-row"><button type="button" data-preset="direct">Preset Direct</button><button type="button" data-preset="proxy">Preset Proxy</button></div>
 <form id="mainForm">${options}<button type="submit">Genera URL configurato</button></form>
 <label for="manifestUrlInput">URL del manifest configurato</label><input id="manifestUrlInput" type="text" readonly spellcheck="false">
 <div class="actions-row"><button id="copyManifestBtn" type="button">Copia URL Manifest</button><a id="installLink" class="install-link" href="#">Apri in Stremio</a><button id="checkManifestBtn" type="button">Verifica manifest</button></div>
-<p id="status" role="status" aria-live="polite"></p><p style="font-size:14px">L’URL contiene la configurazione, inclusa l’eventuale password proxy. Non condividerlo pubblicamente. La verifica del manifest non verifica gli stream.</p>
+<p id="status" role="status" aria-live="polite"></p><p style="font-size:14px">L'URL contiene la configurazione, inclusa l'eventuale password proxy. Non condividerlo pubblicamente. La verifica del manifest non verifica gli stream.</p>
 </main><script>${CLIENT_SCRIPT}</script></body></html>`;
 }
 export { landingTemplate };
