@@ -6,9 +6,11 @@
   "packageManager": "pnpm@12.10.1",
   "resolutions": {
     "tar": "^7.5.21",
-    "path-to-regexp": "^0.1.12",
-    "braces": "^3.0.3",
+    "path-to-regexp": "^0.1.13",
     "@keyv/sqlite": "^6.1.0"
+  },
+  "overrides": {
+    "path-to-regexp": "0.1.13"
   },
   "scripts": {
     "build": "tsc && npx shx mkdir -p dist/config && npx shx cp -r config dist/ && npx shx cp src/config/*.json dist/config/",
