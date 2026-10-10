@@ -1,0 +1,39 @@
+#!/usr/bin/env node
+// Wrapper di avvio per ambienti (es. Beamup) che forzano `node /start`
+const { existsSync } = require('fs');
+const { execSync } = require('child_process');
+
+function run(cmd) {
+  console.log(`[start] Eseguo: ${cmd}`);
+  execSync(cmd, { stdio: 'inherit' });
+}
+
+const DIST_ENTRY = '/usr/src/app/dist/addon.js';
+
+try {
+  // FORZA SEMPRE LA REBUILD PER EVITARE CACHE
+  console.log('[start] Forzando rebuild per evitare cache...');
+  
+  // Rimuovi dist esistente
+  try { run('rm -rf /usr/src/app/dist'); } catch {}
+  
+  // Installa dipendenze se node_modules mancante
+  if (!existsSync('/usr/src/app/node_modules')) {
+    try { run('pnpm -v'); run('pnpm install --prod=false'); }
+    catch { run('npm install'); }
+  }
+  
+  // Forza sempre la build
+  try { run('pnpm run build'); }
+  catch { run('npx tsc'); }
+  
+} catch (e) {
+  console.error('[start] Errore durante build:', e);
+}
+
+try {
+  require(DIST_ENTRY);
+} catch (e) {
+  console.error('[start] Errore avviando', DIST_ENTRY, e);
+  process.exit(1);
+}
