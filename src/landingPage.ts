@@ -1,493 +1,1380 @@
-const STYLESHEET = `
+/**
+ * HanX — Cosmic editorial.
+ * File leggibile, senza immagini Base64 né dipendenze frontend.
+ * Asset previsto: public/icon.png alla radice del repository.
+ * URL pubblico previsto: /public/icon.png.
+ */
+export const HANX_ICON_URL = '/public/icon.png';
+
+// ==================== STILI ====================
+const STYLESHEET = String.raw`
+:root {
+    color-scheme: dark;
+    --text: #eef3ff;
+    --muted: #a5b2c9;
+    --cyan: #71dbf5;
+    --coral: #f47888;
+    --line: #a5bee329;
+}
+
 * {
-	box-sizing: border-box;
-}
-
-body,
-html {
-	margin: 0;
-	padding: 0;
-	width: 100%;
-	min-height: 100%;
+    box-sizing: border-box;
 }
 
 body {
-	padding: 2vh;
-	/* Responsive base font size: never smaller than 15px, scales with viewport height */
-	font-size: clamp(15px, 2.2vh, 22px);
+    margin: 0;
+    background: #070c19;
+    color: var(--text);
+    font-family: Arial, Helvetica, sans-serif;
+    line-height: 1.45;
+    isolation: isolate;
 }
 
-html {
-	background: linear-gradient(135deg, #3d1f5c 0%, #2d1544 50%, #1a0d2e 100%);
-	background-attachment: fixed;
-	min-height: 100vh;
-	animation: gradientShift 8s ease-in-out infinite;
+body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: -2;
+    pointer-events: none;
+    background: radial-gradient(ellipse at 85% 5%, #39458770, transparent 48%), radial-gradient(ellipse at 0% 50%, #6d264753, transparent 44%), radial-gradient(ellipse at 90% 90%, #174e6545, transparent 42%);
 }
 
-@keyframes gradientShift {
-	0%, 100% { background-position: 0% 50%; }
-	50% { background-position: 100% 50%; }
+body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    opacity: 0.7;
+    background-image: radial-gradient(circle at 18px 29px, #ffffffb0 0.7px, transparent 1.1px), radial-gradient(circle at 87px 61px, #b6d7ff99 0.5px, transparent 1px), radial-gradient(circle at 47px 109px, #ffffff80 0.6px, transparent 1px);
+    background-size: 173px 191px, 257px 229px, 311px 277px;
 }
 
-@keyframes floatingSoft {
-	0%, 100% { transform: translateY(0px); }
-	50% { transform: translateY(-10px); }
-}
-
-@keyframes glow {
-	0%, 100% { opacity: 0.3; }
-	50% { opacity: 0.6; }
-}
-
-body {
-	/* Use a single-column flex layout to avoid unintended side-by-side columns */
-	display: flex;
-	flex-direction: column;
-	align-items: center;
-	font-family: 'Open Sans', Arial, sans-serif;
-	color: white;
-}
-
-h1 {
-	font-size: clamp(28px, 5vh, 54px);
-	font-weight: 700;
-}
-
-h2 {
-	font-size: clamp(17px, 2.6vh, 30px);
-	font-weight: normal;
-	font-style: italic;
-	opacity: 0.8;
-}
-
-h3 {
-	font-size: clamp(17px, 2.6vh, 30px);
-}
-
-h1,
-h2,
-h3,
-p {
-	margin: 0;
-	text-shadow: 0 0 1vh rgba(0, 0, 0, 0.15);
-}
-
-p {
-	font-size: clamp(14px, 2vh, 22px);
-}
-
-ul {
-	font-size: clamp(14px, 2vh, 22px);
-	margin: 0;
-	margin-top: 1vh;
-	padding-left: 3vh;
-}
-
-a {
-	color: white
-}
-
-a.install-link {
-	text-decoration: none
+button, input, textarea, select {
+    font: inherit;
 }
 
 button {
-	border: 0;
-	outline: 0;
-	color: white;
-	background: #8A5AAB;
-	padding: 1.2vh 3.5vh;
-	margin: auto;
-	text-align: center;
-	font-family: 'Open Sans', Arial, sans-serif;
-	font-size: clamp(16px, 2.4vh, 26px);
-	font-weight: 600;
-	cursor: pointer;
-	display: block;
-	box-shadow: 0 0.5vh 1vh rgba(0, 0, 0, 0.2);
-	transition: box-shadow 0.1s ease-in-out;
+    cursor: pointer;
 }
 
-button:hover {
-	box-shadow: none;
+button:disabled {
+    cursor: wait;
+    opacity: 0.65;
 }
 
-button:active {
-	box-shadow: 0 0 0 0.5vh white inset;
+button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible, a:focus-visible {
+    outline: 3px solid var(--cyan);
+    outline-offset: 4px;
 }
 
-/* Pretty toggle styles */
-.toggle-row {
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	gap: 0.6rem;
-	padding: 0.45rem 0.25rem;
-	border-radius: 10px;
-}
-.toggle-row.dimmed {
-	/* Non oscura più l'intera riga, ma solo il selettore a destra */
-}
-.toggle-row.dimmed .toggle-right {
-	filter: grayscale(100%);
-	opacity: 0.55;
-	transition: opacity 0.2s ease, filter 0.2s ease;
-}
-/* Forza il colore rosso quando il toggle è spento e oscurato */
-.toggle-row.dimmed .switch input:not(:checked) + .slider {
-	background-color: #b31b1b !important;
-}
-.toggle-title {
-	font-size: clamp(0.95rem, 2.1vh, 1.35rem);
-	font-weight: 700;
-	letter-spacing: 0.01em;
-	color: #c9b3ff; /* soft purple */
-	text-shadow: 0 0 8px rgba(140, 82, 255, 0.6);
-}
-.toggle-row.dimmed .toggle-title { color:#555 !important; text-shadow:none; }
-.toggle-right {
-	display: inline-flex;
-	align-items: center;
-	gap: 0.4rem;
-}
-.toggle-off, .toggle-on {
-	font-size: clamp(0.75rem, 1.8vh, 1rem);
-	font-weight: 700;
-	letter-spacing: 0.03em;
-}
-.toggle-off { color: #888; }
-.toggle-on { color: #888; }
-.toggle-row.is-on .toggle-on { color: #00c16e; }
-.toggle-row:not(.is-on) .toggle-off { color: #ff3b3b; }
-
-/* Switch */
-.switch {
-	position: relative;
-	display: inline-block;
-	width: 62px;
-	height: 30px;
-}
-.switch input { display: none; }
-.slider {
-	position: absolute;
-	cursor: pointer;
-	top: 0; left: 0; right: 0; bottom: 0;
-	background-color: #b31b1b; /* red when OFF */
-	transition: 0.2s ease;
-	border-radius: 30px;
-	box-shadow: 0 0 10px rgba(140, 82, 255, 0.5); /* purple glow */
-}
-.slider:before {
-	position: absolute;
-	content: "";
-	height: 24px;
-	width: 24px;
-	left: 3px;
-	top: 3px;
-	background-color: #fff;
-	border-radius: 50%;
-	transition: 0.2s ease;
+header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 18px 5vw;
+    border-bottom: 1px solid #ffffff32;
 }
 
-.switch input:checked + .slider {
-	background-color: #00c16e; /* green when ON */
-	box-shadow: 0 0 14px rgba(140, 82, 255, 0.9); /* stronger glow */
-}
-.switch input:checked + .slider:before { transform: translateX(32px); }
-
-#addon {
-	/* Make the main container responsive and single-column */
-	width: 100%;
-	max-width: 1100px;
-	margin: auto;
+.head-logo {
+    width: 140px;
+    height: 64px;
+    object-fit: contain;
+    filter: drop-shadow(0 0 13px #14a2dd44);
 }
 
-.logo {
-	height: 14vh;
-	width: 14vh;
-	margin: auto;
-	margin-bottom: 3vh;
+.stamp {
+    font: 10px/1.6 monospace;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #b8c2d5;
 }
 
-.logo img {
-	width: 100%;
+.badge {
+    font: 10px monospace;
+    background: #ffffff0b;
+    border: 1px solid #ffffff35;
+    padding: 9px 13px;
 }
 
-.name, .version {
-	display: inline-block;
-	vertical-align: top;
+.wrap {
+    max-width: 1420px;
+    padding: 0 5vw;
+    margin: auto;
 }
 
-.name {
-	line-height: 5vh;
-	margin: 0;
+.hero {
+    position: relative;
+    display: grid;
+    grid-template-columns: 1.15fr 1fr;
+    border-bottom: 1px solid #ffffff45;
+    min-height: 415px;
+    align-items: center;
+    gap: 25px;
 }
 
-.version {
-	position: relative;
-	line-height: 5vh;
-	opacity: 0.8;
-	margin-bottom: 2vh;
+.hero-copy {
+    padding: 45px 0;
 }
 
-.contact {
-	position: absolute;
-	left: 0;
-	bottom: 4vh;
-	width: 100%;
-	text-align: center;
+.kicker {
+    font: 11px monospace;
+    letter-spacing: 1.2px;
+    text-transform: uppercase;
+    color: #a0dff1;
 }
 
-.contact a {
-	font-size: 1.4vh;
-	font-style: italic;
+.kicker::before {
+    content: '✦';
+    color: var(--coral);
+    margin-right: 10px;
 }
 
-.separator {
-	margin-bottom: 4vh;
+.hero h1 {
+    font-size: clamp(52px, 6.9vw, 95px);
+    letter-spacing: -5px;
+    font-weight: 900;
+    line-height: 0.95;
+    margin: 26px 0;
 }
 
-.form-element {
-	margin-bottom: 2vh;
+.hero h1 em {
+    font-style: normal;
+    color: #fb929b;
 }
 
-.label-to-top {
-	margin-bottom: 2vh;
+.hero p {
+    font-size: 14px;
+    color: #b7bfce;
+    max-width: 390px;
 }
 
-.label-to-right {
-	margin-left: 1vh !important;
+.hero-art {
+    position: relative;
+    display: grid;
+    place-items: center;
+    min-height: 335px;
 }
 
-.full-width {
-	width: 100%;
+.hero-art::before {
+    content: '';
+    width: 290px;
+    height: 290px;
+    border: 1px solid #a8c3e246;
+    border-radius: 50%;
+    position: absolute;
+    transform: rotate(-24deg) scaleX(1.3);
 }
 
-/* Actions row: install + copy side by side */
-.actions-row {
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	gap: 1rem;
-	flex-wrap: wrap;
-}
-.actions-row .install-link button,
-.actions-row #copyManifestLink {
-	margin: 0; /* override global button margin */
-}
-.actions-row .install-link button {
-	padding: 0.85rem 2.2rem;
-	background: linear-gradient(135deg, #7c3aff, #a855f7);
-	color: #fff;
-	border: 2px solid #c084fc;
-	border-radius: 10px;
-	cursor: pointer;
-	font-weight: 800;
-	font-size: 1.05rem;
-	letter-spacing: 0.05em;
-	box-shadow: 0 0 18px rgba(168,85,247,0.9), 0 0 40px rgba(168,85,247,0.45), inset 0 1px 0 rgba(255,255,255,0.15);
-	text-shadow: 0 0 8px rgba(255,255,255,0.6);
-	transition: all 0.2s ease;
-}
-.actions-row #copyManifestLink {
-	padding: 0.85rem 2.2rem;
-	background: linear-gradient(135deg, #1e3a8a, #2563eb);
-	color: #fff;
-	border: 2px solid #60a5fa;
-	border-radius: 10px;
-	cursor: pointer;
-	font-weight: 800;
-	font-size: 1.05rem;
-	letter-spacing: 0.05em;
-	box-shadow: 0 0 18px rgba(96,165,250,0.9), 0 0 40px rgba(96,165,250,0.45), inset 0 1px 0 rgba(255,255,255,0.15);
-	text-shadow: 0 0 8px rgba(255,255,255,0.6);
-	transition: all 0.2s ease;
+.hero-art::after {
+    content: '';
+    width: 300px;
+    height: 300px;
+    border: 1px solid #f4788845;
+    border-radius: 50%;
+    position: absolute;
+    transform: rotate(25deg) scaleX(1.3);
+    z-index: -1;
 }
 
-@keyframes pulse {
-	0% { box-shadow: 0 0 0 0 rgba(140, 82, 255, 0.3); }
-	70% { box-shadow: 0 0 0 16px rgba(140, 82, 255, 0); }
-	100% { box-shadow: 0 0 0 0 rgba(140, 82, 255, 0); }
+.hero-logo {
+    width: 100%;
+    max-width: 540px;
+    position: relative;
+    filter: drop-shadow(0 15px 30px #020414) drop-shadow(0 0 24px #00bce733);
+    z-index: 1;
 }
-/* Preset buttons */
-.preset-btn { background:#4d2d66; border:1px solid #8c52ff; color:#fff; font-weight:600; padding:0.45rem 0.6rem; border-radius:8px; cursor:pointer; box-shadow:0 0 8px rgba(140,82,255,0.4); transition:background .2s, transform .15s; }
-.preset-btn:hover { background:#5c3780; }
-.preset-btn:active { transform:scale(.95); }
-.preset-btn.active { background:#00c16e; border-color:#00c16e; box-shadow:0 0 10px rgba(0,193,110,0.7); }
-	/* (Removed floating AddonBase toast styles – inline badge used) */
-.help-btn.fast-inline {
-	margin-left: 0.75rem;
-}
-.help-btn { background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.4); color:#fff; padding:0.35rem 0.9rem; border-radius:999px; letter-spacing:0.05em; cursor:pointer; transition:background 0.2s ease; }
-.help-btn:hover { background:rgba(255,255,255,0.2); }
-.fast-toast { position:fixed; left:50%; bottom:3rem; transform:translateX(-50%); background:rgba(30,30,40,0.95); color:#fff; padding:0.9rem 1.2rem; border-radius:10px; box-shadow:0 8px 20px rgba(0,0,0,0.3); opacity:0; pointer-events:none; transition:opacity 0.3s ease; max-width:320px; text-align:center; font-size:0.9rem; }
-.fast-toast.show { opacity:1; pointer-events:auto; }
-`
 
-const CLIENT_SCRIPT = `
+.orbit-label {
+    position: absolute;
+    bottom: 5px;
+    right: 0;
+    font: 10px monospace;
+    color: #b4c5dd;
+    letter-spacing: 2px;
+}
+
+.strip {
+    display: flex;
+    justify-content: space-between;
+    padding: 16px 0;
+    border-bottom: 1px solid #ffffff35;
+    gap: 15px;
+    font: 10px monospace;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+}
+
+.strip .fade {
+    color: #98a4b9;
+}
+
+.studio {
+    display: grid;
+    grid-template-columns: 210px minmax(0, 1fr);
+    gap: 45px;
+    margin: 36px 0 45px;
+}
+
+.rail {
+    align-self: start;
+    position: sticky;
+    top: 20px;
+}
+
+.rail h2 {
+    font-size: 24px;
+    letter-spacing: -1px;
+    margin: 0 0 22px;
+}
+
+.tab {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: none;
+    color: #aeb6c8;
+    border: 0;
+    border-top: 1px solid #ffffff25;
+    padding: 18px 0;
+    font-size: 13px;
+}
+
+.tab.active {
+    color: var(--cyan);
+    font-weight: 700;
+}
+
+.tab span {
+    font: 10px monospace;
+    margin-right: 14px;
+}
+
+.rail-note {
+    font: 10px/1.8 monospace;
+    color: #9ba5b9;
+    margin-top: 25px;
+}
+
+.editorial {
+    background: linear-gradient(145deg, #17233bee, #0d1426ef 65%, #22192eee);
+    color: var(--text);
+    padding: 32px;
+    border: 1px solid #87b7e73d;
+    box-shadow: 12px 12px 0 #00000025, 0 18px 70px #02061135;
+    position: relative;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+}
+
+.editorial::before {
+    content: '';
+    width: 58px;
+    height: 3px;
+    position: absolute;
+    top: 0;
+    left: 32px;
+    background: linear-gradient(90deg, var(--cyan), #e59fdb);
+}
+
+.pane {
+    display: none;
+}
+
+.pane.active {
+    display: block;
+}
+
+.pane-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: start;
+}
+
+.pane-head h2 {
+    font-size: 34px;
+    letter-spacing: -1.3px;
+    margin: 0;
+}
+
+.pane-head p {
+    font-size: 13px;
+    color: var(--muted);
+    margin: 8px 0 24px;
+}
+
+.meta {
+    font: 9px monospace;
+    text-transform: uppercase;
+    color: var(--muted);
+    padding-top: 7px;
+    white-space: nowrap;
+}
+
+.sources {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+}
+
+.source {
+    position: relative;
+    border: 1px solid var(--line);
+    padding: 21px 15px;
+    background: #0c1427ab;
+    min-height: 203px;
+    transition: border-color 0.2s, background 0.2s;
+}
+
+.source.selected {
+    background: linear-gradient(150deg, #23436380, #15213bd9);
+    border-color: #83c7ef7a;
+}
+
+.source input {
+    position: absolute;
+    right: 13px;
+    top: 14px;
+    width: 18px;
+    height: 18px;
+    accent-color: #47aeca;
+}
+
+.source .initial {
+    font-size: 48px;
+    font-weight: 900;
+    letter-spacing: -3px;
+    display: block;
+    margin: 20px 0 13px;
+}
+
+.source:nth-child(1) .initial {
+    color: #ffa4b7;
+}
+
+.source:nth-child(2) .initial {
+    color: #97b2ff;
+}
+
+.source:nth-child(3) .initial {
+    color: #87dccd;
+}
+
+.source strong {
+    font-size: 13px;
+    display: block;
+}
+
+.source small {
+    display: block;
+    font: 9px monospace;
+    color: var(--muted);
+    margin-top: 8px;
+}
+
+.hint {
+    font-size: 11px;
+    color: var(--muted);
+    line-height: 1.65;
+}
+
+.actions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 15px;
+    margin-top: 28px;
+    padding-top: 22px;
+    border-top: 1px solid var(--line);
+}
+
+.btn {
+    border: 1px solid #9ebae454;
+    background: #101b30;
+    color: var(--text);
+    padding: 13px 19px;
+    font-size: 12px;
+    font-weight: 700;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 18px;
+    text-decoration: none;
+}
+
+.btn.blue {
+    background: linear-gradient(110deg, #3855c7, #4765cb);
+    color: #fff;
+    border-color: #8eaefa70;
+}
+
+.btn.coral {
+    background: linear-gradient(110deg, #965078, #784894);
+    border-color: #e2a7d174;
+    color: white;
+}
+
+.btn:hover {
+    filter: brightness(1.15);
+}
+
+.modes {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+}
+
+.mode {
+    background: #0c1427ab;
+    border: 1px solid var(--line);
+    padding: 22px;
+    text-align: left;
+    color: var(--text);
+}
+
+.mode.active {
+    background: linear-gradient(145deg, #23436390, #16243dd9);
+    border-color: #83c7ef7a;
+}
+
+.mode .letter {
+    font: 10px monospace;
+    color: var(--cyan);
+}
+
+.mode h3 {
+    font-size: 25px;
+    letter-spacing: -1px;
+    margin: 10px 0;
+}
+
+.mode p {
+    font-size: 12px;
+    color: var(--muted);
+    margin: 0;
+}
+
+.field {
+    display: block;
+    font: 10px monospace;
+    margin: 17px 0;
+    color: #c4d0e5;
+}
+
+.field input, .field select {
+    display: block;
+    width: 100%;
+    margin-top: 8px;
+    padding: 13px;
+    border: 1px solid #7898c33d;
+    background: #091225;
+    color: var(--text);
+    font: 13px Arial;
+    border-radius: 0;
+}
+
+input::placeholder {
+    color: #8e9ab0;
+}
+
+.fields {
+    padding-top: 8px;
+}
+
+.pair {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 15px;
+}
+
+.password-wrap {
+    position: relative;
+}
+
+.password-wrap input {
+    padding-right: 78px;
+}
+
+.password-wrap button {
+    position: absolute;
+    right: 8px;
+    top: 8px;
+    border: 0;
+    background: none;
+    color: var(--cyan);
+    font: 10px monospace;
+    padding: 7px;
+}
+
+details {
+    font-size: 12px;
+    margin-top: 24px;
+    padding-top: 17px;
+    border-top: 1px solid var(--line);
+}
+
+summary {
+    cursor: pointer;
+    color: #c8d7ee;
+}
+
+details label {
+    display: block;
+    margin: 14px 0;
+}
+
+details input[type=checkbox] {
+    accent-color: #47aeca;
+}
+
+.pass {
+    border: 1px solid #87b7e74d;
+    padding: 23px;
+    background: linear-gradient(145deg, #16233bf0, #0a1427ee);
+}
+
+.pass-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid #9ebae44d;
+    padding-bottom: 17px;
+}
+
+.pass-header strong {
+    font-size: 21px;
+    letter-spacing: -1px;
+}
+
+.pass-header span {
+    font: 9px monospace;
+    color: var(--cyan);
+}
+
+.pass-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 20px;
+    padding: 13px 0;
+    border-bottom: 1px dashed var(--line);
+    font-size: 12px;
+}
+
+.pass-row span {
+    color: var(--muted);
+}
+
+.pass-row strong {
+    text-align: right;
+    overflow-wrap: anywhere;
+}
+
+.url-label {
+    font: 10px monospace;
+    display: block;
+    margin-top: 19px;
+    color: #c4d0e5;
+}
+
+.url-label textarea {
+    display: block;
+    margin-top: 8px;
+    resize: none;
+    width: 100%;
+    height: 106px;
+    background: #081123;
+    border: 1px solid #87b7e73d;
+    padding: 12px;
+    color: #aee4f6;
+    font: 10px/1.7 monospace;
+}
+
+.copy-row {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-top: 16px;
+}
+
+.feedback {
+    font: 11px/1.6 monospace;
+    min-height: 20px;
+    margin: 18px 0 0;
+    color: #8be7d7;
+    overflow-wrap: anywhere;
+}
+
+.feedback.error {
+    color: #ffabba;
+}
+
+footer {
+    display: flex;
+    justify-content: space-between;
+    gap: 15px;
+    border-top: 1px solid #ffffff35;
+    padding: 22px 0 30px;
+    font: 10px monospace;
+    color: #9aa5b8;
+    text-transform: uppercase;
+}
+
+[hidden] {
+    display: none !important;
+}
+
+@media (max-width: 900px) {
+    .studio {
+        grid-template-columns: 155px 1fr;
+        gap: 25px;
+    }
+    .hero {
+        gap: 10px;
+    }
+    .hero h1 {
+        letter-spacing: -3.5px;
+    }
+    .hero-art::before, .hero-art::after {
+        width: 215px;
+        height: 215px;
+    }
+    .editorial {
+        padding: 24px;
+    }
+    .source {
+        padding: 17px 11px;
+    }
+    .source .initial {
+        font-size: 39px;
+    }
+    .pane-head h2 {
+        font-size: 29px;
+    }
+    .meta {
+        display: none;
+    }
+}
+
+@media (max-width: 650px) {
+    header {
+        padding: 13px 5vw;
+    }
+    .head-logo {
+        width: 105px;
+        height: 48px;
+    }
+    .stamp {
+        display: none;
+    }
+    .hero {
+        grid-template-columns: 1fr;
+        gap: 0;
+    }
+    .hero-copy {
+        padding: 33px 0 10px;
+    }
+    .hero h1 {
+        font-size: 61px;
+        letter-spacing: -3px;
+    }
+    .hero-art {
+        min-height: 220px;
+        max-width: 400px;
+        width: 100%;
+        margin: auto;
+    }
+    .hero-logo {
+        max-width: 355px;
+    }
+    .hero-art::before, .hero-art::after {
+        height: 190px;
+        width: 190px;
+    }
+    .orbit-label {
+        font-size: 8px;
+    }
+    .strip {
+        font-size: 9px;
+    }
+    .strip .fade {
+        display: none;
+    }
+    .studio {
+        display: block;
+        margin-top: 22px;
+    }
+    .rail {
+        position: static;
+    }
+    .rail h2, .rail-note {
+        display: none;
+    }
+    .rail nav {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 15px;
+    }
+    .tab {
+        font-size: 11px;
+        padding: 12px 0;
+    }
+    .tab span {
+        margin-right: 6px;
+    }
+    .editorial {
+        padding: 20px;
+        box-shadow: 6px 6px 0 #0000002b;
+    }
+    .sources {
+        gap: 7px;
+    }
+    .source {
+        padding: 16px 8px;
+        min-height: 180px;
+    }
+    .source strong {
+        font-size: 10px;
+    }
+    .source small {
+        font-size: 8px;
+    }
+    .pair {
+        grid-template-columns: 1fr;
+    }
+    .mode {
+        padding: 17px;
+    }
+    .actions {
+        gap: 8px;
+    }
+    .btn {
+        padding: 12px 13px;
+        font-size: 11px;
+    }
+    .pass {
+        padding: 15px;
+    }
+    .pass-header {
+        gap: 12px;
+        flex-wrap: wrap;
+    }
+    footer {
+        flex-direction: column;
+    }
+    .meta {
+        white-space: normal;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    * {
+        transition: none !important;
+    }
+}
+`;
+
+// ==================== JAVASCRIPT DEL BROWSER ====================
+const CLIENT_SCRIPT = String.raw`
 (function () {
     'use strict';
-    var form = document.getElementById('mainForm');
-    var output = document.getElementById('manifestUrlInput');
-    var install = document.getElementById('installLink');
-    var status = document.getElementById('status');
-    var currentUrl = '';
 
-    function field(key) { return form.elements.namedItem(key); }
-    function message(text) { status.textContent = text; }
+    var getElement = function (id) {
+        return document.getElementById(id);
+    };
+    var pageData = window.__HANX_PAGE_DATA__ || { defaults: {} };
+    var defaults = pageData.defaults || {};
+    var mode = 'direct';
+    var manifestUrl = '';
+    var providers = [
+        ['animeunityEnabled', 'AnimeUnity'],
+        ['animesaturnEnabled', 'AnimeSaturn'],
+        ['animeworldEnabled', 'AnimeWorld']
+    ];
 
-    function configFromForm() {
-        var config = {};
-        form.querySelectorAll('[data-config-key]').forEach(function (el) {
-            var key = el.getAttribute('data-config-key');
-            if (key === 'personalTmdbKey' || key === 'mediaflowMaster') return;
-            config[key] = el.type === 'checkbox' ? el.checked :
-                (key === 'mediaFlowProxyPassword' ? el.value : el.value.trim());
-        });
-        var master = field('mediaflowMaster');
-        if (master && !master.checked) {
-            delete config.mediaFlowProxyUrl;
-            delete config.mediaFlowProxyPassword;
-            delete config.useMediaFlow;
+    function hasDefault(key) {
+        return Object.prototype.hasOwnProperty.call(defaults, key);
+    }
+
+    function toBoolean(value, fallback) {
+        if (value === undefined || value === null) {
+            return fallback;
         }
+        if (typeof value === 'boolean') {
+            return value;
+        }
+        return ['true', '1', 'on', 'yes', 'checked'].indexOf(
+            String(value).toLowerCase()
+        ) !== -1;
+    }
+
+    function showMessage(text, isError) {
+        var feedback = getElement('feedback');
+        feedback.textContent = text;
+        feedback.classList.toggle('error', !!isError);
+    }
+
+    function buildConfig() {
+        var config = {};
+
+        providers.forEach(function (provider) {
+            config[provider[0]] = getElement(provider[0]).checked;
+        });
+        ['animeunityDirect', 'animeunityDirectFhd', 'animeunityProxy'].forEach(
+            function (key) {
+                config[key] = getElement(key).checked;
+            }
+        );
+
+        var tmdbKey = getElement('tmdbApiKey').value.trim();
+        if (tmdbKey) {
+            config.tmdbApiKey = tmdbKey;
+        }
+
+        if (mode === 'proxy') {
+            config.mediaFlowProxyUrl = getElement('mediaFlowProxyUrl')
+                .value.trim().replace(/\/+$/, '');
+            config.mediaFlowProxyPassword = getElement('mediaFlowProxyPassword').value;
+            config.useMediaFlow = getElement('backend').value === 'mediaflow';
+        }
+
         return config;
     }
 
-    function refresh() {
-        var config = configFromForm();
-        var base = new URL(document.baseURI);
-        base.search = ''; base.hash = '';
-        base.pathname = base.pathname.replace(/\\/(?:configure|index\\.html)?\\/?$/, '').replace(/\\/+$/, '');
-        var path = base.pathname.replace(/\\/+$/, '') || '';
-        currentUrl = base.origin + path + '/' + encodeURIComponent(JSON.stringify(config)) + '/manifest.json';
-        output.value = currentUrl;
-        install.href = 'stremio://' + currentUrl.replace(/^https?:\\/\\//, '');
-        message('URL aggiornato. Contiene la configurazione selezionata.');
-        return config;
+    function updatePage() {
+        var active = providers.filter(function (provider) {
+            return getElement(provider[0]).checked;
+        });
+
+        getElement('providerCount').textContent = active.length + ' sorgenti selezionate';
+        getElement('sourcesSummary').textContent = active.map(function (provider) {
+            return provider[1];
+        }).join(' / ') || 'Nessuna';
+
+        getElement('modeSummary').textContent = mode === 'direct'
+            ? 'Direct'
+            : (getElement('backend').value === 'mediaflow' ? 'MediaFlow' : 'EasyProxy');
+        getElement('proxyFields').hidden = mode !== 'proxy';
+
+        document.querySelectorAll('.source').forEach(function (card) {
+            card.classList.toggle('selected', card.querySelector('input').checked);
+        });
+        document.querySelectorAll('[data-mode]').forEach(function (button) {
+            var selected = button.getAttribute('data-mode') === mode;
+            button.classList.toggle('active', selected);
+            button.setAttribute('aria-pressed', String(selected));
+        });
+
+        var basePath = window.location.pathname
+            .replace(/\/(?:configure|index\.html)\/?$/, '')
+            .replace(/\/+$/, '');
+        var encodedConfig = encodeURIComponent(JSON.stringify(buildConfig()));
+
+        manifestUrl = window.location.origin + basePath + '/'
+            + encodedConfig + '/manifest.json';
+
+        getElement('manifestUrl').value = manifestUrl;
+        getElement('serverSummary').textContent = window.location.host + basePath;
+        getElement('installLink').href = 'stremio://'
+            + manifestUrl.replace(/^https?:\/\//, '');
     }
 
-    function validate() {
-        if (!form.reportValidity()) return false;
-        var config = configFromForm();
-        if (config.mediaFlowProxyUrl) {
+    function validateConfig() {
+        if (!providers.some(function (provider) {
+            return getElement(provider[0]).checked;
+        })) {
+            showMessage('Seleziona almeno una sorgente.', true);
+            return false;
+        }
+
+        if (mode === 'proxy') {
             try {
-                var proxy = new URL(config.mediaFlowProxyUrl);
-                if (!/^https?:$/.test(proxy.protocol)) throw new Error();
-            } catch (e) {
-                message('Inserisci un URL proxy valido, completo di http:// o https://.');
+                var proxy = new URL(getElement('mediaFlowProxyUrl').value.trim());
+                if (!/^https?:$/.test(proxy.protocol) || proxy.username || proxy.password) {
+                    throw new Error('Invalid proxy URL');
+                }
+            } catch (_) {
+                showMessage('Inserisci un URL proxy valido, completo di http:// o https://.', true);
+                getElement('mediaFlowProxyUrl').focus();
                 return false;
             }
-        } else if (field('mediaflowMaster') && field('mediaflowMaster').checked) {
-            message('Proxy attivo: inserisci il suo URL.');
-            return false;
         }
-        if (config.animeunityEnabled === false && config.animesaturnEnabled === false && config.animeworldEnabled === false) {
-            message('Attiva almeno un provider.');
-            return false;
+
+        if (getElement('animeunityEnabled').checked) {
+            var hasVariant = getElement('animeunityDirect').checked
+                || getElement('animeunityDirectFhd').checked
+                || getElement('animeunityProxy').checked;
+
+            if (!hasVariant) {
+                getElement('advancedOptions').open = true;
+                showMessage('AnimeUnity attivo: scegli almeno una variante nelle opzioni avanzate.', true);
+                return false;
+            }
+            if (getElement('animeunityProxy').checked && mode !== 'proxy') {
+                showMessage('La variante AnimeUnity Proxy richiede la modalità Con proxy.', true);
+                return false;
+            }
         }
+
         return true;
     }
 
-    form.addEventListener('submit', function(e) { e.preventDefault(); if (validate()) refresh(); });
-    form.addEventListener('input', refresh);
-    form.addEventListener('change', refresh);
+    function changeStep(number) {
+        updatePage();
 
-    document.querySelectorAll('[data-preset]').forEach(function(button) {
-        button.addEventListener('click', function() {
-            var proxy = button.getAttribute('data-preset') === 'proxy';
-            ['animeunityEnabled','animesaturnEnabled','animeworldEnabled'].forEach(function(key) { if (field(key)) field(key).checked = true; });
-            var flags = { mediaflowMaster: proxy, animeunityDirect: !proxy, animeunityDirectFhd: false, animeunityProxy: proxy };
-            Object.keys(flags).forEach(function(key) { if (field(key)) field(key).checked = flags[key]; });
-            refresh();
+        if (number === 2 && !providers.some(function (provider) {
+            return getElement(provider[0]).checked;
+        })) {
+            showMessage('Seleziona almeno una sorgente.', true);
+            return;
+        }
+        if (number === 3 && !validateConfig()) {
+            return;
+        }
+
+        document.querySelectorAll('[data-pane]').forEach(function (pane) {
+            pane.classList.toggle('active', pane.getAttribute('data-pane') === String(number));
+        });
+        document.querySelectorAll('[data-step]').forEach(function (button) {
+            var selected = button.getAttribute('data-step') === String(number);
+            button.classList.toggle('active', selected);
+            if (selected) {
+                button.setAttribute('aria-current', 'step');
+            } else {
+                button.removeAttribute('aria-current');
+            }
+        });
+
+        showMessage('');
+        var heading = document.querySelector('.pane.active h2');
+        if (heading) {
+            heading.setAttribute('tabindex', '-1');
+            heading.focus({ preventScroll: true });
+        }
+    }
+
+    function applyDefaults() {
+        providers.forEach(function (provider) {
+            getElement(provider[0]).checked = toBoolean(defaults[provider[0]], true);
+        });
+        ['animeunityDirect', 'animeunityDirectFhd', 'animeunityProxy'].forEach(function (key) {
+            getElement(key).checked = toBoolean(defaults[key], key === 'animeunityDirect');
+        });
+        ['tmdbApiKey', 'mediaFlowProxyUrl', 'mediaFlowProxyPassword'].forEach(function (key) {
+            getElement(key).value = typeof defaults[key] === 'string' ? defaults[key] : '';
+        });
+
+        getElement('backend').value = toBoolean(defaults.useMediaFlow, false)
+            ? 'mediaflow' : 'easyproxy';
+
+        if (toBoolean(defaults.mediaflowMaster, false)
+            || getElement('mediaFlowProxyUrl').value.trim()) {
+            mode = 'proxy';
+            if (!hasDefault('animeunityDirect')) {
+                getElement('animeunityDirect').checked = false;
+            }
+            if (!hasDefault('animeunityProxy')) {
+                getElement('animeunityProxy').checked = true;
+            }
+        }
+    }
+
+    document.querySelectorAll('[data-next], [data-step]').forEach(function (button) {
+        button.addEventListener('click', function () {
+            changeStep(Number(button.getAttribute('data-next') || button.getAttribute('data-step')));
         });
     });
+    document.querySelectorAll('[data-mode]').forEach(function (button) {
+        button.addEventListener('click', function () {
+            mode = button.getAttribute('data-mode');
+            getElement('animeunityDirect').checked = mode === 'direct';
+            getElement('animeunityProxy').checked = mode === 'proxy';
+            updatePage();
+            showMessage('');
+        });
+    });
+    document.querySelectorAll('input, select').forEach(function (input) {
+        input.addEventListener('input', updatePage);
+        input.addEventListener('change', updatePage);
+    });
 
-    install.addEventListener('click', function(e) { if (!validate()) { e.preventDefault(); return; } refresh(); });
+    getElement('revealPassword').addEventListener('click', function () {
+        var input = getElement('mediaFlowProxyPassword');
+        var visible = input.type === 'password';
+        input.type = visible ? 'text' : 'password';
+        this.textContent = visible ? 'Nascondi' : 'Mostra';
+        this.setAttribute('aria-label', visible ? 'Nascondi password' : 'Mostra password');
+    });
 
-    document.getElementById('copyManifestBtn').addEventListener('click', async function() {
-        if (!validate()) return;
-        refresh();
+    getElement('copyManifestBtn').addEventListener('click', async function () {
+        updatePage();
+        if (!validateConfig()) {
+            return;
+        }
+
         try {
-            if (!navigator.clipboard || !navigator.clipboard.writeText) throw new Error();
-            await navigator.clipboard.writeText(currentUrl);
-            message('URL configurato copiato. Incollalo in Stremio.');
-        } catch (e) {
-            output.focus(); output.select();
+            if (!navigator.clipboard || !navigator.clipboard.writeText) {
+                throw new Error('Clipboard unavailable');
+            }
+            await navigator.clipboard.writeText(manifestUrl);
+            showMessage('URL configurato copiato. Incollalo in Stremio.');
+        } catch (_) {
+            var input = getElement('manifestUrl');
+            input.focus();
+            input.select();
             var copied = false;
-            try { copied = document.execCommand('copy'); } catch (_) {}
-            message(copied ? 'URL configurato copiato.' : 'Copia manualmente l\u2019URL selezionato.');
+            try {
+                copied = document.execCommand('copy');
+            } catch (_) {}
+            showMessage(copied ? 'URL configurato copiato.' : 'Copia manualmente il testo selezionato.', !copied);
         }
     });
 
-    document.getElementById('checkManifestBtn').addEventListener('click', async function() {
-        if (!validate()) return;
-        refresh();
-        var urlToCheck = currentUrl;
-        var controller = new AbortController();
-        var timer = setTimeout(function() { controller.abort(); }, 15000);
-        message('Verifica del manifest in corso\u2026');
-        try {
-            var response = await fetch(urlToCheck, { signal: controller.signal, cache: 'no-store' });
-            if (!response.ok) throw new Error('HTTP ' + response.status);
-            var manifest = await response.json();
-            if (!manifest || typeof manifest.id !== 'string' || typeof manifest.name !== 'string' || typeof manifest.version !== 'string' || !Array.isArray(manifest.resources) || !Array.isArray(manifest.types) || !Array.isArray(manifest.catalogs)) {
-                throw new Error('La risposta non contiene i campi principali di un manifest Stremio.');
-            }
-            message('Manifest raggiungibile: ' + manifest.name + ' \u2014 ' + manifest.version + '. Il playback va verificato separatamente.');
-        } catch (e) {
-            message('Verifica fallita: ' + (e.name === 'AbortError' ? 'timeout' : e.message));
-        } finally { clearTimeout(timer); }
+    getElement('installLink').addEventListener('click', function (event) {
+        updatePage();
+        if (!validateConfig()) {
+            event.preventDefault();
+        }
     });
 
-    refresh();
+    getElement('checkManifestBtn').addEventListener('click', async function () {
+        updatePage();
+        if (!validateConfig()) {
+            return;
+        }
+
+        var urlToCheck = manifestUrl;
+        var controller = new AbortController();
+        var timer = setTimeout(function () { controller.abort(); }, 15000);
+        var button = this;
+        button.disabled = true;
+        showMessage('Verifica del manifest in corso…');
+
+        try {
+            var response = await fetch(urlToCheck, {
+                cache: 'no-store',
+                signal: controller.signal
+            });
+            if (!response.ok) {
+                throw new Error('HTTP ' + response.status);
+            }
+
+            var manifest = await response.json();
+            if (!manifest || typeof manifest.id !== 'string'
+                || typeof manifest.name !== 'string'
+                || typeof manifest.version !== 'string'
+                || !Array.isArray(manifest.types)
+                || !Array.isArray(manifest.resources)
+                || !Array.isArray(manifest.catalogs)) {
+                throw new Error('Risposta priva dei campi principali del manifest.');
+            }
+
+            showMessage('Manifest raggiungibile: ' + manifest.name + ' — '
+                + manifest.version + '. Verifica il playback in Stremio.');
+        } catch (error) {
+            showMessage('Verifica fallita: '
+                + (error.name === 'AbortError' ? 'timeout' : error.message), true);
+        } finally {
+            clearTimeout(timer);
+            button.disabled = false;
+        }
+    });
+
+    applyDefaults();
+    updatePage();
 })();
 `;
 
+// ==================== TEMPLATE SERVER ====================
+
 function escapeHtml(value: unknown): string {
-    return String(value ?? '').replace(/[&<>"']/g, (char) => {
-        const entities: Record<string, string> = {
-            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
-        };
-        return entities[char];
-    });
+    const entities: Record<string, string> = {
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;'
+    };
+
+    return String(value ?? '').replace(/[&<>"']/g, character => entities[character]);
 }
 
-function landingTemplate(manifest: any): string {
-    const fields = Array.isArray(manifest.config) ? [...manifest.config] : [];
-    if (!fields.some((field: any) => field.key === 'mediaflowMaster')) {
-        fields.push({ key: 'mediaflowMaster', title: 'Abilita proxy', type: 'checkbox', default: false });
-    }
-    const options = fields.filter((field: any) => field.key !== 'personalTmdbKey').map((field: any) => {
-        const key = escapeHtml(field.key);
-        const title = escapeHtml(field.title || field.key);
-        if (field.type === 'checkbox') {
-            const checked = typeof field.default === 'boolean' ? field.default :
-                field.default === 'checked' || ['animeunityEnabled', 'animesaturnEnabled', 'animeworldEnabled', 'animeunityDirect'].includes(field.key);
-            return `<div class="form-element"><label><input type="checkbox" id="${key}" name="${key}" data-config-key="${key}"${checked ? ' checked' : ''}> ${title}</label></div>`;
+function serializeForScript(value: unknown): string {
+    return JSON.stringify(value)
+        .replace(/</g, '\\u003c')
+        .replace(/>/g, '\\u003e')
+        .replace(/&/g, '\\u0026')
+        .replace(/\u2028/g, '\\u2028')
+        .replace(/\u2029/g, '\\u2029');
+}
+
+export function landingTemplate(manifest: any): string {
+    const defaults: Record<string, unknown> = {};
+    const fields = Array.isArray(manifest.config) ? manifest.config : [];
+
+    fields.forEach((field: any) => {
+        if (typeof field.key === 'string' && field.default !== undefined) {
+            defaults[field.key] = field.default;
         }
-        if (field.type === 'select') {
-            const choices = (field.options || []).map((value: any) => `<option value="${escapeHtml(value)}"${value === field.default ? ' selected' : ''}>${escapeHtml(value)}</option>`).join('');
-            return `<div class="form-element"><label for="${key}">${title}</label><select class="full-width" id="${key}" name="${key}" data-config-key="${key}">${choices}</select></div>`;
-        }
-        const type = field.key === 'mediaFlowProxyPassword' || field.type === 'password' ? 'password' : field.type === 'number' ? 'number' : 'text';
-        return `<div class="form-element"><label for="${key}">${title}</label><input class="full-width" type="${type}" id="${key}" name="${key}" data-config-key="${key}" value="${escapeHtml(field.default ?? '')}"${field.required ? ' required' : ''}></div>`;
-    }).join('\n');
+    });
+
+    const pageData = serializeForScript({ defaults });
+    const iconUrl = escapeHtml(HANX_ICON_URL);
+
     return `<!DOCTYPE html>
 <html lang="it">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeHtml(manifest.name || 'HanX')} — Configurazione</title>
-<style>${STYLESHEET}
-input:not([type=checkbox]),select{padding:12px;margin-top:8px;background:#21132e;color:white;border:1px solid #8A5AAB;border-radius:6px}
-input[type=checkbox]{display:inline-block;width:20px;height:20px;vertical-align:middle}
-.panel{width:100%;max-width:900px;padding:24px;background:rgba(20,15,35,.85);border-radius:12px}
-#manifestUrlInput{width:100%;font-size:14px}#status{margin:16px 0;overflow-wrap:anywhere}.actions-row{margin:18px 0}
-</style></head>
-<body><main class="panel"><h1>${escapeHtml(manifest.name || 'HanX')}</h1><p>${escapeHtml(manifest.description || '')}</p>
-<h2 style="margin:20px 0">Configura e copia l'URL per Stremio</h2>
-<div class="actions-row"><button type="button" data-preset="direct">Preset Direct</button><button type="button" data-preset="proxy">Preset Proxy</button></div>
-<form id="mainForm">${options}<button type="submit">Genera URL configurato</button></form>
-<label for="manifestUrlInput">URL del manifest configurato</label><input id="manifestUrlInput" type="text" readonly spellcheck="false">
-<div class="actions-row"><button id="copyManifestBtn" type="button">Copia URL Manifest</button><a id="installLink" class="install-link" href="#">Apri in Stremio</a><button id="checkManifestBtn" type="button">Verifica manifest</button></div>
-<p id="status" role="status" aria-live="polite"></p><p style="font-size:14px">L'URL contiene la configurazione, inclusa l'eventuale password proxy. Non condividerlo pubblicamente. La verifica del manifest non verifica gli stream.</p>
-</main><script>${CLIENT_SCRIPT}</script></body></html>`;
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>${escapeHtml(manifest.name || 'HanX')} — Configurazione</title>
+        <link rel="icon" type="image/png" href="${iconUrl}">
+        <style>
+${STYLESHEET}
+        </style>
+    </head>
+    <body>
+        <header>
+            <img class="head-logo" src="${iconUrl}" alt="HanX">
+            <div class="stamp">
+                Anime configuration studio<br>
+                The cosmic edition
+            </div>
+            <span class="badge">${escapeHtml(manifest.version || '')}</span>
+        </header>
+
+        <div class="wrap">
+            <section class="hero">
+                <div class="hero-copy">
+                    <div class="kicker">Un addon. Infiniti nuovi mondi.</div>
+                    <h1>YOUR NEXT<br><em>UNIVERSE.</em></h1>
+                    <p>
+                        Scegli le tue sorgenti anime, configura la connessione
+                        e porta HanX su Stremio. Il prossimo arco narrativo comincia qui.
+                    </p>
+                </div>
+                <div class="hero-art">
+                    <img class="hero-logo" src="${iconUrl}" alt="Logo HanX">
+                    <span class="orbit-label">WATCH / DISCOVER / REPEAT</span>
+                </div>
+            </section>
+
+            <div class="strip">
+                <span>AnimeUnity + AnimeSaturn + AnimeWorld</span>
+                <span class="fade">Configurazione in tre passaggi</span>
+                <span>Solo anime</span>
+            </div>
+
+            <div class="studio">
+                <aside class="rail">
+                    <h2>Fallo tuo.</h2>
+                    <nav aria-label="Passaggi configurazione">
+                        <button class="tab active" type="button" data-step="1" aria-current="step">
+                            <span>01 /</span>Le sorgenti
+                        </button>
+                        <button class="tab" type="button" data-step="2">
+                            <span>02 /</span>La connessione
+                        </button>
+                        <button class="tab" type="button" data-step="3">
+                            <span>03 /</span>Il tuo link
+                        </button>
+                    </nav>
+                    <p class="rail-note">
+                        ESPLORA NUOVI MONDI.<br>
+                        TIENI IL CONTROLLO.<br>
+                        La configurazione rimane nel tuo link personale.
+                    </p>
+                </aside>
+
+                <main class="editorial">
+                    <!-- 01: Provider -->
+                    <section class="pane active" data-pane="1">
+                        <div class="pane-head">
+                            <div>
+                                <h2>Scegli il tuo trio.</h2>
+                                <p>Una, due o tutte e tre. Sei tu a decidere.</p>
+                            </div>
+                            <span class="meta">01 — Sources</span>
+                        </div>
+
+                        <div class="sources">
+                            <label class="source selected">
+                                <input id="animeunityEnabled" type="checkbox" checked aria-label="Abilita AnimeUnity">
+                                <span class="initial">AU.</span>
+                                <strong>AnimeUnity</strong>
+                                <small>DIRECT / PROXY</small>
+                            </label>
+                            <label class="source selected">
+                                <input id="animesaturnEnabled" type="checkbox" checked aria-label="Abilita AnimeSaturn">
+                                <span class="initial">AS.</span>
+                                <strong>AnimeSaturn</strong>
+                                <small>ANIME PROVIDER</small>
+                            </label>
+                            <label class="source selected">
+                                <input id="animeworldEnabled" type="checkbox" checked aria-label="Abilita AnimeWorld">
+                                <span class="initial">AW.</span>
+                                <strong>AnimeWorld</strong>
+                                <small>ANIME PROVIDER</small>
+                            </label>
+                        </div>
+
+                        <p class="hint">
+                            Disponibilità, qualità e alternative di riproduzione dipendono dai provider.
+                        </p>
+                        <div class="actions">
+                            <span class="meta" id="providerCount">3 sorgenti selezionate</span>
+                            <button class="btn blue" type="button" data-next="2">
+                                Scegli la connessione ↗
+                            </button>
+                        </div>
+                    </section>
+
+                    <!-- 02: Connessione -->
+                    <section class="pane" data-pane="2">
+                        <div class="pane-head">
+                            <div>
+                                <h2>Trova la tua strada.</h2>
+                                <p>Direct oppure il tuo proxy. Senza perdere il filo.</p>
+                            </div>
+                            <span class="meta">02 — Connection</span>
+                        </div>
+
+                        <div class="modes">
+                            <button class="mode active" type="button" data-mode="direct" aria-pressed="true">
+                                <span class="letter">A / ESSENTIAL</span>
+                                <h3>Direct.</h3>
+                                <p>Senza proxy di riproduzione configurato.</p>
+                            </button>
+                            <button class="mode" type="button" data-mode="proxy" aria-pressed="false">
+                                <span class="letter">B / YOUR SETUP</span>
+                                <h3>Con proxy.</h3>
+                                <p>Collega il tuo EasyProxy o MediaFlow.</p>
+                            </button>
+                        </div>
+
+                        <div class="fields" id="proxyFields" hidden>
+                            <div class="pair">
+                                <label class="field">
+                                    BACKEND
+                                    <select id="backend">
+                                        <option value="easyproxy">EasyProxy</option>
+                                        <option value="mediaflow">MediaFlow</option>
+                                    </select>
+                                </label>
+                                <label class="field">
+                                    PASSWORD · FACOLTATIVA
+                                    <div class="password-wrap">
+                                        <input id="mediaFlowProxyPassword" type="password" autocomplete="off" placeholder="Password del tuo proxy">
+                                        <button id="revealPassword" type="button" aria-label="Mostra password">
+                                            Mostra
+                                        </button>
+                                    </div>
+                                </label>
+                            </div>
+                            <label class="field">
+                                URL DEL PROXY
+                                <input id="mediaFlowProxyUrl" type="url" autocomplete="off" placeholder="https://proxy.example.com">
+                            </label>
+                        </div>
+
+                        <details id="advancedOptions">
+                            <summary>Il dettaglio fa la differenza — opzioni avanzate</summary>
+                            <label class="field">
+                                TMDB API KEY · FACOLTATIVA
+                                <input id="tmdbApiKey" type="password" autocomplete="off" placeholder="Fallback del server se lasciata vuota">
+                            </label>
+                            <label>
+                                <input id="animeunityDirect" type="checkbox" checked>
+                                AnimeUnity · Direct
+                            </label>
+                            <label>
+                                <input id="animeunityDirectFhd" type="checkbox">
+                                AnimeUnity · Synthetic FHD
+                            </label>
+                            <label>
+                                <input id="animeunityProxy" type="checkbox">
+                                AnimeUnity · Proxy
+                            </label>
+                            <p class="hint">
+                                Direct e Synthetic FHD dipendono dall’installazione e dai flussi disponibili.
+                                La modalità proxy non verifica automaticamente l’accessibilità del servizio.
+                            </p>
+                        </details>
+
+                        <div class="actions">
+                            <button class="btn" type="button" data-next="1">← Sorgenti</button>
+                            <button class="btn blue" type="button" data-next="3">Genera il mio link ↗</button>
+                        </div>
+                    </section>
+
+                    <!-- 03: Manifest -->
+                    <section class="pane" data-pane="3">
+                        <div class="pane-head">
+                            <div>
+                                <h2>Il tuo accesso<br>a un nuovo universo.</h2>
+                                <p>Controlla la configurazione. Poi copia il link.</p>
+                            </div>
+                        </div>
+
+                        <div class="pass">
+                            <div class="pass-header">
+                                <strong>HANX / YOUR SETUP</strong>
+                                <span>CONFIGURATION PASS</span>
+                            </div>
+                            <div class="pass-row">
+                                <span>Sorgenti</span>
+                                <strong id="sourcesSummary"></strong>
+                            </div>
+                            <div class="pass-row">
+                                <span>Connessione</span>
+                                <strong id="modeSummary"></strong>
+                            </div>
+                            <div class="pass-row">
+                                <span>Contenuti</span>
+                                <strong>Solo anime</strong>
+                            </div>
+                            <div class="pass-row">
+                                <span>Server</span>
+                                <strong id="serverSummary"></strong>
+                            </div>
+
+                            <label class="url-label" for="manifestUrl">
+                                IL TUO MANIFEST URL
+                                <textarea id="manifestUrl" readonly spellcheck="false" aria-label="URL del manifest configurato"></textarea>
+                            </label>
+                            <div class="copy-row">
+                                <button id="copyManifestBtn" class="btn coral" type="button">Copia il link ↗</button>
+                                <a id="installLink" class="btn blue" href="#">Apri in Stremio ↗</a>
+                                <button id="checkManifestBtn" class="btn" type="button">Verifica manifest</button>
+                            </div>
+                            <p class="hint">
+                                Incolla l’URL in Stremio per installare l’addon.
+                                Il link contiene l’eventuale password proxy: non pubblicarlo.
+                                La verifica del manifest non verifica gli stream.
+                            </p>
+                        </div>
+
+                        <div class="actions">
+                            <button class="btn" type="button" data-next="2">← Modifica connessione</button>
+                            <span class="meta">Made for your next arc.</span>
+                        </div>
+                    </section>
+
+                    <p class="feedback" id="feedback" role="status" aria-live="polite"></p>
+                </main>
+            </div>
+
+            <footer>
+                <span>${escapeHtml(manifest.name || 'HanX')} — Anime configuration studio.</span>
+                <span>Cosmic edition / Solo anime</span>
+            </footer>
+        </div>
+
+        <script>
+            window.__HANX_PAGE_DATA__ = ${pageData};
+        </script>
+        <script>
+${CLIENT_SCRIPT}
+        </script>
+    </body>
+</html>`;
 }
-export { landingTemplate };

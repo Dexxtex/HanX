@@ -13,8 +13,8 @@ import fetchMod = require('node-fetch');
 import { fetchPage } from './providers/flaresolverr';
 
 // --- Lightweight declarations to avoid TS complaints if @types/node non installati ---
-// (Non sostituiscono l'uso consigliato di @types/node, ma evitano errori bloccanti.) 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any 
+// (Non sostituiscono l'uso consigliato di @types/node, ma evitano errori bloccanti.)
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 declare const __dirname: string;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 declare const process: any;
@@ -1648,6 +1648,12 @@ app.get(['/vixsynthetic', '/vixsynthetic.m3u8'], async (req: Request, res: Respo
         res.status(500).send('#EXTM3U\n# internal error');
     }
 });
+
+// Serve la cartella public.
+app.use(
+    '/public',
+    express.static(path.join(__dirname, '..', 'public'))
+);
 
 // ✅ Middleware semplificato che usa sempre il router globale
 app.use((req: Request, res: Response, next: NextFunction) => {

@@ -1,5 +1,5 @@
 # Scegli un'immagine Node.js di base
-FROM node:20-slim
+FROM node:24-slim
 
 # Installa python3 e curl (usati nei workflow GitHub)
 USER root
@@ -14,7 +14,7 @@ RUN ln -s /usr/bin/python3 /usr/bin/python
 WORKDIR /usr/src/app
 
 # Installa pnpm
-RUN npm install -g pnpm@8.15.5
+RUN npm install -g pnpm@12.10.1
 
 # Copia i file del progetto nella directory di lavoro
 COPY . .

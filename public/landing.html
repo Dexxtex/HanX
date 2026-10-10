@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="it">
+    <head>
+        <meta charset="UTF-8">
+        <meta
+            name="viewport"
+            content="width=device-width, initial-scale=1.0"
+        >
+
+        <title>HanX — Anime per Stremio</title>
+
+        <link
+            id="favicon"
+            rel="icon"
+            type="image/png"
+            href="/public/icon.png"
+        >
+
+        <style>
+            :root {
+                color-scheme: dark;
+
+                --background: #070c19;
+                --text: #eef3ff;
+                --muted: #a5b2c9;
+                --cyan: #71dbf5;
+                --coral: #fb929b;
+                --border: #87b7e73d;
+            }
+
+            * {
+                box-sizing: border-box;
+            }
+
+            body {
+                min-height: 100vh;
+                margin: 0;
+                background: var(--background);
+                color: var(--text);
+                font-family: Arial, Helvetica, sans-serif;
+                line-height: 1.5;
+                isolation: isolate;
+            }
+
+            body::before {
+                content: "";
+                position: fixed;
+                inset: 0;
+                z-index: -2;
+                pointer-events: none;
+
+                background:
+                    radial-gradient(
+                        ellipse at 85% 5%,
+                        #39458770,
+                        transparent 48%
+                    ),
+                    radial-gradient(
+                        ellipse at 0% 50%,
+                        #6d264753,
+                        transparent 44%
+                    ),
+                    radial-gradient(
+                        ellipse at 90% 90%,
+                        #174e6545,
+                        transparent 42%
+                    );
+            }
+
+            body::after {
+                content: "";
+                position: fixed;
+                inset: 0;
+                z-index: -1;
+                opacity: 0.7;
+                pointer-events: none;
+
+                background-image:
+                    radial-gradient(
+                        circle at 18px 29px,
+                        #ffffffb0 0.7px,
+                        transparent 1.1px
+                    ),
+                    radial-gradient(
+                        circle at 87px 61px,
+                        #b6d7ff99 0.5px,
+                        transparent 1px
+                    ),
+                    radial-gradient(
+                        circle at 47px 109px,
+                        #ffffff80 0.6px,
+                        transparent 1px
+                    );
+
+                background-size:
+                    173px 191px,
+                    257px 229px,
+                    311px 277px;
+            }
+
+            .container {
+                width: min(1100px, 90%);
+                margin: 0 auto;
+            }
+
+            .header {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 20px;
+                padding: 24px 0;
+                border-bottom: 1px solid #ffffff32;
+            }
+
+            .header-logo {
+                width: 140px;
+                height: 64px;
+                object-fit: contain;
+            }
+
+            .header-label {
+                color: var(--muted);
+                font: 10px/1.7 monospace;
+                letter-spacing: 1px;
+                text-align: right;
+                text-transform: uppercase;
+            }
+
+            .hero {
+                display: grid;
+                grid-template-columns: 1.15fr 1fr;
+                align-items: center;
+                gap: 40px;
+                padding: 64px 0;
+            }
+
+            .eyebrow {
+                color: var(--cyan);
+                font: 11px monospace;
+                letter-spacing: 1.2px;
+                text-transform: uppercase;
+            }
+
+            .eyebrow::before {
+                content: "✦";
+                margin-right: 10px;
+                color: var(--coral);
+            }
+
+            h1 {
+                margin: 26px 0;
+                font-size: clamp(48px, 7vw, 86px);
+                font-weight: 900;
+                line-height: 0.95;
+                letter-spacing: -4px;
+            }
+
+            h1 span {
+                color: var(--coral);
+            }
+
+            .description {
+                max-width: 430px;
+                margin: 0;
+                color: var(--muted);
+                font-size: 15px;
+            }
+
+            .hero-art {
+                position: relative;
+                display: grid;
+                min-height: 300px;
+                place-items: center;
+            }
+
+            .hero-art::before {
+                content: "";
+                position: absolute;
+                width: 240px;
+                height: 240px;
+                border: 1px solid #a8c3e246;
+                border-radius: 50%;
+                transform: rotate(-24deg) scaleX(1.3);
+            }
+
+            .hero-art::after {
+                content: "";
+                position: absolute;
+                width: 250px;
+                height: 250px;
+                border: 1px solid #f4788845;
+                border-radius: 50%;
+                transform: rotate(25deg) scaleX(1.3);
+            }
+
+            .hero-logo {
+                position: relative;
+                z-index: 1;
+                width: 100%;
+                max-width: 480px;
+
+                filter:
+                    drop-shadow(0 15px 30px #020414)
+                    drop-shadow(0 0 24px #00bce733);
+            }
+
+            .panel {
+                padding: 30px;
+                border: 1px solid var(--border);
+
+                background: linear-gradient(
+                    145deg,
+                    #17233bee,
+                    #0d1426ef 65%,
+                    #22192eee
+                );
+            }
+
+            .panel h2 {
+                margin: 0 0 10px;
+                font-size: 28px;
+                letter-spacing: -1px;
+            }
+
+            .panel p {
+                margin: 0;
+                color: var(--muted);
+                font-size: 14px;
+            }
+
+            .providers {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 10px;
+                margin: 22px 0;
+            }
+
+            .provider {
+                padding: 9px 13px;
+                border: 1px solid #83c7ef55;
+                background: #14233d;
+                color: var(--text);
+                font-size: 12px;
+            }
+
+            .button {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                gap: 16px;
+                padding: 14px 22px;
+                border: 1px solid #8eaefa70;
+
+                background: linear-gradient(
+                    110deg,
+                    #3855c7,
+                    #4765cb
+                );
+
+                color: white;
+                font-size: 14px;
+                font-weight: 700;
+                text-decoration: none;
+            }
+
+            .button:hover {
+                filter: brightness(1.15);
+            }
+
+            .button:focus-visible {
+                outline: 3px solid var(--cyan);
+                outline-offset: 4px;
+            }
+
+            .help {
+                margin-top: 16px !important;
+                font-size: 12px !important;
+            }
+
+            .footer {
+                display: flex;
+                justify-content: space-between;
+                gap: 20px;
+                margin-top: 40px;
+                padding: 22px 0;
+                border-top: 1px solid #ffffff32;
+
+                color: var(--muted);
+                font: 10px monospace;
+                text-transform: uppercase;
+            }
+
+            @media (max-width: 700px) {
+                .hero {
+                    grid-template-columns: 1fr;
+                    gap: 15px;
+                    padding: 40px 0;
+                }
+
+                h1 {
+                    letter-spacing: -3px;
+                }
+
+                .hero-art {
+                    min-height: 240px;
+                }
+
+                .hero-logo {
+                    max-width: 360px;
+                }
+
+                .hero-art::before,
+                .hero-art::after {
+                    width: 190px;
+                    height: 190px;
+                }
+
+                .header-label {
+                    display: none;
+                }
+
+                .panel {
+                    padding: 22px;
+                }
+
+                .button {
+                    width: 100%;
+                }
+
+                .footer {
+                    flex-direction: column;
+                }
+            }
+        </style>
+    </head>
+
+    <body>
+        <div class="container">
+            <header class="header">
+                <img
+                    id="headerLogo"
+                    class="header-logo"
+                    src="/public/icon.png"
+                    alt="HanX"
+                >
+
+                <div class="header-label">
+                    Anime configuration studio<br>
+                    The cosmic edition
+                </div>
+            </header>
+
+            <main>
+                <section class="hero">
+                    <div>
+                        <div class="eyebrow">
+                            Un addon. Infiniti nuovi mondi.
+                        </div>
+
+                        <h1>
+                            YOUR NEXT<br>
+                            <span>UNIVERSE.</span>
+                        </h1>
+
+                        <p class="description">
+                            I tuoi provider, la tua connessione,
+                            il tuo prossimo episodio.
+                            Configura HanX e porta i tuoi anime su Stremio.
+                        </p>
+                    </div>
+
+                    <div class="hero-art">
+                        <img
+                            id="heroLogo"
+                            class="hero-logo"
+                            src="/public/icon.png"
+                            alt="Logo HanX"
+                        >
+                    </div>
+                </section>
+
+                <section class="panel">
+                    <h2>Fallo tuo.</h2>
+
+                    <p>
+                        Seleziona le sorgenti, scegli Direct oppure
+                        il tuo proxy e genera il link configurato.
+                    </p>
+
+                    <div class="providers" aria-label="Provider disponibili">
+                        <span class="provider">AnimeUnity</span>
+                        <span class="provider">AnimeSaturn</span>
+                        <span class="provider">AnimeWorld</span>
+                    </div>
+
+                    <a
+                        id="configureLink"
+                        class="button"
+                        href="/"
+                    >
+                        Configura e installa
+                        <span aria-hidden="true">↗</span>
+                    </a>
+
+                    <p class="help">
+                        Il configuratore genera l’URL da copiare in Stremio.
+                        TMDB è facoltativo: HanX rimane dedicato agli anime.
+                    </p>
+                </section>
+            </main>
+
+            <footer class="footer">
+                <span>HanX — Anime configuration studio.</span>
+                <span>Solo anime. La tua configurazione.</span>
+            </footer>
+        </div>
+
+        <script>
+            // Percorsi pubblici: modifica questi valori se necessario.
+            const HANX_ICON_URL = "/public/icon.png";
+            const HANX_CONFIGURE_URL = "/";
+
+            document.getElementById("headerLogo").src = HANX_ICON_URL;
+            document.getElementById("heroLogo").src = HANX_ICON_URL;
+            document.getElementById("favicon").href = HANX_ICON_URL;
+
+            document.getElementById("configureLink").href =
+                HANX_CONFIGURE_URL;
+        </script>
+    </body>
+</html>
