@@ -64,11 +64,11 @@ export function langToFlag(langs: string[]): string {
 }
 
 // Simple legacy name mapping helper for anime-only transitional phase
-// Converts legacy addon.ts provider name strings (e.g. 'StreamViX AU') into new label.
+// Converts legacy addon.ts provider name strings (e.g. 'HanX AU') into new label.
 export function mapLegacyProviderName(legacy: string): string {
   const lower = legacy.toLowerCase();
-  if (lower.includes('streamvix au')) return providerLabel('animeunity');
-  if (lower.includes('streamvix as')) return providerLabel('animesaturn');
-  if (lower.includes('streamvix aw')) return providerLabel('animeworld');
+  if (lower.includes('hanx au')) return providerLabel('animeunity');
+  if (lower.includes('hanx as')) return providerLabel('animesaturn');
+  if (lower.includes('hanx aw')) return providerLabel('animeworld');
   return legacy;
 }

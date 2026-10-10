@@ -140,7 +140,7 @@ async function fetchVixCloudSiteVersion(siteOrigin: string): Promise<string> {
 
 //   try {
 //     console.log(`VIX_CHECK: Checking TMDB ID ${tmdbId} of type ${vixSrcApiType} against VixSrc list: ${listUrl}`);
-//     const response = await fetch(listUrl, { headers: { 'User-Agent': 'Mozilla/5.0 (StreamViX EarlyDirect)', 'Accept': 'application/json' } });
+//     const response = await fetch(listUrl, { headers: { 'User-Agent': 'Mozilla/5.0 (HanX EarlyDirect)', 'Accept': 'application/json' } });
 //     if (!response.ok) {
 //       console.error(`VIX_CHECK: Failed to fetch VixSrc list for type ${vixSrcApiType}, status: ${response.status}`);
 //       if (skipFlag) {
@@ -169,7 +169,7 @@ async function fetchVixCloudSiteVersion(siteOrigin: string): Promise<string> {
 //     try {
 //       await new Promise(r => setTimeout(r, 400));
 //       console.log('VIX_CHECK: retry fetch list');
-//       const response2 = await fetch(listUrl, { headers: { 'User-Agent': 'Mozilla/5.0 (StreamViX EarlyDirect Retry)', 'Accept': 'application/json' } });
+//       const response2 = await fetch(listUrl, { headers: { 'User-Agent': 'Mozilla/5.0 (HanX EarlyDirect Retry)', 'Accept': 'application/json' } });
 //       if (response2.ok) {
 //         const d2 = await response2.json();
 //         if (Array.isArray(d2)) {
@@ -197,7 +197,7 @@ async function fetchVixCloudSiteVersion(siteOrigin: string): Promise<string> {
 //   //const listUrl = `${VIXCLOUD_SITE_ORIGIN}/api/list/episode/?lang=it`;
 //   try {
 //     console.log(`VIX_EP_CHECK: Checking TMDB ID ${tmdbId} S${season}E${episode} against VixSrc episode list: ${listUrl}`);
-//     const response = await fetch(listUrl, { headers: { 'User-Agent': 'Mozilla/5.0 (StreamViX EarlyDirect)', 'Accept': 'application/json' } });
+//     const response = await fetch(listUrl, { headers: { 'User-Agent': 'Mozilla/5.0 (HanX EarlyDirect)', 'Accept': 'application/json' } });
 //     if (!response.ok) {
 //       console.error(`VIX_EP_CHECK: Failed to fetch VixSrc episode list, status: ${response.status}`);
 //       if (skipFlag) { console.warn('VIX_EP_CHECK: Skip attivo -> continuo'); return true; }
@@ -221,7 +221,7 @@ async function fetchVixCloudSiteVersion(siteOrigin: string): Promise<string> {
 //     try {
 //       await new Promise(r => setTimeout(r, 400));
 //       console.log('VIX_EP_CHECK: retry fetch episode list');
-//       const r2 = await fetch(listUrl, { headers: { 'User-Agent': 'Mozilla/5.0 (StreamViX EarlyDirect Retry)', 'Accept': 'application/json' } });
+//       const r2 = await fetch(listUrl, { headers: { 'User-Agent': 'Mozilla/5.0 (HanX EarlyDirect Retry)', 'Accept': 'application/json' } });
 //       if (r2.ok) {
 //         const d2 = await r2.json();
 //         if (Array.isArray(d2)) {
@@ -738,7 +738,7 @@ export async function getStreamContent(id: string, type: ContentType, config: Ex
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const env: any = (global as any)?.process?.env || (typeof process !== 'undefined' ? (process as any).env : {});
     if (!config.addonBase) {
-      const envBase = env.ADDON_BASE_URL || env.STREAMVIX_ADDON_BASE || '';
+      const envBase = env.ADDON_BASE_URL || env.HANX_ADDON_BASE || '';
       if (envBase.startsWith('http') && !envBase.includes(domains.vixsrc)) {
         config.addonBase = envBase.replace(/\/$/, '');
         console.log('[VixSrc][Debug] addonBase fallback da ENV =', config.addonBase);
@@ -747,7 +747,7 @@ export async function getStreamContent(id: string, type: ContentType, config: Ex
       }
     }
     if (config.vixDual !== true) {
-      const dualFlag = String(env.VIX_DUAL || env.VIXSRC_DUAL || env.STREAMVIX_DUAL || '').toLowerCase();
+      const dualFlag = String(env.VIX_DUAL || env.VIXSRC_DUAL || env.HANX_DUAL || '').toLowerCase();
       if (['1', 'true', 'on', 'yes', 'y'].includes(dualFlag)) {
         config.vixDual = true;
         console.log('[VixSrc][Debug] vixDual abilitato via ENV');
@@ -761,7 +761,7 @@ export async function getStreamContent(id: string, type: ContentType, config: Ex
     console.log('[VixSrc][Debug] addonBase ancora assente dopo fallback ENV');
     // Ultimo fallback: applica default hard-coded richiesto dall'utente
     // Solo se ancora assente e per evitare derivazioni errate dal dominio sorgente.
-    const DEFAULT_ADDON_BASE = 'https://streamvix.hayd.uk';
+    const DEFAULT_ADDON_BASE = 'https://hanx.hayd.uk';
     try {
       if (!config.addonBase) {
         config.addonBase = DEFAULT_ADDON_BASE;

@@ -1,0 +1,31 @@
+# Dipendenze
+node_modules
+pnpm-lock.yaml
+package-lock.json
+
+# Build
+dist
+
+# Git
+.git
+.gitignore
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test
+test-provider.ps1
+test-provider-mal.ps1
+server.log
+
+# Documentazione
+README.md
+DEBUG_FETCH.md
+LICENSE.txt

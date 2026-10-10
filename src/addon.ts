@@ -178,11 +178,11 @@ function sortStreamsByPriority(streams: { url?: string; title?: string }[]): voi
 // Helper: compute Europe/Rome interpretation for eventStart even if timezone is missing
 // ================= MANIFEST BASE (restored) =================
 const baseManifest: Manifest = {
-    id: "org.stremio.vixcloud",
+    id: "org.stremio.hanx",
     version: "12.4.23",
-    name: "StreamViX | Elfhosted",
-    description: "StreamViX addon dedicato ad AnimeUnity, AnimeSaturn e AnimeWorld",
-    background: "https://raw.githubusercontent.com/qwertyuiop8899/StreamViX/refs/heads/main/public/backround.png",
+    name: "HanX | Elfhosted",
+    description: "HanX addon dedicato ad AnimeUnity, AnimeSaturn e AnimeWorld",
+    background: "https://raw.githubusercontent.com/Dexxtex/HanX/refs/heads/main/public/backround.png",
     types: ["anime"],
     idPrefixes: ["tt", "kitsu", "mal", "tmdb"],
     catalogs: [],
@@ -1237,5 +1237,5 @@ app.get('/', (req: Request, res: Response) => {
 // Avvia il server Express
 const PORT = parseInt(process.env.PORT || '7000', 10);
 app.listen(PORT, '0.0.0.0', () => {
-    console.log(`🚀 StreamVix addon listening on http://0.0.0.0:${PORT}`);
+    console.log(`🚀 HanX addon listening on http://0.0.0.0:${PORT}`);
 });

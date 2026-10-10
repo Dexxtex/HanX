@@ -2,7 +2,6 @@ export interface Config {
   tmdbApiKey: string;
   mfpUrl: string;
   mfpPassword: string;
-  bothLink: boolean;
   animeUnityEnabled: boolean;
   port: number;
 }
@@ -11,7 +10,6 @@ export const config: Config = {
   tmdbApiKey: process.env.TMDB_API_KEY || '',
   mfpUrl: process.env.MFP_URL || '',
   mfpPassword: process.env.MFP_PSW || '',
-  bothLink: process.env.BOTHLINK === 'true',
   animeUnityEnabled: process.env.ANIMEUNITY_ENABLED === 'true',
   port: parseInt(process.env.PORT || '7860')
 };

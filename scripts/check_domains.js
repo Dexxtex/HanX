@@ -12,7 +12,7 @@ const path = require('path');
 
 // NOTE: flaresolverr.ts deve essere compilato in dist/ prima dell'esecuzione.
 // Se dist/ non esiste, eseguire: pnpm build
-const flaresolverrPath = path.join(__dirname, '..', 'dist', 'src', 'providers', 'flaresolverr.js');
+const flaresolverrPath = path.join(__dirname, '..', 'dist', 'providers', 'flaresolverr.js');
 const { fetchPage } = require(flaresolverrPath);
 
 const argv = process.argv.slice(2);

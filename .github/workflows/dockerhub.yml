@@ -15,7 +15,7 @@ permissions:
 env:
   GHCR: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
-  DOCKERHUB_IMAGE: qwertyuiop8899/streamvix
+  DOCKERHUB_IMAGE: dexxtex/hanx
 
 jobs:
   build-and-push:
