@@ -857,12 +857,26 @@ function landingTemplate(manifest: any) {
 	<body>
 		<h1>${manifest.name || 'HanX'}</h1>
 		<p>${manifest.description || 'Addon Stremio per anime'}</p>
+	
+		<!-- Install diretto -->
+		<div style="text-align:center; margin:1.5rem 0;">
+			<a id="installLink" href="#" class="install-button" style="display:inline-block; padding:12px 24px; background:#8A5AAB; color:#fff; text-decoration:none; border-radius:8px; font-weight:700; font-size:1.1rem;">🎬 Installa su Stremio</a>
+		</div>
+	
 		${contactHTML}
 		<div class="container">
 			${guidedInstallationHTML}
 			${formHTML}
 		</div>
 		<script>
+			// Install link diretto
+			(function() {
+				var installLink = document.getElementById('installLink');
+				if (installLink) {
+					var manifestUrl = window.location.protocol + '//' + window.location.host + '/manifest.json';
+					installLink.href = 'stremio://install-addon/' + encodeURIComponent(manifestUrl);
+				}
+			})();
 			${script}
 		</script>
 	</body>
