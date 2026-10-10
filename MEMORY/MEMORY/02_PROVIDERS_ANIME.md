@@ -60,22 +60,10 @@
 
 ## VIXSRC/VIXCLOUD
 
-- `src/extractor.ts` (~1459 righe) — FASE 7b pulito ✅
+- `src/extractor.ts` - pulito ✅
 - Funzioni TMDB spostate in `tmdbResolver.ts`
 - Logica VixSrc/VixCloud essenziale mantenuta
 - Endpoint mantenuti: VixSynthetic + Middleware Express
-
----
-
-## 📊 STATO FILE RIMOSSI
-
-| File | Motivazione |
-|------|-------------|
-| `easyproxyDvr.ts` | ❌ DVR non usato da anime, rimosso SF19d |
-| `toon-provider.ts`, `toonitalia-provider.ts` | ❌ Provider non-anime |
-| `sportzxUpdater.ts` … `epg.ts` (13 file) | ❌ Updater TV/Sport |
-| `guardoserie.ts`, `guardaflix.ts`, `trailerProvider.ts` | ❌ Provider non-anime |
-| `ppv_streams.py`, `scripts/uprot_resolver.py` | ❌ Script Python non-anime |
 
 ---
 

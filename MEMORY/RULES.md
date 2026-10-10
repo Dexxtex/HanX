@@ -1,6 +1,6 @@
 # 📜 Regole di Sviluppo — HanX
 
-> **Aggiornamento**: 10/10/2026 — FASE 8 COMPLETATA
+> **Ultimo aggiornamento**: 10/10/2026
 
 ---
 
@@ -8,7 +8,7 @@
 
 1. **Chiedere sempre prima** di iniziare azioni significative
 2. **Interrompere tutto** se l'utente rifiuta la proposta
-3. **Leggere questo file** prima di ogni sessione di lavoro
+3. **Leggere RULES.md** prima di ogni sessione di lavoro
 
 ---
 
@@ -16,23 +16,18 @@
 
 **HanX** è un addon Stremio/NUVIO **esclusivo per anime**:
 - Provider: AnimeUnity, AnimeSaturn, AnimeWorld
-- Codice non-anime: ✅ RIMOSSO (FASE 8 completata)
+- Codice non-anime: ✅ RIMOSSO
 - Infrastruttura: ✅ MANTENUTA (proxy, cache, mapping)
 
 ---
 
 ## 📁 STRUTTURA DOCUMENTAZIONE
 
-| Cartella | Scopo |
-|----------|-------|
-| `MEMORY/MEMORY/` | Documentazione tecnica (max 3 file) |
-| `MEMORY/BACKUP_STORICO/` | Storico cambiamenti (dimensione libera) |
-| `MEMORY/ERROR_TRACKING/` | Registro errori e lezioni |
-
-**File MEMORY:**
-- `01_STRUTTURA_E_ARCHITETTURA.md` — Architettura e componenti
-- `02_PROVIDERS_ANIME.md` — Provider e utility
-- `03_OBIETTIVI_E_TODO.md` — Obiettivi e stato lavoro
+| File | Scopo |
+|------|-------|
+| `MEMORY/MEMORY/01_STRUTTURA_E_ARCHITETTURA.md` | Architettura e componenti |
+| `MEMORY/MEMORY/02_PROVIDERS_ANIME.md` | Provider e utility |
+| `MEMORY/MEMORY/03_OBIETTIVI_E_TODO.md` | Obiettivi, roadmap e stato lavoro |
 
 ---
 
@@ -57,25 +52,15 @@ Quando si modifica il codice, seguire questo ordine:
 1. **landingPage.ts** — Interfaccia web
 2. **extractor.ts** — Estrazione stream
 3. **addon.ts** — Main addon (ultimo)
-4. **Test compilazione** — `tsc --noEmit`
-
----
-
-## 📏 REGOLA NUMERI DI RIGA
-
-- Usare SEMPRE il conteggio dell'**editor** (non terminale)
-- Il terminale conta diversamente (ignora righe vuote, newline)
-- **Esempio**: `addon.ts` = ~1223 righe (editor), non usare `wc -l`
-- Per verifiche esatte: `read_file` con `start_line`/`end_line`
-- **NO `grep`** per numeri di riga esatti (mostra solo intervalli)
+4. **Test compilazione** — `pnpm run build`
 
 ---
 
 ## ✅ AGGIORNAMENTO DOCUMENTAZIONE
 
-- **AD OGNI SESSIONE**: aggiornare `memoria/`
-- **NO file superflui**: non creare directory non necessarie
-- **Rimuovere**: correlazioni, dipendenze, import non-anime
+- **AD OGNI SESSIONE**: aggiornare `MEMORY/MEMORY/03_OBIETTIVI_E_TODO.md`
+- **NO file superflui**: non creare directory o file non necessari
+- **Rimuovere**: riferimenti obsoleti, codice non-anime, import eliminati
 
 ---
 
