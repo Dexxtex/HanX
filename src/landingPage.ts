@@ -339,7 +339,6 @@ function landingTemplate(manifest: any) {
 
 	let formHTML = ''
 	let script = ''
-	let fastModeDefault = false
 
 	// ── GUIDED INSTALLATION SECTION ──
 	const guidedInstallationHTML = `
@@ -421,10 +420,6 @@ function landingTemplate(manifest: any) {
 					// Remove custom TMDB key field from UI entirely (use default only)
 					return;
 				}
-				if (key === 'fastMode') {
-					fastModeDefault = !!(elem as any).default;
-					return;
-				}
 				const isRequired = elem.required ? ' required' : ''
 				const defaultHTML = elem.default ? ` value="${elem.default}"` : ''
 				const inputType = elem.type
@@ -437,11 +432,6 @@ function landingTemplate(manifest: any) {
 			} else if (elem.type === 'checkbox') {
 				// Skip only personalTmdbKey (custom placement); mediaflowMaster & localMode will be moved later
 				if (key === 'personalTmdbKey') return; // removed from UI
-				// fastMode: handled by custom toggle below, skip here to avoid duplicating
-				if (key === 'fastMode') {
-					fastModeDefault = !!(elem as any).default;
-					return;
-				}
 				// Sub-menu items: create hidden inputs to store their values from manifest
 				if (['animeunityDirect', 'animeunityDirectFhd', 'animeunityProxy', 'animesaturnDirect', 'animesaturnDirectFhd', 'animesaturnProxy', 'animeworldDirect', 'animeworldDirectFhd', 'animeworldProxy', 'useMediaFlow'].includes(key)) {
 					const isChecked = (typeof (elem as any).default === 'boolean') && ((elem as any).default as boolean);
@@ -544,24 +534,6 @@ function landingTemplate(manifest: any) {
 					const _raw = manifest.__resolvedAddonBase; const _host = _raw.replace(/^https?:\/\//, ''); const _isFallback = /hanx\.hayd\.uk/.test(_raw); return `<div id="svxAddonBaseBadge" style="text-align:center; margin:-0.25rem 0 1.1rem 0;">
 					<span style=\"display:inline-block; padding:0.35rem 0.75rem; background:rgba(0,0,0,0.45); border:1px solid rgba(140,82,255,0.65); border-radius:14px; font-size:0.70rem; letter-spacing:0.05em; font-weight:600; color:#c9b3ff;\" title=\"Addon Base URL risolta all'avvio\">Addon Base URL per Vix FHD: <span style='color:#00c16e;'>${_host}</span><a href=\"https://github.com/Dexxtex/HanX/blob/main/README.md\" target=\"_blank\" style=\"text-decoration:none; margin-left:6px; color:#8c52ff;\">📖 README</a></span>
 				</div>` })() : ''}
-				<div class="form-element" style="margin-top:0.5rem;">
-					<div class="toggle-row" data-toggle-row="fastMode">
-						<span class="toggle-title">Modalità Veloce ⚡</span>
-						<div class="toggle-right">
-							<span class="toggle-off">OFF</span>
-							<label class="switch">
-								<input type="checkbox" id="fastMode" name="fastMode" data-config-key="fastMode" data-main-toggle="1"${fastModeDefault ? ' checked' : ''} />
-								<span class="slider"></span>
-							</label>
-							<span class="toggle-on">ON</span>
-							<button type="button" id="fastModeHelp" class="help-btn fast-inline">HELP</button>
-						</div>
-					</div>
-					<div id="fastModeToast" class="fast-toast">
-						<strong>Modalità Veloce</strong><br>
-						Priorità ad AnimeUnity, AnimeSaturn e AnimeWorld in ordine. Restituisce gli stream anime disponibili. 
-					</div>
-				</div>
 			</form>
 
 			<div class="separator"></div>
@@ -618,7 +590,6 @@ function landingTemplate(manifest: any) {
 							animesaturnDirect: true,
 							animeworldDirect: true,
 							mediaflowMaster: false,
-							fastMode: false,
 							personalTmdbKey: '',
 							mfpUrl: '',
 							mfpPwd: ''
@@ -636,7 +607,6 @@ function landingTemplate(manifest: any) {
 							animesaturnProxy: true,
 							animeworldProxy: true,
 							mediaflowMaster: true,
-							fastMode: false,
 							personalTmdbKey: '',
 							mfpUrl: '',
 							mfpPwd: ''
@@ -735,36 +705,11 @@ function landingTemplate(manifest: any) {
 						config.useMediaFlow = !!guidedUseMediaFlow;
 					}
 
-					// Show FastMode popup
-					showFastModePopup(config);
+					// Vai direttamente al pannello install
+					showInstallPanel(config);
+				// Vai direttamente al pannello install
+					showInstallPanel(config);
 				});
-
-				// ── FASTMODE POPUP ──
-				function showFastModePopup(config){
-					// Create overlay
-					var overlay = document.createElement('div');
-					overlay.id = 'fastModeOverlay';
-					overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.75);z-index:9999;display:flex;align-items:center;justify-content:center;';
-					overlay.innerHTML = '<div style="background:rgba(20,15,35,0.97);border:1px solid rgba(140,82,255,0.6);border-radius:12px;padding:2rem;max-width:420px;width:90%;text-align:center;">'
-						+ '<h3 style="color:#c9b3ff;margin:0 0 1rem 0;">⚡ Modalità Veloce?</h3>'
-						+ '<p style="color:#aaa;font-size:0.85rem;line-height:1.5;margin:0 0 1.5rem 0;">Priorità ad AnimeUnity, AnimeSaturn e AnimeWorld in ordine. Se SC non ha ITA, restituisce comunque SC insieme al primo provider disponibile. Per anime, mostra il primo che risponde (ITA + SUB).</p>'
-						+ '<div style="display:flex;gap:1rem;justify-content:center;flex-wrap:wrap;">'
-						+ '<button id="fastModeYes" type="button" style="padding:0.7rem 1.5rem;background:#00c16e;color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:600;">Sì, attiva ⚡</button>'
-						+ '<button id="fastModeNo" type="button" style="padding:0.7rem 1.5rem;background:rgba(140,82,255,0.4);color:#fff;border:1px solid rgba(140,82,255,0.6);border-radius:8px;cursor:pointer;font-weight:600;">No, normale</button>'
-						+ '</div></div>';
-					document.body.appendChild(overlay);
-
-					document.getElementById('fastModeYes').addEventListener('click', function(){
-						config.fastMode = true;
-						overlay.remove();
-						showInstallPanel(config);
-					});
-					document.getElementById('fastModeNo').addEventListener('click', function(){
-						config.fastMode = false;
-						overlay.remove();
-						showInstallPanel(config);
-					});
-				}
 
 				// ── INSTALL PANEL (after preset confirmed) ──
 				function showInstallPanel(config){
@@ -785,9 +730,7 @@ function landingTemplate(manifest: any) {
 					panel.id = 'guidedInstallPanel';
 					panel.style.cssText = 'text-align:center;padding:1.5rem;';
 					panel.innerHTML = '<h3 style="color:#00c16e;margin:0 0 1rem 0;text-shadow:0 0 12px rgba(0,193,110,0.8);">✅ Configurazione Pronta!</h3>'
-						+ '<p style="color:#aaa;font-size:0.85rem;margin-bottom:1.5rem;">'
-						+ (config.fastMode ? '⚡ Modalità Veloce attiva' : 'Modalità normale')
-						+ '</p>'
+						+ '<p style="color:#aaa;font-size:0.85rem;margin-bottom:1.5rem;">Configurazione selezionata</p>'
 						+ '<div style="display:flex;gap:1rem;justify-content:center;flex-wrap:wrap;margin-bottom:1.5rem;">'
 						+ '<a href="' + stremioUrl + '" style="text-decoration:none;"><button type="button" style="padding:0.85rem 2.2rem;background:linear-gradient(135deg,#7c3aff,#a855f7);color:#fff;border:2px solid #c084fc;border-radius:10px;cursor:pointer;font-weight:800;font-size:1.05rem;letter-spacing:0.05em;box-shadow:0 0 18px rgba(168,85,247,0.9),0 0 40px rgba(168,85,247,0.45),inset 0 1px 0 rgba(255,255,255,0.15);text-shadow:0 0 8px rgba(255,255,255,0.6);transition:all 0.2s ease;">🎬 INSTALLA SU STREMIO</button></a>'
 						+ '<button id="guidedCopyBtn" type="button" style="padding:0.85rem 2.2rem;background:linear-gradient(135deg,#1e3a8a,#2563eb);color:#fff;border:2px solid #60a5fa;border-radius:10px;cursor:pointer;font-weight:800;font-size:1.05rem;letter-spacing:0.05em;box-shadow:0 0 18px rgba(96,165,250,0.9),0 0 40px rgba(96,165,250,0.45),inset 0 1px 0 rgba(255,255,255,0.15);text-shadow:0 0 8px rgba(255,255,255,0.6);transition:all 0.2s ease;">📋 COPIA MANIFEST URL</button>'
