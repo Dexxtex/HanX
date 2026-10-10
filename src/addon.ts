@@ -75,7 +75,7 @@ const baseManifest: Manifest = {
     version: "12.4.23",
     name: "HanX | Elfhosted",
     description: "HanX addon dedicato ad AnimeUnity, AnimeSaturn e AnimeWorld",
-    background: "https://raw.githubusercontent.com/Dexxtex/HanX/refs/heads/main/public/backround.png",
+    background: "https://raw.githubusercontent.com/Dexxtex/HanX/refs/heads/main/public/background.png",
     types: ["movie", "series", "anime"],
     idPrefixes: ["tt", "kitsu", "mal", "tmdb"],
     catalogs: [],
