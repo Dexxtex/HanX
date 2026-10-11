@@ -33,7 +33,7 @@ Aggiornare Express da v4 a v5 e @types/express a v5:
 
 Express 5 richiede Node.js 18 o superiore.
 
-> **Nel nostro caso**: Dockerfile usa `node:24-slim` ✅
+> **Nel nostro caso**: Dockerfile usa `node:26-slim` ✅
 
 ### 2. Metodi Deprecati Rimosse
 

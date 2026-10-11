@@ -22,7 +22,7 @@
 
 È il prerequisite per node-fetch@3 (✅ completato), https-proxy-agent@9 e probabilmente semplifica anche socks-proxy-agent@10.
 
-> 📖 **Documentazione completa**: Vedi `MEMORY/MEMORY/04_MIGRAZIONE_ESM.md` per guide passo-passo, regex, e soluzioni ai problemi comuni.
+> 📖 **Documentazione completa**: Vedi `MEMORY/MIGRATION/01_MIGRAZIONE_ESM.md` per guide passo-passo, regex, e soluzioni ai problemi comuni.
 
 **Opzione A — Migrazione completa a ESM**:
 - `"type": "module"` in package.json
@@ -63,14 +63,6 @@ pnpm test
 # https-proxy-agent@^9.1.0 + socks-proxy-agent@^10.1.0 installati
 # Build OK, test OK, proxy funzionali verificati
 
-# 6. Express 5 (la più delicata)
-pnpm up express@^5.3.0 @types/express@^5.0.6
-# Controlla: app.del()→app.delete(), res.sendfile()→res.sendFile()
-# Controlla: req.acceptsCharset()→req.acceptsCharsets()
-# Controlla: wildcard routing (* → /*)
-# Controlla: async middleware (ora le promise rejectate arrivano agli error handler)
-pnpm test
-
 # 6. Express 5 (dopo proxy agent) ✅ COMPLETATO 2026-10-11
 # Vedi MEMORY/MIGRATION/05_EXPRESS_V5_MIGRATION.md per piano completo
 # express@^5.3.0 + @types/express@^5.0.6 installati
@@ -109,7 +101,7 @@ rg -n "app\.(get|use|all)\(['\"][^'\"]*\*" src
 ### 🔄 ESM/NodeNext
 
 - **Stato**: ✅ Completato — conversione da CJS a ESM terminata, build e Docker funzionanti
-- **File guida**: `MEMORY/MEMORY/04_MIGRAZIONE_ESM.md`
+- **File guida**: `MEMORY/MIGRATION/01_MIGRAZIONE_ESM.md`
 - **Cambiamenti completati**:
   - [x] Aggiungere `"type": "module"` in `package.json`
   - [x] Aggiornare `tsconfig.json`: `module: "NodeNext"`, `moduleResolution: "NodeNext"`
@@ -125,7 +117,7 @@ rg -n "app\.(get|use|all)\(['\"][^'\"]*\*" src
 
 ```dockerfile
 # Dockerfile
-FROM node:26-alpine  # o node:24-slim per ora
+FROM node:26-slim
 ```
 
 ### 🎯 Cosa non aspettarsi
