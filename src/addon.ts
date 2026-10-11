@@ -1643,7 +1643,7 @@ app.get(['/vixsynthetic', '/vixsynthetic.m3u8'], async (req: Request, res: Expre
 // Serve la cartella public.
 app.use(
     '/public',
-    express.static(path.join(__dirname, '..', 'public'))
+    express.static(path.join(__dirname, '..', 'public'), { dotfiles: 'allow' /* Express 5: preserve v4 behavior */ })
 );
 
 // ✅ Middleware semplificato che usa sempre il router globale
