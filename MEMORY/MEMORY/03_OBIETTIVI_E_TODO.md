@@ -127,11 +127,48 @@ FROM node:26-slim
 - **Fai una branch per fase**, non un unico mega-PR
 - La combinazione ESM + node-fetch + Express 5 insieme renderebbe difficile isolare regressioni
 
-### ✅ TypeScript 7 — Posporre
+### 🐌 TypeScript 7 — Posposto (toolchain non pronta)
 
-- TypeScript 7 è la nuova implementazione nativa
-- **typescript-eslint** potrebbe non supportare ancora la API TS 7
-- Aggiornare solo dopo aver verificato compatibilità con la toolchain
+> **Stato**: TypeScript 7.0 rilasciato il 8 luglio 2026 — **posposto per ora**
+> **Motivo**: La JS API di TypeScript 7 non è stabile, strumenti come `typescript-eslint` e `ts-node` non sono compatibili
+
+**Cosa cambia in TS 7:**
+- Compiler riscritto in Go (10x più veloce)
+- `tsc` command invariato, stesso type checking
+- Nuovi default: `strict: true`, `target: es2025`, `module: esnext`, `types: []`
+- Opzioni rimosse: `baseUrl`, `moduleResolution: node`, `target: es5`, `module: amd/umd/system`
+
+**Strumenti NON compatibili con TS 7:**
+| Tool | Status |
+|------|--------|
+| `typescript-eslint` | ❌ Dipende dalla JS API (non disponibile in TS 7) |
+| `ts-node` | ❌ Crasha su startup |
+| Vue/Svelte/Astro SFC | ❌ Template type checking |
+| Angular template | ❌ Template type checking |
+
+**Strumenti che FUNZIONANO:**
+| Tool | Status |
+|------|--------|
+| `tsc` (build) | ✅ Compiler nativo Go |
+| `tsx` | ✅ Funziona (non usa ts-node) |
+| VS Code | ✅ Con estensione TS 7 |
+
+**Soluzione di compatibilità (quando TS 7 sarà pronto):**
+```json
+{
+  "devDependencies": {
+    "@typescript/native": "npm:typescript@^7.0.2",
+    "typescript": "npm:@typescript/typescript6@^6.0.2"
+  }
+}
+```
+- `npx tsc` → TypeScript 7 (build veloce)
+- `npx tsc6` → TypeScript 6 (per typescript-eslint, ecc.)
+
+**Quando procedere:**
+- Dopo rilascio di `typescript-eslint` compatibile con TS 7
+- Dopo che la JS API sarà stabilizzata (probabilmente TS 7.1+)
+- Verificare: https://github.com/typescript-eslint/typescript-eslint/issues
 
 ---
 
