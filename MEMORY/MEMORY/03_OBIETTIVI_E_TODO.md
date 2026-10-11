@@ -14,8 +14,8 @@
 | 3 | ESM/NodeNext | ✅ Completato | Alto |
 | 4 | Proxy agent 7/8 → 9/10 | ✅ Completato (2026-10-11) | Medio |
 | 5 | node-fetch 2 → 3 | ✅ Completato (2026-10-11) | Alto — nessuna modifica codice necessaria |
-| 6 | express 4 → 5 + @types/express 5 | ⬜ Da fare | Alto — vedi 05_EXPRESS_V5_MIGRATION.md |
-| 7 | Node 24 → 26 + @types/node 26 | ⬜ Da fare | Basso/medio |
+| 6 | express 4 → 5 + @types/express 5 | ✅ Completato (2026-10-11) | Alto — vedi 05_EXPRESS_V5_MIGRATION.md |
+| 7 | Node 24 → 26 + @types/node 26 | ✅ Completato (2026-10-11) | Basso/medio |
 | 8 | TypeScript 5.9 → 7 | ⬜ Da fare | Medio/alto |
 
 ### 🔑 Prerequisito: ESM o Dual-Mode
@@ -71,17 +71,16 @@ pnpm up express@^5.3.0 @types/express@^5.0.6
 # Controlla: async middleware (ora le promise rejectate arrivano agli error handler)
 pnpm test
 
-# 6. Express 5 (dopo proxy agent)
+# 6. Express 5 (dopo proxy agent) ✅ COMPLETATO 2026-10-11
 # Vedi MEMORY/MIGRATION/05_EXPRESS_V5_MIGRATION.md per piano completo
-pnpm up express@^5.3.0 @types/express@^5.0.6
-# Eseguire codemod: npx codemod@latest @expressjs/v5-migration-recipe
-# Testare: express.static dotfiles, urlencoded extended, req.body, req.params
-pnpm build && pnpm test
+# express@^5.3.0 + @types/express@^5.0.6 installati
+# Codemod applicato: dotfiles: 'allow' su express.static()
+# Build OK, test OK, server Express 5 attivo
 
-# 7. Node 26 + @types/node 26 (ultimo)
-# Dockerfile: FROM node:26-alpine
-pnpm up @types/node@^26.6.5
-docker compose build --no-cache && docker compose up -d
+# 7. Node 26 + @types/node 26 ✅ COMPLETATO 2026-10-11
+# Dockerfile: FROM node:26-slim
+# @types/node@^26.6.4 installato
+# Build OK, test OK
 ```
 
 ### ⚠️ Express 4 → 5: Breaking Changes Critici
