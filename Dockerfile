@@ -1,5 +1,5 @@
 # Scegli un'immagine Node.js di base
-FROM node:24-slim
+FROM node:26-slim
 
 # Installa python3 e curl (usati nei workflow GitHub)
 USER root
