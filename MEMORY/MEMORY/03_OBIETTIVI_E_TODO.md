@@ -16,7 +16,8 @@
 | 5 | node-fetch 2 → 3 | ✅ Completato (2026-10-11) | Alto — nessuna modifica codice necessaria |
 | 6 | express 4 → 5 + @types/express 5 | ✅ Completato (2026-10-11) | Alto — vedi 05_EXPRESS_V5_MIGRATION.md |
 | 7 | Node 24 → 26 + @types/node 26 | ✅ Completato (2026-10-11) | Basso/medio |
-| 8 | TypeScript 5.9 → 7 | ⬜ Da fare | Medio/alto |
+| 8 | TypeScript 5.9 → 7 | ⬜ Da fare (toolchain non pronta) | Medio/alto |
+| 9 | Sicurezza — shx + overrides | ⬜ Da fare | Basso — vedi 06_SECURITY_MIGRATION.md |
 
 ### 🔑 Prerequisito: ESM o Dual-Mode
 
