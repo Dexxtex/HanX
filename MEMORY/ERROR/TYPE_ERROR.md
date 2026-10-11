@@ -1,11 +1,60 @@
 # ⚠️ Errori Comuni Terminal — PowerShell/Windows
 
 > **Scopo**: Documentare gli errori ricorrenti che posso fare con il terminale su Windows, per evitarli in futuro.
-> **Ultimo aggiornamento**: 11/10/2026
+> **Ultimo aggiornamento**: 11/10/2026 (sessione pnpm audit)
 
 ---
 
 ## 🔴 Errori da Evitare
+
+### 7. Flag pnpm Non Validi
+
+```bash
+# ❌ NON USARE flag inesistenti:
+pnpm audit fix --force
+pnpm install --prefer-different
+
+# Perché fallisce:
+# --force non esiste in pnpm audit (pnpm v12+)
+# --prefer-different non esiste in pnpm install
+# Errore: "error: unexpected argument '--force' found"
+
+# ✅ USARE invece:
+pnpm audit                    # Solo lettura vulnerabilità
+pnpm install                  # Installa/aggiorna dipendenze
+# Per fixare: aggiornare package.json resolutions e rifare pnpm install
+```
+
+### 8. Comandi PowerShell in Bash
+
+```bash
+# ❌ NON USARE comandi PowerShell in bash:
+Get-ChildItem -Path node_modules -Recurse
+Select-Object -First 1
+
+# Perché fallisce:
+# Get-ChildItem, Select-Object, $env: sono PowerShell, non bash
+# Il terminale esegue bash/sh, non PowerShell
+# Errore: "command not found: Get-ChildItem"
+
+# ✅ USARE comandi bash compatibili:
+find node_modules -name "package.json" -type f | head -5
+ls -la node_modules/
+```
+
+### 9. Path con Virgolette in cat
+
+```bash
+# ❌ NON USARE virgolette doppie con grep in cat:
+cat "node_modules/.../package.json" | grep -E '"router"'
+
+# Perché può fallire:
+# Le virgolette doppie intorno ai path con spazi possono causare errori
+# grep -E con pattern complessi può fallire se non escape correttamente
+
+# ✅ USARE path senza spazi o escape corretto:
+cat node_modules/.pnpm/stremio-addon-sdk@*/package.json | grep router
+```
 
 ### 0. Override Dipendenze in pnpm v11+
 
@@ -134,8 +183,10 @@ git add MEMORY/MIGRATION/file.md
 2. **Mai usare `$VAR`, `${VAR}`, `$(...)`** — il terminale non li supporta
 3. **Usare sempre forward slash `/`** nei path
 4. **Usare `ls` invece di `dir`** in bash
-5. **Mantenere i comandi su una riga** quando possibile
-6. **Verificare il working directory** con `pwd` prima di eseguire comandi
+5. **Usare `find` invece di `Get-ChildItem`** (PowerShell vs bash)
+6. **Verificare flag pnpm** — `--force` non esiste in `pnpm audit`
+7. **Mantenere i comandi su una riga** quando possibile
+8. **Verificare il working directory** con `pwd` prima di eseguire comandi
 
 ---
 
@@ -146,6 +197,8 @@ git add MEMORY/MIGRATION/file.md
 - [ ] Path con forward slash `/`?
 - [ ] Working directory corretto?
 - [ ] Comando su una singola riga?
+- [ ] Flag pnpm validi? (no `--force` in audit)
+- [ ] Comandi bash compatibili? (no `Get-ChildItem`, `Select-Object`)
 
 ---
 

@@ -4,7 +4,7 @@
   "description": "HanX - addon Stremio/NUVIO esclusivo per anime (AnimeUnity, AnimeSaturn, AnimeWorld)",
   "main": "dist/addon.js",
   "type": "module",
-  "packageManager": "pnpm@12.10.1",
+  "packageManager": "pnpm@12.11.2",
   "resolutions": {
     "tar": "^7.5.21",
     "@keyv/sqlite": "^6.1.0"
