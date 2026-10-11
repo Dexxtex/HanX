@@ -1,4 +1,6 @@
-import { addonBuilder, getRouter, Manifest, Stream } from "stremio-addon-sdk";
+import stremioAddonSdk from "stremio-addon-sdk";
+const { addonBuilder, getRouter } = stremioAddonSdk;
+import type { Manifest, Stream } from "stremio-addon-sdk";
 import { fileURLToPath } from 'node:url';
 import { dirname } from 'node:path';
 import * as fs from 'fs';
