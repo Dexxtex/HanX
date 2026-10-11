@@ -1,7 +1,7 @@
 # ⚠️ Errori Comuni Terminal — PowerShell/Windows
 
 > **Scopo**: Documentare gli errori ricorrenti che posso fare con il terminale su Windows, per evitarli in futuro.
-> **Ultimo aggiornamento**: 11/10/2026 (sessione pnpm audit)
+> **Ultimo aggiornamento**: 11/10/2026 (Docker build fix + Elfhosted removal)
 
 ---
 
@@ -174,6 +174,27 @@ git add MEMORY\MIGRATION\file.md
 # ✅ USARE forward slash (funziona sia su bash che PowerShell):
 git add MEMORY/MIGRATION/file.md
 ```
+
+---
+
+### 10. Docker Build — pnpm install senza package.json
+
+```bash
+# ❌ NON USARE COPY prima di pnpm install:
+COPY pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile  # FALLISCE: nessun package.json
+
+# Perché fallisce:
+# pnpm richiede package.json per installare le dipendenze
+# Copiare solo il lockfile senza il manifest causa exit code 1
+
+# ✅ USARE:
+COPY package.json pnpm-workspace.yaml ./
+COPY pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
+```
+
+**Lezione**: Il lockfile da solo non basta — pnpm ha bisogno di package.json per risolvere le dipendenze.
 
 ---
 
