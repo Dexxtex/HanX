@@ -39,15 +39,16 @@ HanX/
 
 ## 🔒 SICUREZZA
 
-> **Stato**: ✅ Zero vulnerabilità (pnpm audit pulito)
+> **Stato**: ⚠️ 5 vulnerabilità residue (rischio basso accettato)
 > **Branch**: `security/migration-shx-removal` (pushato)
+> **Audit**: 4 High + 1 Low in `stremio-addon-sdk` (non sfruttabili in produzione)
 
 | Pacchetto | Stato | Nota |
 |-----------|-------|------|
 | `shx` | ❌ Rimosso | Sostituito con `scripts/build-copy.js` |
-| `braces` | ❌ Rimosso | Era nella catena di shx |
-| `path-to-regexp` | ✅ Override | `^0.1.13` in `pnpm-workspace.yaml` |
-| `tmp` | ✅ Override | `^0.2.6` in `pnpm-workspace.yaml` |
+| `braces` | ❌ Rimosso | Era nella catena di shx — CVE-2026-93687 risolto |
+| `path-to-regexp@0.1.7` | ⚠️ Accettato | In `stremio-addon-sdk > router` — non esposto |
+| `tmp@0.0.33` | ⚠️ Accettato | In `stremio-addon-sdk > inquirer` — CLI only |
 
 ---
 

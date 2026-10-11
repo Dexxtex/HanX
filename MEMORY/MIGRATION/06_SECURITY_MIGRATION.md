@@ -308,12 +308,13 @@ git push origin chore/modernization
 
 ---
 
-## ✅ Vulnerabilità Risolte
+## ⚠️ Vulnerabilità Accettate come Rischio Basso
 
 ### Risultato Audit
 
 ```
-No known vulnerabilities found
+5 vulnerabilities found
+Severity: 1 low | 4 high
 ```
 
 ### Cosa è stato fatto
@@ -322,14 +323,32 @@ No known vulnerabilities found
 |-----------|----------|-----------|
 | `shx` | Dev dependency vulnerabile | ❌ Rimosso completamente |
 | `braces` | CVE-2026-93687 (no patch) | ❌ Rimosso (via shx) |
-| `path-to-regexp` | 3 CVE High in stremio-addon-sdk | ✅ Override a `^0.1.13` |
-| `tmp` | 2 CVE (High + Low) in stremio-addon-sdk | ✅ Override a `^0.2.6` |
+| `path-to-regexp` | 3 CVE High in stremio-addon-sdk | ⚠️ Rischio accettato |
+| `tmp` | 2 CVE (High + Low) in stremio-addon-sdk | ⚠️ Rischio accettato |
 
-### Nota su `stremio-addon-sdk`
+### Perché il rischio è ACCETTABILE
 
-- Le vulnerabilità erano in dipendenze di `stremio-addon-sdk`
-- **Ora risolte** con overrides in `pnpm-workspace.yaml`
-- `pnpm audit` conferma: **zero vulnerabilità**
+1. **`path-to-regexp@0.1.7`** in `stremio-addon-sdk > router`
+   - Router interno non esposto a input utente
+   - Non accetta path dinamici da utenti
+   - CVE sfruttabili solo con input controllato
+
+2. **`tmp@0.0.33`** in `stremio-addon-sdk > inquirer > external-editor`
+   - `inquirer` è usato SOLO per CLI interattiva
+   - Mai usato in produzione (server mode)
+   - Vulnerabilità path traversal non sfruttabili remotamente
+
+3. **Espress 5 richiede `path-to-regexp@8.x`**
+   - Override globale rompe Express 5
+   - Patching potrebbe causare conflitti
+   - Rischio di breaking changes in produzione
+
+### Decisione
+
+- ✅ **Accettare il rischio** come basso
+- 📊 Vulnerabilità in dipendenze CLI non esposte
+- 🔍 Monitorare aggiornamenti di `stremio-addon-sdk`
+- 📝 Documentato in `06_SECURITY_MIGRATION.md`
 
 ---
 

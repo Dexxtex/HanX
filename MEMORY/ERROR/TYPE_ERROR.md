@@ -31,6 +31,27 @@ overrides:
 
 **Lezione**: Leggere sempre la documentazione pnpm v11+ prima di configurare le overrides.
 
+---
+
+### 1. Override Globali Rompono Dipendenze Differenti
+
+```bash
+# ❌ NON USARE override globale per path-to-regexp:
+# pnpm-workspace.yaml
+overrides:
+  path-to-regexp: ^0.1.13  # ROMPE express@5 che usa router@2.x > path-to-regexp@8.x
+
+# Perché fallisce:
+# express@5 usa router@2.2.0 che richiede path-to-regexp@^8.0.0
+# Override globale forza 0.1.13 su TUTTE le istanze
+# Errore: TypeError: pathRegexp.match is not a function
+
+# ✅ SOLUZIONE: Accettare rischio o patchare selettivamente
+# Le vulnerabilità in stremio-addon-sdk sono in dipendenze CLI non esposte
+```
+
+**Lezione**: Verificare compatibilità delle override con TUTTE le dipendenze prima di applicarle.
+
 ### 1. Redirezione Output con `2>/dev/null`
 
 ```bash

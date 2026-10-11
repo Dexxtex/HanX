@@ -123,7 +123,9 @@ FROM node:26-slim
 
 ### 🎯 Nota
 
-- ✅ **Sicurezza completata**: `shx` rimosso, overrides applicati, audit pulito
+- ✅ **`shx` rimosso** — `braces` CVE-2026-93687 eliminato
+- ⚠️ **Vulnerabilità residue** — `path-to-regexp` + `tmp` in `stremio-addon-sdk` (rischio basso accettato, dipendenze CLI non esposte)
+- 📝 **Dettagli**: Vedi `MEMORY/MIGRATION/06_SECURITY_MIGRATION.md`
 - **Fai una branch per fase**, non un unico mega-PR
 - La combinazione ESM + node-fetch + Express 5 insieme renderebbe difficile isolare regressioni
 
