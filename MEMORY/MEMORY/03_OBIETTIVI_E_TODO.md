@@ -12,15 +12,15 @@
 | 1 | tough-cookie 4 → 6 | ✅ Completato | Medio |
 | 2 | jsdom 26 → 30 | ✅ Completato | Medio |
 | 3 | ESM/NodeNext | ✅ Completato | Alto |
-| 4 | Proxy agent 7/8 → 9/10 | ⬜ Da fare | Medio |
-| 5 | node-fetch 2 → 3 | ⬜ Da fare | Alto |
-| 6 | express 4 → 5 + @types/express 5 | ⬜ Da fare | Alto |
+| 4 | Proxy agent 7/8 → 9/10 | ✅ Completato (2026-10-11) | Medio |
+| 5 | node-fetch 2 → 3 | ✅ Completato (2026-10-11) | Alto — nessuna modifica codice necessaria |
+| 6 | express 4 → 5 + @types/express 5 | ⬜ Da fare | Alto — vedi 05_EXPRESS_V5_MIGRATION.md |
 | 7 | Node 24 → 26 + @types/node 26 | ⬜ Da fare | Basso/medio |
 | 8 | TypeScript 5.9 → 7 | ⬜ Da fare | Medio/alto |
 
 ### 🔑 Prerequisito: ESM o Dual-Mode
 
-È il prerequisite per node-fetch@3, https-proxy-agent@9 e probabilmente semplifica anche socks-proxy-agent@10.
+È il prerequisite per node-fetch@3 (✅ completato), https-proxy-agent@9 e probabilmente semplifica anche socks-proxy-agent@10.
 
 > 📖 **Documentazione completa**: Vedi `MEMORY/MEMORY/04_MIGRAZIONE_ESM.md` per guide passo-passo, regex, e soluzioni ai problemi comuni.
 
@@ -54,16 +54,14 @@ pnpm test && pnpm build
 # modifica tsconfig.json + package.json
 pnpm build && docker compose build && docker compose up -d
 
-# 4. node-fetch (dopo ESM)
-pnpm up node-fetch@^3.3.2
-# Sostituisci: import fetch from 'node-fetch'
-# Usa: AbortSignal.timeout(ms) al posto di timeout nelle opzioni
+# 4. node-fetch (dopo ESM) ✅ COMPLETATO 2026-10-11
+# node-fetch@^3.3.2 installato — nessun codice da modificare
+# Il progetto usa già globalThis.fetch (Node.js 18+ native)
 pnpm test
 
-# 5. Proxy agent (dopo ESM)
-pnpm up https-proxy-agent@^9.1.0 socks-proxy-agent@^10.1.0
-# Testa: proxy HTTP, SOCKS, autenticazione, redirect, timeout
-pnpm test
+# 5. Proxy agent (dopo ESM) ✅ COMPLETATO 2026-10-11
+# https-proxy-agent@^9.1.0 + socks-proxy-agent@^10.1.0 installati
+# Build OK, test OK, proxy funzionali verificati
 
 # 6. Express 5 (la più delicata)
 pnpm up express@^5.3.0 @types/express@^5.0.6
@@ -72,6 +70,13 @@ pnpm up express@^5.3.0 @types/express@^5.0.6
 # Controlla: wildcard routing (* → /*)
 # Controlla: async middleware (ora le promise rejectate arrivano agli error handler)
 pnpm test
+
+# 6. Express 5 (dopo proxy agent)
+# Vedi MEMORY/MIGRATION/05_EXPRESS_V5_MIGRATION.md per piano completo
+pnpm up express@^5.3.0 @types/express@^5.0.6
+# Eseguire codemod: npx codemod@latest @expressjs/v5-migration-recipe
+# Testare: express.static dotfiles, urlencoded extended, req.body, req.params
+pnpm build && pnpm test
 
 # 7. Node 26 + @types/node 26 (ultimo)
 # Dockerfile: FROM node:26-alpine
