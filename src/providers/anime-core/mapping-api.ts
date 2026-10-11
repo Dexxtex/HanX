@@ -7,10 +7,10 @@
  * Callers extract provider-specific paths from the mapping payload themselves.
  */
 
-import { getCached, setCached, type CacheEntry } from './cache';
-import { fetchResource, type ProviderCaches, type FetchResourceOptions, DEFAULT_FETCH_TIMEOUT } from './fetch-resource';
-import { getMappingApiBase } from './provider-urls';
-import { normalizeRequestedEpisode, normalizeRequestedSeason, parsePositiveInt } from './helpers';
+import { getCached, setCached, type CacheEntry } from './cache.js';
+import { fetchResource, type ProviderCaches, type FetchResourceOptions, DEFAULT_FETCH_TIMEOUT } from './fetch-resource.js';
+import { getMappingApiBase } from './provider-urls.js';
+import { normalizeRequestedEpisode, normalizeRequestedSeason, parsePositiveInt } from './helpers.js';
 
 // ─── TTL constants for mapping cache ────────────────────────
 

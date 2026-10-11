@@ -14,13 +14,16 @@
 // - Gestione cf_clearance e user-agent per host
 // - Error mapping simile (404 -> not_found, 403 -> blocked, 451 -> cloudflare_censor, 429 -> too_many_requests)
 
-// Ambient declarations (niente @types/node)
+import { fileURLToPath } from 'node:url';
+import { dirname } from 'node:path';
+import * as fs from 'fs';
+import * as path from 'path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 declare const process: any;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-declare function require(name: string): any;
-const fs = require('fs');
-const path = require('path');
 
 // Nota: usare funzione per leggere SOLVER_URL runtime (il test imposta env dopo import)
 // Solver disabilitato: ritorna undefined (puoi riattivare ripristinando lettura env)
@@ -145,8 +148,9 @@ async function proxyAttemptSimple(url: URL): Promise<string | null> {
       console.log('[FS][PROXY][TRY]', masked, 'slot', i+1, 'of', order.length);
       const controller = new AbortController();
       const to = setTimeout(()=>controller.abort(), 6000);
+            const { ProxyAgent } = await import('undici');
       // @ts-ignore
-      const agent = new (require('undici').ProxyAgent)(proxy);
+      const agent = new ProxyAgent(proxy);
       // @ts-ignore
       const r: Response = await fetch(url, { headers: { 'User-Agent': hostUA.get(url.host)||DEFAULT_UA,'Accept':'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8','Accept-Language':'en','Priority':'u=0' }, dispatcher: agent, signal: controller.signal });
       clearTimeout(to);

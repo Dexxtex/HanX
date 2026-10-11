@@ -1,30 +1,21 @@
 import { addonBuilder, getRouter, Manifest, Stream } from "stremio-addon-sdk";
-import { buildUnifiedStreamName, providerLabel } from './utils/unifiedNames';
+import { fileURLToPath } from 'node:url';
+import { dirname } from 'node:path';
 import * as fs from 'fs';
-import { landingTemplate } from './landingPage';
 import * as path from 'path';
 import { createHash } from 'crypto';
-import express, { Request, Response, NextFunction } from 'express';
-import { AnimeUnityProvider } from './providers/animeunity-provider';
-import { AnimeWorldProvider } from './providers/animeworld-provider';
-import { KitsuProvider } from './providers/kitsu';
-import { formatMediaFlowUrl } from './utils/mediaflow';
-import fetchMod = require('node-fetch');
-import { fetchPage } from './providers/flaresolverr';
+import express, { Request, Response as ExpressResponse, NextFunction } from 'express';
+import { AnimeUnityProvider } from './providers/animeunity-provider.js';
+import { AnimeWorldProvider } from './providers/animeworld-provider.js';
+import { KitsuProvider } from './providers/kitsu.js';
+import { buildUnifiedStreamName, providerLabel } from './utils/unifiedNames.js';
+import { landingTemplate } from './landingPage.js';
+import { formatMediaFlowUrl } from './utils/mediaflow.js';
+import { fetchPage } from './providers/flaresolverr.js';
+import { AnimeUnityConfig } from './types/animeunity.js';
 
-// --- Lightweight declarations to avoid TS complaints if @types/node non installati ---
-// (Non sostituiscono l'uso consigliato di @types/node, ma evitano errori bloccanti.)
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-declare const __dirname: string;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-declare const process: any;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-declare const Buffer: any;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-declare function require(name: string): any;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-declare const global: any;
-import { AnimeUnityConfig } from './types/animeunity';
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 // ================= TYPES & INTERFACES =================
 
@@ -909,7 +900,7 @@ function createBuilder(initialConfig: AddonConfig = {}) {
 
                     // AnimeSaturn
                     scheduleProviderRun('AnimeSaturn', animeSaturnEnabled, async () => {
-                        const { AnimeSaturnProvider } = await import('./providers/animesaturn-provider');
+                        const { AnimeSaturnProvider } = await import('./providers/animesaturn-provider.js');
                         const animeSaturnProvider = new AnimeSaturnProvider(animeSaturnConfig);
                         if (id.startsWith('kitsu:')) return animeSaturnProvider.handleKitsuRequest(id);
                         if (id.startsWith('mal:')) return animeSaturnProvider.handleMalRequest(id);
@@ -920,7 +911,7 @@ function createBuilder(initialConfig: AddonConfig = {}) {
 
                     // AnimeWorld
                     scheduleProviderRun('AnimeWorld', animeWorldEnabled, async () => {
-                        const { AnimeWorldProvider } = await import('./providers/animeworld-provider');
+                        const { AnimeWorldProvider } = await import('./providers/animeworld-provider.js');
                         const animeWorldProvider = new AnimeWorldProvider(animeWorldConfig);
                         if (id.startsWith('kitsu:')) return animeWorldProvider.handleKitsuRequest(id);
                         if (id.startsWith('mal:')) return animeWorldProvider.handleMalRequest(id);
@@ -1268,7 +1259,7 @@ function isAllowedDestination(url: URL): boolean {
     return ALLOWED_PROXY_HOSTS.has(host);
 }
 
-app.get(['/vixsynthetic', '/vixsynthetic.m3u8'], async (req: Request, res: Response) => {
+app.get(['/vixsynthetic', '/vixsynthetic.m3u8'], async (req: Request, res: ExpressResponse) => {
     try {
         const src = typeof req.query.src === 'string' ? req.query.src : '';
         if (!src) return res.status(400).send('#EXTM3U\n# Missing src');
@@ -1375,18 +1366,16 @@ app.get(['/vixsynthetic', '/vixsynthetic.m3u8'], async (req: Request, res: Respo
         let redirectCount = 0;
         const MAX_REDIRECTS = 5;
         let currentUrl = src;
-        let r: fetchMod.Response;
+        let r: Response;
         let upstreamBase = src;
         let text = '';
         try {
             while (true) {
-                const response = await fetchMod(currentUrl, {
+                const response = await globalThis.fetch(currentUrl, {
                     headers: fetchHeaders as any,
                     signal: controller.signal as any,
                     redirect: 'manual',
-                    size: 2 * 1024 * 1024,
-                    agent: currentAgent,
-                }) as fetchMod.Response;
+                });
 
                 // Se redirect, valida la nuova destinazione PRIMA di seguirla
                 if (response.status >= 300 && response.status < 400 && response.headers.get('location')) {
@@ -1656,7 +1645,7 @@ app.use(
 );
 
 // ✅ Middleware semplificato che usa sempre il router globale
-app.use((req: Request, res: Response, next: NextFunction) => {
+app.use((req: Request, res: ExpressResponse, next: NextFunction) => {
     debugLog(`Incoming request: ${req.method}`);
 
     const configString = req.path.split('/')[1];
@@ -1741,7 +1730,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 console.log(`✅ Addon active on port ${process.env.PORT || 7000}`);
 
 // Landing page per configurazione web
-app.get('/', (req: Request, res: Response) => {
+app.get('/', (req: Request, res: ExpressResponse) => {
     try {
         const manifest = loadCustomConfig();
         const html = landingTemplate(manifest);

@@ -1,8 +1,8 @@
 import * as cheerio from 'cheerio';
-import { KitsuProvider } from './kitsu';
-import { getDomain } from '../utils/domains';
-import { AnimeWorldConfig, AnimeWorldResult, AnimeWorldEpisode, StreamForStremio } from '../types/animeunity';
-import { checkIsAnimeById, applyUniversalAnimeTitleNormalization } from '../utils/animeGate';
+import { KitsuProvider } from './kitsu.js';
+import { getDomain } from '../utils/domains.js';
+import { AnimeWorldConfig, AnimeWorldResult, AnimeWorldEpisode, StreamForStremio } from '../types/animeunity.js';
+import { checkIsAnimeById, applyUniversalAnimeTitleNormalization } from '../utils/animeGate.js';
 import {
   createCaches,
   fetchResource,
@@ -12,7 +12,73 @@ import {
   extractProviderPaths,
   extractTmdbIdFromMappingPayload,
   resolveEpisodeFromMappingPayload,
-} from './anime-core';
+} from './anime-core/index.js';
+
+// --- Type definitions for external API responses ---
+interface HaglundResponseItem {
+  myanimelist?: string;
+}
+
+interface TmdbTitleResponse {
+  name?: string;
+  title?: string;
+}
+
+interface KitsuMappingAttribute {
+  externalSite?: string;
+  externalId?: number;
+}
+
+interface KitsuMappingItem {
+  attributes?: KitsuMappingAttribute;
+}
+
+interface KitsuMappingsResponse {
+  data?: KitsuMappingItem[];
+}
+
+interface KitsuAttributes {
+  titles?: { en?: string; en_jp?: string };
+  title_en?: string;
+  canonicalTitle?: string;
+  slug?: string;
+}
+
+interface KitsuData {
+  attributes?: KitsuAttributes;
+}
+
+interface KitsuAnimeResponse {
+  data?: KitsuData;
+}
+
+interface KitsuIncludedMapping {
+  type?: string;
+  attributes?: {
+    externalSite?: string;
+    externalId?: number;
+  };
+}
+
+interface KitsuAnimeWithMappingsResponse {
+  included?: KitsuIncludedMapping[];
+}
+
+interface JikanTitle {
+  type?: string;
+  title?: string;
+}
+
+interface JikanData {
+  titles?: JikanTitle[];
+  title_english?: string;
+  title?: string;
+  title_japanese?: string;
+}
+
+interface JikanAnimeResponse {
+  data?: JikanData;
+}
 
 // Cache semplice in-memory per titoli tradotti per evitare chiamate ripetute
 const englishTitleCache = new Map<string, string>();
@@ -589,27 +655,27 @@ async function getEnglishTitleFromAnyId(id: string, type: 'imdb'|'tmdb'|'kitsu'|
   if (type === 'imdb') {
     if (!tmdbKey) throw new Error('TMDB_API_KEY non configurata');
     const imdbIdOnly = id.split(':')[0];
-    const { getTmdbIdFromImdbId } = await import('../utils/tmdbResolver');
+    const { getTmdbIdFromImdbId } = await import('../utils/tmdbResolver.js');
     tmdbId = await getTmdbIdFromImdbId(imdbIdOnly, tmdbKey, 'tv');
     if (!tmdbId) throw new Error('TMDB ID non trovato per IMDB: ' + id);
     try {
-      const haglundResp = await (await fetch(`https://arm.haglund.dev/api/v2/themoviedb?id=${tmdbId}&include=kitsu,myanimelist`)).json();
+      const haglundResp = (await (await fetch(`https://arm.haglund.dev/api/v2/themoviedb?id=${tmdbId}&include=kitsu,myanimelist`)).json()) as HaglundResponseItem[];
       malId = haglundResp[0]?.myanimelist?.toString() || null;
     } catch {}
   } else if (type === 'tmdb') {
     tmdbId = id;
-    try { const haglundResp = await (await fetch(`https://arm.haglund.dev/api/v2/themoviedb?id=${tmdbId}&include=kitsu,myanimelist`)).json(); malId = haglundResp[0]?.myanimelist?.toString() || null; } catch {}
+    try { const haglundResp = (await (await fetch(`https://arm.haglund.dev/api/v2/themoviedb?id=${tmdbId}&include=kitsu,myanimelist`)).json()) as HaglundResponseItem[]; malId = haglundResp[0]?.myanimelist?.toString() || null; } catch {}
   } else if (type === 'kitsu') {
     // 1. Prova a ottenere MAL mapping per poter usare Jikan (English ufficiale)
     try {
-      const mappingsResp = await (await fetch(`https://kitsu.io/api/edge/anime/${id}/mappings`)).json();
+      const mappingsResp = (await (await fetch(`https://kitsu.io/api/edge/anime/${id}/mappings`)).json()) as KitsuMappingsResponse;
       const malMapping = mappingsResp.data?.find((m: any) => m.attributes.externalSite === 'myanimelist/anime');
       malId = malMapping?.attributes?.externalId?.toString() || null;
       console.log('[AnimeWorld][UTitle][Kitsu] primary mappings malId=', malId);
     } catch {}
     // 2. Precarica candidato canonico ma NON restituire ancora (lasciamo chance a Jikan)
     try {
-      const animeResp = await (await fetch(`https://kitsu.io/api/edge/anime/${id}`)).json();
+      const animeResp = (await (await fetch(`https://kitsu.io/api/edge/anime/${id}`)).json()) as KitsuAnimeResponse;
       const attr = animeResp.data?.attributes || {};
       const canonical = attr.titles?.en || attr.title_en || attr.titles?.en_jp || attr.canonicalTitle || attr.slug || null;
       if (canonical) fallbackTitle = canonical;
@@ -618,7 +684,7 @@ async function getEnglishTitleFromAnyId(id: string, type: 'imdb'|'tmdb'|'kitsu'|
     // 3. Se ancora nessun malId prova endpoint include=mappings (alcuni casi differiscono)
     if (!malId) {
       try {
-        const incResp = await (await fetch(`https://kitsu.io/api/edge/anime/${id}?include=mappings`)).json();
+        const incResp = (await (await fetch(`https://kitsu.io/api/edge/anime/${id}?include=mappings`)).json()) as KitsuAnimeWithMappingsResponse;
         const included = incResp.included || [];
         for (const inc of included) {
           if (inc.type === 'mappings' && inc.attributes?.externalSite === 'myanimelist/anime') {
@@ -634,7 +700,7 @@ async function getEnglishTitleFromAnyId(id: string, type: 'imdb'|'tmdb'|'kitsu'|
   }
   if (malId) {
     try {
-      const jikanResp = await (await fetch(`https://api.jikan.moe/v4/anime/${malId}`)).json();
+      const jikanResp = (await (await fetch(`https://api.jikan.moe/v4/anime/${malId}`)).json()) as JikanAnimeResponse;
       let englishTitle = '';
       if (jikanResp.data && Array.isArray(jikanResp.data.titles)) {
         const en = jikanResp.data.titles.find((t: any) => t.type === 'English');
@@ -653,10 +719,10 @@ async function getEnglishTitleFromAnyId(id: string, type: 'imdb'|'tmdb'|'kitsu'|
   }
   if (tmdbId && tmdbKey) {
     try {
-      let tmdbResp = await (await fetch(`https://api.themoviedb.org/3/tv/${tmdbId}?api_key=${tmdbKey}`)).json();
+      let tmdbResp = (await (await fetch(`https://api.themoviedb.org/3/tv/${tmdbId}?api_key=${tmdbKey}`)).json()) as TmdbTitleResponse;
       if (tmdbResp && tmdbResp.name) fallbackTitle = tmdbResp.name;
       if (!fallbackTitle) {
-        tmdbResp = await (await fetch(`https://api.themoviedb.org/3/movie/${tmdbId}?api_key=${tmdbKey}`)).json();
+        tmdbResp = (await (await fetch(`https://api.themoviedb.org/3/movie/${tmdbId}?api_key=${tmdbKey}`)).json()) as TmdbTitleResponse;
         if (tmdbResp && tmdbResp.title) fallbackTitle = tmdbResp.title;
       }
       if (fallbackTitle) return fallbackTitle;

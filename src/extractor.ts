@@ -1,15 +1,34 @@
 import { ContentType } from "stremio-addon-sdk";
-import { buildUnifiedStreamName, providerLabel, langToFlag } from './utils/unifiedNames';
+import { buildUnifiedStreamName, providerLabel, langToFlag } from './utils/unifiedNames.js';
 import * as cheerio from "cheerio";
+import { fileURLToPath } from 'node:url';
+import { dirname } from 'node:path';
 import * as fs from 'fs';
 import * as path from 'path';
-import { getTmdbIdFromImdbId, getStaticTmdbMapping, getObject, ensurePlaylistM3u8 } from './utils/tmdbResolver';
+import { getTmdbIdFromImdbId, getStaticTmdbMapping, getObject, ensurePlaylistM3u8 } from './utils/tmdbResolver.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
 const domains = JSON.parse(fs.readFileSync(path.join(__dirname, '../config/domains.json'), 'utf-8'));
 const VIXCLOUD_SITE_ORIGIN = `https://${domains.vixsrc}`; // e.g., "https://vixcloud.co"
 const VIXCLOUD_REQUEST_TITLE_PATH = "/richiedi-un-titolo"; // Path used to fetch site version
 const VIXCLOUD_EMBED_BASE_PATH = "/embed"; // Base path for embed URLs, e.g., /embed/movie/tt12345  
 // --- TMDB Configuration (needed for getMovieTitle/getSeriesTitle helpers) ---
 const TMDB_API_BASE_URL = "https://api.themoviedb.org/3";
+
+// --- Type definitions for API responses ---
+interface TmdbMovieResponse {
+  title?: string;
+}
+
+interface TmdbTvResponse {
+  name?: string;
+}
+
+interface VixSrcApiResponse {
+  src?: string;
+}
 
 export interface ExtractorConfig {
   tmdbApiKey?: string;
@@ -798,7 +817,7 @@ export async function getStreamContent(id: string, type: ContentType, config: Ex
         console.error(`Error fetching movie title for TMDB ID ${tmdbId}: ${response.status}`);
         return null;
       }
-      const data = await response.json();
+      const data = (await response.json()) as TmdbMovieResponse;
       return data.title || null;
     } catch (error) {
       console.error("Error fetching movie title:", error);
@@ -823,7 +842,7 @@ export async function getStreamContent(id: string, type: ContentType, config: Ex
         console.error(`Error fetching series title for TMDB ID ${tmdbId}: ${response.status}`);
         return null;
       }
-      const data = await response.json();
+      const data = (await response.json()) as TmdbTvResponse;
       return data.name || null;
     } catch (error) {
       console.error("Error fetching series title:", error);
@@ -949,7 +968,7 @@ export async function getStreamContent(id: string, type: ContentType, config: Ex
           try {
             const apiRes = await vixsrcFetch(apiUrl);
             if (apiRes.ok) {
-               const apiJson = await apiRes.json();
+               const apiJson = (await apiRes.json()) as VixSrcApiResponse;
                if (apiJson && apiJson.src) {
                  targetFetchUrl = `${siteOrigin}${apiJson.src}`;
                  console.log(`[VixSrc][Direct] Resolved API src: ${apiJson.src}`);

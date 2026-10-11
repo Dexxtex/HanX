@@ -8,18 +8,21 @@
 ### 📋 Panoramica Migrazioni
 
 | # | Migrazione | Stato | Rischio |
-|---|-----------|-------|---------|
+|---|-----------|-------|---------|  
 | 1 | tough-cookie 4 → 6 | ✅ Completato | Medio |
 | 2 | jsdom 26 → 30 | ✅ Completato | Medio |
-| 3 | Proxy agent 7/8 → 9/10 | ⬜ Da fare | Medio |
-| 4 | node-fetch 2 → 3 | ⬜ Da fare | Alto |
-| 5 | express 4 → 5 + @types/express 5 | ⬜ Da fare | Alto |
-| 6 | Node 24 → 26 + @types/node 26 | ⬜ Da fare | Basso/medio |
-| 7 | TypeScript 5.9 → 7 | ⬜ Da fare | Medio/alto |
+| 3 | ESM/NodeNext | 🔴 In corso | Alto |
+| 4 | Proxy agent 7/8 → 9/10 | ⬜ Da fare | Medio |
+| 5 | node-fetch 2 → 3 | ⬜ Da fare | Alto |
+| 6 | express 4 → 5 + @types/express 5 | ⬜ Da fare | Alto |
+| 7 | Node 24 → 26 + @types/node 26 | ⬜ Da fare | Basso/medio |
+| 8 | TypeScript 5.9 → 7 | ⬜ Da fare | Medio/alto |
 
 ### 🔑 Prerequisito: ESM o Dual-Mode
 
 È il prerequisite per node-fetch@3, https-proxy-agent@9 e probabilmente semplifica anche socks-proxy-agent@10.
+
+> 📖 **Documentazione completa**: Vedi `MEMORY/MEMORY/04_MIGRAZIONE_ESM.md` per guide passo-passo, regex, e soluzioni ai problemi comuni.
 
 **Opzione A — Migrazione completa a ESM**:
 - `"type": "module"` in package.json
@@ -98,6 +101,20 @@ rg -n "app\.(get|use|all)\(['\"][^'\"]*\*" src
 
 - **tough-cookie@6.0.2**: ✅ testato, build OK, `@types/tough-cookie` rimosso (tipi integrati)
 - **jsdom@30.1.2**: ✅ testato, build OK
+
+### 🔄 ESM/NodeNext
+
+- **Stato**: 🔴 In corso — conversione da CJS a ESM
+- **File guida**: `MEMORY/MEMORY/04_MIGRAZIONE_ESM.md`
+- **Cambiamenti necessari**:
+  - [ ] Aggiungere `"type": "module"` in `package.json`
+  - [ ] Aggiornare `tsconfig.json`: `module: "NodeNext"`, `moduleResolution: "NodeNext"`
+  - [ ] Convertire tutti i `require()` in `import`
+  - [ ] Aggiungere estensioni `.js` agli import relativi
+  - [ ] Sostituire `__dirname`/`__filename` con `fileURLToPath(import.meta.url)`
+  - [ ] Configurare `tsnode.esm.js` o usare `tsx`
+  - [ ] Importare `dotenv/config.js` come prima riga
+  - [ ] Testare build e avvio
 
 ### 🐳 Node 26 + Docker
 

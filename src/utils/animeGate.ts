@@ -7,7 +7,7 @@
 // Feature flag: ANIME_GATE_ENABLED (default true). Callers can still import and decide.
 
 export type ExternalIdType = 'imdb' | 'tmdb';
-import type { StreamForStremio } from '../types/animeunity';
+import type { StreamForStremio } from '../types/animeunity.js';
 
 export interface AnimeGateResult {
   isAnime: boolean;
@@ -16,9 +16,16 @@ export interface AnimeGateResult {
   reason: string;
 }
 
+// Minimal TMDB response shape (id, name/title)
+interface TmdbBasicResponse {
+  id?: number;
+  name?: string;
+  title?: string;
+}
+
 async function getTmdbIdFromImdb(imdbId: string, tmdbKey: string): Promise<string | null> {
   try {
-    const { getTmdbIdFromImdbId } = await import('./tmdbResolver');
+    const { getTmdbIdFromImdbId } = await import('./tmdbResolver.js');
     const imdbOnly = imdbId.split(':')[0];
     const tmdbId = await getTmdbIdFromImdbId(imdbOnly, tmdbKey, 'tv');
     return tmdbId || null;
@@ -49,7 +56,7 @@ async function fetchTmdbDetailsAny(tmdbId: string, tmdbKey: string, mediaHint?: 
       const url = `https://api.themoviedb.org/3/${kind}/${tmdbId}?api_key=${tmdbKey}`;
       const resp = await fetch(url);
       if (!resp.ok) continue;
-      const json = await resp.json();
+      const json = (await resp.json()) as TmdbBasicResponse;
       if (json && (json.id || json.name || json.title)) return json;
     } catch {}
   }

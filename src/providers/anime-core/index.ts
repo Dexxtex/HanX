@@ -13,7 +13,7 @@ export {
   uniqueStrings,
   createCaches,
   type CacheEntry,
-} from './cache';
+} from './cache.js';
 
 // Fetch with cache + inflight dedup
 export {
@@ -23,14 +23,14 @@ export {
   DEFAULT_FETCH_TIMEOUT,
   type ProviderCaches,
   type FetchResourceOptions,
-} from './fetch-resource';
+} from './fetch-resource.js';
 
 // Provider URL resolution
 export {
   getProviderUrl,
   getMappingApiBase,
   getProviderUrlsFilePath,
-} from './provider-urls';
+} from './provider-urls.js';
 
 // Mapping API interaction
 export {
@@ -45,7 +45,7 @@ export {
   type LookupRequest,
   type ProviderContext,
   type MappingPayload,
-} from './mapping-api';
+} from './mapping-api.js';
 
 // Shared helpers
 export {
@@ -67,4 +67,4 @@ export {
   collectMediaLinksFromEmbedHtml,
   BLOCKED_DOMAINS,
   type NormalizedEpisode,
-} from './helpers';
+} from './helpers.js';

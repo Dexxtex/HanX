@@ -8,9 +8,14 @@
  * - Remote JSON refreshed every 10 s from configurable URL
  */
 
+import { fileURLToPath } from 'node:url';
+import { dirname } from 'node:path';
 import * as fs from 'fs';
 import * as path from 'path';
-import { getDomain } from '../../utils/domains';
+import { getDomain } from '../../utils/domains.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 // ─── Configuration ──────────────────────────────────────────
 

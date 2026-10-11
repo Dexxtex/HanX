@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { KitsuAnime } from '../types/animeunity';
+import { KitsuAnime } from '../types/animeunity.js';
 
 const TIMEOUT = 10000;
 

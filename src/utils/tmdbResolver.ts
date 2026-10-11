@@ -1,8 +1,19 @@
+import { fileURLToPath } from 'node:url';
+import { dirname } from 'node:path';
 import * as fs from 'fs';
 import * as path from 'path';
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
 // --- TMDB Configuration ---
 const TMDB_API_BASE_URL = "https://api.themoviedb.org/3";
+
+// --- Type definitions for TMDB API responses ---
+interface TmdbFindResponse {
+  movie_results?: Array<{ id: number; title: string }>;
+  tv_results?: Array<{ id: number; name: string }>;
+}
 
 // --- IMDB to TMDB Static Mapping ---
 interface ImdbToTmdbMapping {
@@ -124,7 +135,7 @@ export async function getTmdbIdFromImdbId(imdbId: string, tmdbApiKey?: string, p
       console.error(`Failed to fetch TMDB ID for ${imdbId}: ${response.status}`);
       return null;
     }
-    const data = await response.json();
+    const data = (await response.json()) as TmdbFindResponse;
 
     // Priorità intelligente: se preferredType è specificato, cerca prima quel tipo
     const movieResults = data.movie_results || [];

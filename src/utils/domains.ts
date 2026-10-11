@@ -1,5 +1,10 @@
+import { fileURLToPath } from 'node:url';
+import { dirname } from 'node:path';
 import fs from 'fs';
 import path from 'path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 let domainCache: Record<string, string> | null = null;
 let lastLoad = 0; // epoch ms

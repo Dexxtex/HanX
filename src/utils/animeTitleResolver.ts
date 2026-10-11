@@ -110,7 +110,7 @@ const ANIMEMAPPING_BASE = 'https://animemapping.stremio-italia.eu';
 /** Ottieni TMDB ID da IMDB ID usando il resolver dedicato */
 async function getTmdbIdFromImdb(imdbId: string, tmdbKey: string): Promise<string | null> {
   try {
-    const { getTmdbIdFromImdbId } = await import('./tmdbResolver');
+    const { getTmdbIdFromImdbId } = await import('./tmdbResolver.js');
     const imdbOnly = imdbId.split(':')[0];
     const result = await getTmdbIdFromImdbId(imdbOnly, tmdbKey, 'tv');
     return result || null;
