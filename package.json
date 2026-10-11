@@ -7,9 +7,7 @@
   "packageManager": "pnpm@12.10.1",
   "resolutions": {
     "tar": "^7.5.21",
-    "@keyv/sqlite": "^6.1.0",
-    "path-to-regexp": "^0.1.13",
-    "tmp": "^0.2.6"
+    "@keyv/sqlite": "^6.1.0"
   },
   "scripts": {
     "build": "tsc && node scripts/build-copy.js",
