@@ -11,7 +11,7 @@
 |---|-----------|-------|---------|  
 | 1 | tough-cookie 4 → 6 | ✅ Completato | Medio |
 | 2 | jsdom 26 → 30 | ✅ Completato | Medio |
-| 3 | ESM/NodeNext | 🔴 In corso | Alto |
+| 3 | ESM/NodeNext | ✅ Completato | Alto |
 | 4 | Proxy agent 7/8 → 9/10 | ⬜ Da fare | Medio |
 | 5 | node-fetch 2 → 3 | ⬜ Da fare | Alto |
 | 6 | express 4 → 5 + @types/express 5 | ⬜ Da fare | Alto |
@@ -104,17 +104,18 @@ rg -n "app\.(get|use|all)\(['\"][^'\"]*\*" src
 
 ### 🔄 ESM/NodeNext
 
-- **Stato**: 🔴 In corso — conversione da CJS a ESM
+- **Stato**: ✅ Completato — conversione da CJS a ESM terminata, build e Docker funzionanti
 - **File guida**: `MEMORY/MEMORY/04_MIGRAZIONE_ESM.md`
-- **Cambiamenti necessari**:
-  - [ ] Aggiungere `"type": "module"` in `package.json`
-  - [ ] Aggiornare `tsconfig.json`: `module: "NodeNext"`, `moduleResolution: "NodeNext"`
-  - [ ] Convertire tutti i `require()` in `import`
-  - [ ] Aggiungere estensioni `.js` agli import relativi
-  - [ ] Sostituire `__dirname`/`__filename` con `fileURLToPath(import.meta.url)`
-  - [ ] Configurare `tsnode.esm.js` o usare `tsx`
-  - [ ] Importare `dotenv/config.js` come prima riga
-  - [ ] Testare build e avvio
+- **Cambiamenti completati**:
+  - [x] Aggiungere `"type": "module"` in `package.json`
+  - [x] Aggiornare `tsconfig.json`: `module: "NodeNext"`, `moduleResolution: "NodeNext"`
+  - [x] Convertire tutti i `require()` in `import`
+  - [x] Aggiungere estensioni `.js` agli import relativi
+  - [x] Sostituire `__dirname`/`__filename` con `fileURLToPath(import.meta.url)`
+  - [x] Usare `tsx` per lo sviluppo
+  - [x] Importare `dotenv/config.js` come prima riga
+  - [x] Testare build e avvio
+- **Casi limite CJS risolti**: `stremio-addon-sdk` (default import + `import type` per Manifest/Stream), `check_domains.js` → `.cjs`
 
 ### 🐳 Node 26 + Docker
 

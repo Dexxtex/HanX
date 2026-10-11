@@ -18,7 +18,7 @@
 | **Punto 6** | `check_domains.js` → `check_domains.cjs` + script aggiornato | ✅ Completato |
 | **Punto 7** | Tutti gli import relativi con `.js` (statici + dynamic) | ✅ Completato |
 | **Build** | Zero errori ESM (`TS2835`, `ERR_MODULE_NOT_FOUND`) | ✅ Completato |
-| **Build** | 26 errori preesistenti (tipi `unknown`, non legati a ESM) | 🔄 In correzione (35/61 risolti) |
+| **Build** | Zero errori TypeScript totali | ✅ Completato (61/61 risolti) |
 
 ---
 
@@ -609,11 +609,11 @@ pnpm check:domains
 
 ---
 
-## ⚠️ Errori Rimanenti (NON legati a ESM)
+## ✅ Tutti gli Errori Risolti
 
-Dopo la migrazione ESM, restano **26 errori TypeScript preesistenti** (da 61 iniziali, 35 risolti). Non sono causati dalla migrazione:
+Dalla migrazione ESM a oggi, **61 errori TypeScript risolti** (0 rimanenti).
 
-### ✅ Errori Risolti (35)
+### ✅ Errori Risolti — Migrazione ESM (35)
 
 | File | Errori Risolti | Strategia |
 |------|---------------|-----------|
@@ -624,14 +624,19 @@ Dopo la migrazione ESM, restano **26 errori TypeScript preesistenti** (da 61 ini
 | `src/providers/animeworld-provider.ts` | 2 | Interfacce `HaglundResponseItem`, `TmdbTitleResponse` + type assertion |
 | `src/providers/animeunity-provider.ts` | 6 | Interfacce `HaglundResponseItem`, `TmdbTitleResponse` + type assertion |
 
-### 🔄 Errori Rimanenti (26)
+### ✅ Errori Risolti — Tipi `unknown` (26)
 
-| File | Errori | Causa |
-|------|--------|-------|
-| `animeworld-provider.ts` | ~12 | `mappingsResp`, `animeResp`, `incResp`, `jikanResp`, `tmdbResp` senza tipo |
-| `animeunity-provider.ts` | ~14 | `mappingsResp`, `kitsuMain`, `jikanResp`, `tmdbResp` senza tipo |
+| File | Errori | Causa | Soluzione |
+|------|--------|-------|-----------|
+| `animeworld-provider.ts` | 13 | `mappingsResp`, `animeResp`, `incResp`, `jikanResp`, `tmdbResp` senza tipo | 11 interfacce aggiunte (`KitsuMappingsResponse`, `KitsuAnimeResponse`, `JikanAnimeResponse`, ecc.) + type assertion su `.json()` |
+| `animeunity-provider.ts` | 13 | `mappingsResp`, `kitsuMain`, `jikanResp`, `tmdbResp` senza tipo | Stessa strategia: interfacce + type assertion |
 
-**Strategia di correzione**: Definire interfacce TypeScript minimali (solo proprietà usate) con campi opzionali (`?`), poi applicare type assertion `(await response.json()) as InterfaceName` sui risultati `.json()`. Nessun runtime validation — zero overhead.
+### ✅ Errori Risolti — Compatibilità ESM/CJS
+
+| File | Problema | Soluzione |
+|------|----------|-----------|
+| `src/addon.ts` | `stremio-addon-sdk` non esporta named import in ESM | Default import + destructuring + `import type` per Manifest/Stream |
+| `scripts/check_domains.js` | File `.js` interpretato come ESM ma scritto in CJS | Rinominato in `.cjs` |
 
 ---
 
