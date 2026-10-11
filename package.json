@@ -7,10 +7,12 @@
   "packageManager": "pnpm@12.10.1",
   "resolutions": {
     "tar": "^7.5.21",
-    "@keyv/sqlite": "^6.1.0"
+    "@keyv/sqlite": "^6.1.0",
+    "path-to-regexp": "^0.1.13",
+    "tmp": "^0.2.6"
   },
   "scripts": {
-    "build": "tsc && npx shx mkdir -p dist/config && npx shx cp -r config dist/ && npx shx cp src/config/*.json dist/config/",
+    "build": "tsc && node scripts/build-copy.js",
     "start": "node dist/addon.js",
     "dev": "tsx src/addon.ts",
     "check:domains": "node scripts/check_domains.cjs"
@@ -27,6 +29,7 @@
     "got-scraping": "^4.2.2",
     "https-proxy-agent": "^9.1.0",
     "jsdom": "^30.1.2",
+    "mime-types": "^3.0.0",
     "node-fetch": "^3.3.2",
     "randomstring": "^1.3.2",
     "sax": "^1.6.1",
@@ -37,14 +40,12 @@
     "undici": "^8.11.2",
     "unpacker": "^1.0.1",
     "winston": "^3.19.0",
-    "xml2js": "^0.6.2",
-    "mime-types": "^3.0.0"
+    "xml2js": "^0.6.2"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
     "@types/node": "^26.6.4",
     "@types/xml2js": "^0.4.11",
-    "shx": "^0.4.0",
     "ts-node": "^10.9.0",
     "tsx": "^4.19.0",
     "typescript": "^5.0.0"

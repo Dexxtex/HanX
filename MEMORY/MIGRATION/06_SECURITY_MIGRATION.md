@@ -1,8 +1,9 @@
 # 🔒 Migrazione Sicurezza — Rimuovere shx + Mitigare Vulnerabilità Transitive
 
-> **Stato**: Da fare
+> **Stato**: In corso (Fase 1/10 completata)
 > **Rischio**: Basso (dev dependency + overrides)
 > **Data creazione**: 2026-10-11
+> **Branch**: `security/migration-shx-removal`
 
 ---
 
@@ -83,15 +84,15 @@ shx@0.4.0
 
 | # | Fase | Descrizione | Rischio |
 |---|------|-------------|---------|
-| 1 | **Backup** | Snapshot package.json e pnpm-lock.yaml | Basso |
-| 2 | **Script Build** | Creare script JS per sostituire `shx` | Basso |
-| 3 | **Test Build Locale** | Verificare build con nuovi script | Medio |
+| 1 | ✅ **Backup** | Snapshot package.json e pnpm-lock.yaml | Basso |
+| 2 | ✅ **Script Build** | Creare script JS per sostituire `shx` | Basso |
+| 3 | ✅ **Test Build Locale** | Verificare build con nuovi script | Medio |
 | 4 | **Test Docker** | Verificare build in Docker | Medio |
 | 5 | **Rimozione shx** | Rimuovere `shx` da devDependencies | Basso |
-| 6 | **pnpm Overrides** | Aggiungere overrides per `stremio-addon-sdk` | Medio |
-| 7 | **Audit Sicurezza** | Verificare `pnpm audit` — zero vulnerabilità | Alto |
-| 8 | **Build Finale** | `pnpm build` — zero errori | Medio |
-| 9 | **Test Runtime** | Avviare addon e verificare | Alto |
+| 6 | ✅ **pnpm Overrides** | Aggiungere overrides per `stremio-addon-sdk` | Medio |
+| 7 | ✅ **Audit Sicurezza** | Verificare `pnpm audit` — zero vulnerabilità | Alto |
+| 8 | ✅ **Build Finale** | `pnpm build` — zero errori | Medio |
+| 9 | ✅ **Test Runtime** | Avviare addon e verificare | Alto |
 | 10 | **Commit & Push** | Commit dei cambiamenti | Basso |
 
 ---
