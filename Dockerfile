@@ -13,7 +13,8 @@ RUN apk add --no-cache ca-certificates curl
 # Installa pnpm direttamente
 RUN npm install -g pnpm@12.11.2
 
-# Copia solo lockfile per cache ottimale
+# Copia manifest e lockfile per cache ottimale
+COPY package.json pnpm-workspace.yaml ./
 COPY pnpm-lock.yaml ./
 
 # Installa TUTTE le dipendenze (dev incluse necessarie per build)
