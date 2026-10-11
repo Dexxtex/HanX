@@ -1,10 +1,35 @@
 # ⚠️ Errori Comuni Terminal — PowerShell/Windows
 
 > **Scopo**: Documentare gli errori ricorrenti che posso fare con il terminale su Windows, per evitarli in futuro.
+> **Ultimo aggiornamento**: 11/10/2026
 
 ---
 
 ## 🔴 Errori da Evitare
+
+### 0. Override Dipendenze in pnpm v11+
+
+```bash
+# ❌ NON USARE pnpm.overrides in package.json:
+{
+  "pnpm": {
+    "overrides": {
+      "path-to-regexp": "^0.1.13"
+    }
+  }
+}
+
+# Perché fallisce:
+# In pnpm v11+, il campo "pnpm" in package.json è ignorato
+
+# ✅ USARE pnpm-workspace.yaml:
+# pnpm-workspace.yaml
+overrides:
+  path-to-regexp: ^0.1.13
+  tmp: ^0.2.6
+```
+
+**Lezione**: Leggere sempre la documentazione pnpm v11+ prima di configurare le overrides.
 
 ### 1. Redirezione Output con `2>/dev/null`
 

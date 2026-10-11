@@ -86,13 +86,13 @@ shx@0.4.0
 ## 📝 Piano di Esecuzione — 10 Fasi
 
 | # | Fase | Descrizione | Rischio |
-|---|------|-------------|---------|
+|---|------|-------------|---------|  
 | 1 | ✅ **Backup** | Snapshot package.json e pnpm-lock.yaml | Basso |
 | 2 | ✅ **Script Build** | Creare script JS per sostituire `shx` | Basso |
 | 3 | ✅ **Test Build Locale** | Verificare build con nuovi script | Medio |
-| 4 | **Test Docker** | Verificare build in Docker | Medio |
-| 5 | **Rimozione shx** | Rimuovere `shx` da devDependencies | Basso |
-| 6 | ✅ **pnpm Overrides** | Aggiungere overrides per `stremio-addon-sdk` | Medio |
+| 4 | ⏭️ **Test Docker** | Saltato (Docker non disponibile) | Medio |
+| 5 | ✅ **Rimozione shx** | Rimuovere `shx` da devDependencies | Basso |
+| 6 | ✅ **pnpm Overrides** | Override in `pnpm-workspace.yaml` (non package.json) | Medio |
 | 7 | ✅ **Audit Sicurezza** | Verificare `pnpm audit` — zero vulnerabilità | Alto |
 | 8 | ✅ **Build Finale** | `pnpm build` — zero errori | Medio |
 | 9 | ✅ **Test Runtime** | Avviare addon e verificare | Alto |
@@ -232,33 +232,23 @@ pnpm remove shx
 
 ### Fase 6 — pnpm Overrides
 
-Aggiungere a `package.json`:
+**Soluzione corretta per pnpm v11+:**
 
-```json
-{
-  "resolutions": {
-    "path-to-regexp": "^0.1.13",
-    "tmp": "^0.2.6"
-  }
-}
+Aggiungere in `pnpm-workspace.yaml` (NON in package.json):
+
+```yaml
+overrides:
+  path-to-regexp: ^0.1.13
+  tmp: ^0.2.6
 ```
 
-**Oppure con `pnpm.overrides`:**
-
-```json
-{
-  "pnpm": {
-    "overrides": {
-      "path-to-regexp": "^0.1.13",
-      "tmp": "^0.2.6"
-    }
-  }
-}
-```
+> ⚠️ **Nota importante**: In pnpm v11+, il campo `pnpm` in package.json è ignorato. Le overrides devono essere in `pnpm-workspace.yaml`.
 
 **Verifiche:**
 - ✅ `pnpm install` succeeds
-- ✅ `pnpm list path-to-regexp tmp` mostra versioni patchate
+- ✅ `pnpm audit` → "No known vulnerabilities found"
+- ✅ `path-to-regexp@0.1.13` installato
+- ✅ `tmp@0.2.7` installato (>=0.2.6)
 
 ---
 
@@ -318,28 +308,28 @@ git push origin chore/modernization
 
 ---
 
-## ⚠️ Rischio Residuo: `stremio-addon-sdk`
+## ✅ Vulnerabilità Risolte
 
-### Dipendenze vulnerabili non patchabili direttamente
+### Risultato Audit
 
-| Pacchetto | Via | Fix |
-|-----------|-----|-----|
-| `path-to-regexp@0.1.7` | `stremio-addon-sdk` → `router` | `pnpm overrides` ✅ |
-| `tmp@0.0.33` | `stremio-addon-sdk` → `inquirer` | `pnpm overrides` ✅ |
+```
+No known vulnerabilities found
+```
 
-### Se `pnpm overrides` non funziona
+### Cosa è stato fatto
 
-**Opzione A: Fork `stremio-addon-sdk`**
-1. Clonare il repository
-2. Aggiornare `router` e `inquirer` alle versioni sicure
-3. Pubblicare su npm con nome diverso (es. `hanx-addon-sdk`)
-4. Aggiornare `package.json`
+| Pacchetto | Problema | Soluzione |
+|-----------|----------|-----------|
+| `shx` | Dev dependency vulnerabile | ❌ Rimosso completamente |
+| `braces` | CVE-2026-93687 (no patch) | ❌ Rimosso (via shx) |
+| `path-to-regexp` | 3 CVE High in stremio-addon-sdk | ✅ Override a `^0.1.13` |
+| `tmp` | 2 CVE (High + Low) in stremio-addon-sdk | ✅ Override a `^0.2.6` |
 
-**Opzione B: Accettare il rischio**
-- `stremio-addon-sdk` è un SDK per addon Stremio
-- Le vulnerabilità sono in dipendenze di sviluppo (inquirer per CLI)
-- Non esposte in produzione (non c'è input utente diretto)
-- Monitorare aggiornamenti upstream
+### Nota su `stremio-addon-sdk`
+
+- Le vulnerabilità erano in dipendenze di `stremio-addon-sdk`
+- **Ora risolte** con overrides in `pnpm-workspace.yaml`
+- `pnpm audit` conferma: **zero vulnerabilità**
 
 ---
 

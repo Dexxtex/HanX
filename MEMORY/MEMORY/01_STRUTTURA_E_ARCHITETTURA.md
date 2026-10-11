@@ -25,12 +25,29 @@ HanX/
 ├── config/
 │   ├── domains.json
 │   └── provider_urls.json
+├── scripts/
+│   ├── build-copy.js         # Script build nativo (sostituisce shx)
+│   └── check_domains.cjs
 ├── public/                   # Assets statici
 ├── MEMORY/                   # Documentazione progetto
 ├── Dockerfile
 ├── docker-compose.yml
-└── package.json
+├── package.json
+├── pnpm-workspace.yaml       # Override dipendenze vulnerabili
+└── tsconfig.json
 ```
+
+## 🔒 SICUREZZA
+
+> **Stato**: ✅ Zero vulnerabilità (pnpm audit pulito)
+> **Branch**: `security/migration-shx-removal` (pushato)
+
+| Pacchetto | Stato | Nota |
+|-----------|-------|------|
+| `shx` | ❌ Rimosso | Sostituito con `scripts/build-copy.js` |
+| `braces` | ❌ Rimosso | Era nella catena di shx |
+| `path-to-regexp` | ✅ Override | `^0.1.13` in `pnpm-workspace.yaml` |
+| `tmp` | ✅ Override | `^0.2.6` in `pnpm-workspace.yaml` |
 
 ---
 

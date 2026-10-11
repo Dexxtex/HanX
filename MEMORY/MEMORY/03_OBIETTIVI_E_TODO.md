@@ -17,7 +17,7 @@
 | 6 | express 4 → 5 + @types/express 5 | ✅ Completato (2026-10-11) | Alto — vedi 05_EXPRESS_V5_MIGRATION.md |
 | 7 | Node 24 → 26 + @types/node 26 | ✅ Completato (2026-10-11) | Basso/medio |
 | 8 | TypeScript 5.9 → 7 | ⬜ Da fare (toolchain non pronta) | Medio/alto |
-| 9 | Sicurezza — shx + overrides | ⬜ Da fare | Basso — vedi 06_SECURITY_MIGRATION.md |
+| 9 | Sicurezza — shx + overrides | ✅ Completato (2026-10-11) | Basso — vedi 06_SECURITY_MIGRATION.md |
 
 ### 🔑 Prerequisito: ESM o Dual-Mode
 
@@ -121,10 +121,9 @@ rg -n "app\.(get|use|all)\(['\"][^'\"]*\*" src
 FROM node:26-slim
 ```
 
-### 🎯 Cosa non aspettarsi
+### 🎯 Nota
 
-- Questi upgrade **NON risolvono le 6 vulnerabilità residue** (path-to-regexp, tmp, braces) — legate a `stremio-addon-sdk`
-- Express 5 cambierà la catena di routing e **potrebbe** aggiornare `path-to-regexp`, quindi rivaluta l'audit dopo la migrazione
+- ✅ **Sicurezza completata**: `shx` rimosso, overrides applicati, audit pulito
 - **Fai una branch per fase**, non un unico mega-PR
 - La combinazione ESM + node-fetch + Express 5 insieme renderebbe difficile isolare regressioni
 
