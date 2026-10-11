@@ -14,13 +14,11 @@ RUN npm install -g pnpm@12.11.2
 COPY pnpm-lock.yaml ./
 
 # Fetch packages nello store (senza install)
-RUN --mount=type=cache,target=/pnpm/store \
-    pnpm fetch --frozen-lockfile
+RUN pnpm fetch --frozen-lockfile
 
 # Copia package.json e installa solo production deps
 COPY package.json ./
-RUN --mount=type=cache,target=/pnpm/store \
-    pnpm install --frozen-lockfile --prod --offline
+RUN pnpm install --frozen-lockfile --prod --offline
 
 # ============================
 # Stage 2: Builder
