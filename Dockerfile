@@ -1,27 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # ============================
-# Stage 1: Dependencies
-# ============================
-FROM node:26-alpine AS deps
-
-WORKDIR /app
-
-# Installa pnpm direttamente (più robusto di corepack su Alpine)
-RUN npm install -g pnpm@12.11.2
-
-# Copia solo lockfile per cache ottimale
-COPY pnpm-lock.yaml ./
-
-# Fetch packages nello store (senza install)
-RUN pnpm fetch --frozen-lockfile
-
-# Copia package.json e installa solo production deps
-COPY package.json ./
-RUN pnpm install --frozen-lockfile --prod --offline
-
-# ============================
-# Stage 2: Builder
+# Stage 1: Build
 # ============================
 FROM node:26-alpine AS builder
 
@@ -33,9 +13,10 @@ RUN apk add --no-cache ca-certificates curl
 # Installa pnpm direttamente
 RUN npm install -g pnpm@12.11.2
 
-# Copia lockfile e installa TUTTE le dipendenze (incluse dev per build)
+# Copia solo lockfile per cache ottimale
 COPY pnpm-lock.yaml ./
-COPY package.json ./
+
+# Installa TUTTE le dipendenze (dev incluse necessarie per build)
 RUN pnpm install --frozen-lockfile
 
 # Fix per il problema undici su ARM/Raspberry Pi
@@ -51,14 +32,11 @@ RUN pnpm run build
 RUN cp -r public dist/
 
 # ============================
-# Stage 3: Production Runner
+# Stage 2: Production Runner
 # ============================
 FROM node:26-alpine AS runner
 
 WORKDIR /app
-
-# Installa pnpm per eventuali comandi runtime (opzionale, ma utile per debugging)
-RUN npm install -g pnpm@12.11.2
 
 # Imposta ambiente produzione
 ENV NODE_ENV=production \
@@ -68,11 +46,9 @@ ENV NODE_ENV=production \
 RUN addgroup -g 1001 -S nodejs && \
     adduser -u 1001 -S appuser -G nodejs
 
-# Copia solo production dependencies dal stage deps
-COPY --from=deps --chown=appuser:nodejs /app/node_modules ./node_modules
-
-# Copia build artifacts dal stage builder
+# Copia build artifacts
 COPY --from=builder --chown=appuser:nodejs /app/dist ./dist
+COPY --from=builder --chown=appuser:nodejs /app/node_modules ./node_modules
 
 # Switcha a utente non-root
 USER appuser
