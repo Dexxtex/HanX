@@ -7,8 +7,8 @@ FROM node:26-alpine AS deps
 
 WORKDIR /app
 
-# Abilita corepack: legge pnpm@12.11.2 da packageManager
-RUN corepack enable
+# Installa pnpm direttamente (più robusto di corepack su Alpine)
+RUN npm install -g pnpm@12.11.2
 
 # Copia solo lockfile per cache ottimale
 COPY pnpm-lock.yaml ./
@@ -32,8 +32,8 @@ WORKDIR /app
 # Installa certificati e curl (usati nei workflow GitHub)
 RUN apk add --no-cache ca-certificates curl
 
-# Abilita corepack
-RUN corepack enable
+# Installa pnpm direttamente
+RUN npm install -g pnpm@12.11.2
 
 # Copia lockfile e installa TUTTE le dipendenze (incluse dev per build)
 COPY pnpm-lock.yaml ./
@@ -58,6 +58,9 @@ RUN cp -r public dist/
 FROM node:26-alpine AS runner
 
 WORKDIR /app
+
+# Installa pnpm per eventuali comandi runtime (opzionale, ma utile per debugging)
+RUN npm install -g pnpm@12.11.2
 
 # Imposta ambiente produzione
 ENV NODE_ENV=production \
