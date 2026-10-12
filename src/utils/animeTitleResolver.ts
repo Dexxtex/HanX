@@ -6,8 +6,8 @@
  *
  * Strategia per kitsu: IDs:
  *   1. animemapping.stremio.dpdns.org → tmdbId, malId  (in parallelo con Kitsu details)
- *   2. Jikan (via malId) → titolo inglese specifico per stagione
- *   3. Fallback: Kitsu mappings API → malId → Jikan
+ *   2. Tenrai (via malId) → titolo inglese specifico per stagione
+ *   3. Fallback: Kitsu mappings API → malId → Tenrai
  *   4. Fallback: Kitsu canonical title (titles.en / en_jp)
  *   5. Fallback: TMDB title (ultima risorsa)
  *
@@ -15,12 +15,14 @@
  *   1. (solo imdb) getTmdbIdFromImdbId → tmdbId
  *   2. animemapping by-imdb/by-tmdb?season=N → kitsuId, malId, titleHints, episodeMode
  *   3. Se episodeMode === "absolute": TMDB seasons → calculateAbsoluteEpisode
- *   4. Jikan → englishTitle (fallback: titleHints[0])
- *   5. Fallback: Haglund → malId → Jikan
+ *   4. Tenrai → englishTitle (fallback: titleHints[0])
+ *   5. Fallback: Haglund → malId → Tenrai
  *   6. Fallback: TMDB title
  *
  * Cache: 6 ore in-memory (il titolo non cambia)
  */
+
+import { getMalAnimeMetadata, getPreferredMalTitle } from '../providers/anime-core/tenrai-metadata.js';
 
 export interface AnimeResolvedTitle {
   englishTitle: string;
@@ -82,15 +84,13 @@ async function fetchJson(url: string, timeoutMs = 8000): Promise<any | null> {
 }
 
 // ─── Title helpers ──────────────────────────────────────────────────
-async function getTitleFromJikan(malId: string): Promise<string | null> {
-  const data = await fetchJson(`https://api.jikan.moe/v4/anime/${malId}`);
-  if (!data?.data) return null;
-  // Preferisci titolo inglese esplicito (più specifico per stagione)
-  if (Array.isArray(data.data.titles)) {
-    const en = data.data.titles.find((t: any) => t.type === 'English');
-    if (en?.title) return en.title;
+async function getTitleFromTenrai(malId: string): Promise<string | null> {
+  try {
+    const metadata = await getMalAnimeMetadata(malId);
+    return getPreferredMalTitle(metadata);
+  } catch {
+    return null;
   }
-  return data.data.title_english || data.data.title || data.data.title_japanese || null;
 }
 
 async function getTitleFromTmdb(tmdbId: string, tmdbKey: string): Promise<string | null> {
@@ -292,14 +292,14 @@ async function resolveFromKitsu(fullId: string, tmdbKey: string): Promise<AnimeR
     kitsuCanonical = attr.titles?.en || attr.titles?.en_jp || attr.canonicalTitle || null;
   }
 
-  // ── Step 1: Titolo da Jikan (preferito — specifico per stagione) ──
+  // ── Step 1: Titolo da Tenrai (preferito — specifico per stagione) ──
   if (malId) {
-    englishTitle = await getTitleFromJikan(malId);
+    englishTitle = await getTitleFromTenrai(malId);
     if (englishTitle) {
-      console.log(`[AnimeTitleResolver] Jikan title: "${englishTitle}"`);
+      console.log(`[AnimeTitleResolver] Tenrai title: "${englishTitle}"`);
       return { englishTitle, malId, tmdbId, imdbId, kitsuId, startDate, titleHints, episodeMode, mappedSeasons };
     }
-    console.log(`[AnimeTitleResolver] Jikan fallito per malId=${malId}`);
+    console.log(`[AnimeTitleResolver] Tenrai fallito per malId=${malId}`);
   }
 
   // ── Step 2: Se mapping API non aveva malId, prova Kitsu mappings ──
@@ -310,7 +310,7 @@ async function resolveFromKitsu(fullId: string, tmdbKey: string): Promise<AnimeR
       malId = malMapping?.attributes?.externalId?.toString() || undefined;
       if (malId) {
         console.log(`[AnimeTitleResolver] Kitsu mappings: malId=${malId}`);
-        englishTitle = await getTitleFromJikan(malId);
+        englishTitle = await getTitleFromTenrai(malId);
         if (englishTitle) {
           return { englishTitle, malId, tmdbId, imdbId, kitsuId, startDate, titleHints, episodeMode, mappedSeasons };
         }
@@ -339,7 +339,7 @@ async function resolveFromKitsu(fullId: string, tmdbKey: string): Promise<AnimeR
 // ─── MAL resolver ───────────────────────────────────────────────────
 async function resolveFromMal(fullId: string): Promise<AnimeResolvedTitle | null> {
   const malId = fullId.split(':')[1];
-  const englishTitle = await getTitleFromJikan(malId);
+  const englishTitle = await getTitleFromTenrai(malId);
   if (!englishTitle) return null;
   return { englishTitle, malId };
 }
@@ -390,11 +390,11 @@ async function resolveFromImdb(
     }
   }
 
-  // ── Step 3: Titolo da Jikan (preferito) ──
+  // ── Step 3: Titolo da Tenrai (preferito) ──
   if (malId) {
-    englishTitle = await getTitleFromJikan(malId);
+    englishTitle = await getTitleFromTenrai(malId);
     if (englishTitle) {
-      console.log(`[AnimeTitleResolver] IMDB→Jikan title: "${englishTitle}"`);
+      console.log(`[AnimeTitleResolver] IMDB→Tenrai title: "${englishTitle}"`);
     }
   }
 
@@ -410,9 +410,9 @@ async function resolveFromImdb(
     if (haglund?.mal) {
       malId = haglund.mal;
       kitsuId = kitsuId || haglund.kitsu;
-      englishTitle = await getTitleFromJikan(malId);
+      englishTitle = await getTitleFromTenrai(malId);
       if (englishTitle) {
-        console.log(`[AnimeTitleResolver] IMDB→Haglund→Jikan fallback: "${englishTitle}"`);
+        console.log(`[AnimeTitleResolver] IMDB→Haglund→Tenrai fallback: "${englishTitle}"`);
       }
     }
   }
@@ -484,11 +484,11 @@ async function resolveFromTmdb(
     }
   }
 
-  // ── Step 3: Jikan ──
+  // ── Step 3: Tenrai ──
   if (malId) {
-    englishTitle = await getTitleFromJikan(malId);
+    englishTitle = await getTitleFromTenrai(malId);
     if (englishTitle) {
-      console.log(`[AnimeTitleResolver] TMDB→Jikan title: "${englishTitle}"`);
+      console.log(`[AnimeTitleResolver] TMDB→Tenrai title: "${englishTitle}"`);
     }
   }
 
@@ -504,9 +504,9 @@ async function resolveFromTmdb(
     if (haglund?.mal) {
       malId = haglund.mal;
       kitsuId = kitsuId || haglund.kitsu;
-      englishTitle = await getTitleFromJikan(malId);
+      englishTitle = await getTitleFromTenrai(malId);
       if (englishTitle) {
-        console.log(`[AnimeTitleResolver] TMDB→Haglund→Jikan fallback: "${englishTitle}"`);
+        console.log(`[AnimeTitleResolver] TMDB→Haglund→Tenrai fallback: "${englishTitle}"`);
       }
     }
   }

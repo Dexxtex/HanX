@@ -11,8 +11,9 @@
   },
   "scripts": {
     "build": "tsc && node scripts/build-copy.js",
-    "start": "node dist/addon.js",
-    "dev": "tsx src/addon.ts",
+    "start": "node --env-file-if-exists=.env dist/addon.js",
+    "dev": "node --env-file-if-exists=.env --import tsx src/addon.ts",
+    "test": "pnpm run build && node --test tests/tenrai-metadata.test.mjs",
     "check:domains": "node scripts/check_domains.cjs"
   },
   "dependencies": {

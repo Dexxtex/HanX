@@ -21,6 +21,8 @@ import {
   normalizePlayableMediaUrl,
   normalizeHostLabel,
   BLOCKED_DOMAINS,
+  getMalAnimeMetadata,
+  getPreferredMalTitle,
 } from './anime-core/index.js';
 
 // --- Type definitions for external API responses ---
@@ -51,22 +53,6 @@ interface KitsuData {
 
 interface KitsuMainResponse {
   data?: KitsuData;
-}
-
-interface JikanTitle {
-  type?: string;
-  title?: string;
-}
-
-interface JikanData {
-  titles?: JikanTitle[];
-  title_english?: string;
-  title?: string;
-  title_japanese?: string;
-}
-
-interface JikanResponse {
-  data?: JikanData;
 }
 
 interface TmdbTitleResponse {
@@ -600,8 +586,10 @@ async function asSearch(query: string): Promise<AnimeSaturnResult[]> {
   const q = encodeURIComponent(qRaw);
   if (!q) return [];
 
+  // Nuova API JSON: GET /api/search?q=...
+  // Sostituisce la vecchia /index.php?search=1&key=... (404 dopo il restyling del sito).
   try {
-    const apiUrl = `${getSaturnBaseUrl()}/index.php?search=1&key=${q}`;
+    const apiUrl = `${getSaturnBaseUrl()}/api/search?q=${q}`;
     const apiData = await fetchResource(apiUrl, asCaches, {
       ttlMs: 2 * 60 * 1000,
       cacheKey: `as-search-api:${qRaw.toLowerCase()}`,
@@ -616,24 +604,33 @@ async function asSearch(query: string): Promise<AnimeSaturnResult[]> {
 
     const outFromApi: AnimeSaturnResult[] = [];
     const seen = new Set<string>();
-    if (Array.isArray(apiData)) {
-      for (const item of apiData) {
-        const link = String(item?.link || '').trim();
-        const path = normalizeAnimeSaturnPath(`/anime/${link}`);
-        if (!path || seen.has(path)) continue;
-        seen.add(path);
-        const title = String(item?.name || link || path).replace(/\s+/g, ' ').trim();
-        outFromApi.push({ title, url: buildSaturnUrl(path) || `${getSaturnBaseUrl()}${path}` });
-      }
+    // Formato nuovo: { query, results: [{ title, url }] } — formato vecchio: [{ name, link }]
+    const records: any[] = Array.isArray(apiData)
+      ? apiData
+      : Array.isArray((apiData as any)?.results)
+        ? (apiData as any).results
+        : [];
+    for (const item of records) {
+      const rawUrl = String(item?.url || item?.link || '').trim();
+      if (!rawUrl) continue;
+      const path = normalizeAnimeSaturnPath(
+        rawUrl.startsWith('/') || /^https?:\/\//i.test(rawUrl) ? rawUrl : `/anime/${rawUrl}`
+      );
+      if (!path || seen.has(path)) continue;
+      seen.add(path);
+      const title = String(item?.title || item?.name || path).replace(/\s+/g, ' ').trim();
+      outFromApi.push({ title, url: buildSaturnUrl(path) || `${getSaturnBaseUrl()}${path}` });
     }
+    console.log(`[AnimeSaturn][Search] API /api/search?q="${qRaw}" -> ${outFromApi.length} risultati`);
     if (outFromApi.length) return outFromApi;
   } catch (err: any) {
-    console.warn('[AnimeSaturn][Search] live-search API failed, fallback HTML:', err?.message || err);
+    console.warn('[AnimeSaturn][Search] API /api/search fallita, fallback HTML:', err?.message || err);
   }
 
+  // Fallback HTML: sito nuovo -> /filter?key=... ; sito vecchio -> /?search=...
   const urls = [
+    `${getSaturnBaseUrl()}/filter?key=${q}`,
     `${getSaturnBaseUrl()}/?search=${q}`,
-    `${getSaturnBaseUrl()}/anime?search=${q}`,
   ];
   const out: AnimeSaturnResult[] = [];
   const seen = new Set<string>();
@@ -646,16 +643,26 @@ async function asSearch(query: string): Promise<AnimeSaturnResult[]> {
         timeoutMs: AS_FETCH_TIMEOUT,
         headers: buildSaturnHeaders(`${getSaturnBaseUrl()}/`),
       });
-    } catch {
+    } catch (err: any) {
+      console.warn(`[AnimeSaturn][Search] scraping HTML fallito per ${url}:`, err?.message || err);
       continue;
     }
     const $ = cheerio.load(String(html || ''));
     $('a[href*="/anime/"]').each((_, el) => {
-      const href = String($(el).attr('href') || '').trim();
+      const $el = $(el);
+      const href = String($el.attr('href') || '').trim();
       const path = normalizeAnimeSaturnPath(href);
       if (!path || seen.has(path)) return;
       seen.add(path);
-      const title = String($(el).attr('title') || $(el).text() || path).replace(/\s+/g, ' ').trim();
+      // Markup nuovo: titolo in <h3 class="ac__title"> o nell'alt della locandina;
+      // markup vecchio: attributo title o testo dell'anchor.
+      const title = (
+        $el.find('h3.ac__title').first().text().trim() ||
+        String($el.find('img[alt]').first().attr('alt') || '').trim() ||
+        String($el.attr('title') || '').trim() ||
+        $el.text().trim() ||
+        path
+      ).replace(/\s+/g, ' ').trim();
       if (title && qRaw) {
         const t = normalizeUnicodeToAscii(title.toLowerCase());
         const qn = normalizeUnicodeToAscii(qRaw.toLowerCase());
@@ -663,6 +670,7 @@ async function asSearch(query: string): Promise<AnimeSaturnResult[]> {
       }
       out.push({ title, url: buildSaturnUrl(path) || `${getSaturnBaseUrl()}${path}` });
     });
+    console.log(`[AnimeSaturn][Search] scraping HTML ${url} -> ${out.length} risultati cumulativi`);
     if (out.length) break;
   }
   return out;
@@ -713,21 +721,14 @@ async function getEnglishTitleFromAnyId(id: string, type: 'imdb'|'tmdb'|'kitsu'|
   }
   if (malId) {
     try {
-      const jikanResp = (await (await fetch(`https://api.jikan.moe/v4/anime/${malId}`)).json()) as JikanResponse;
-      let englishTitle = '';
-      if (jikanResp.data && Array.isArray(jikanResp.data.titles)) {
-        const en = jikanResp.data.titles.find((t: any) => t.type === 'English');
-        englishTitle = en?.title || '';
-      }
-      if (!englishTitle && jikanResp.data) {
-        englishTitle = jikanResp.data.title_english || jikanResp.data.title || jikanResp.data.title_japanese || '';
-      }
+      const metadata = await getMalAnimeMetadata(malId);
+      const englishTitle = getPreferredMalTitle(metadata) || '';
       if (englishTitle) {
-        console.log(`[UniversalTitle] Titolo inglese trovato da Jikan: ${englishTitle}`);
+        console.log(`[UniversalTitle] Titolo inglese trovato da Tenrai (${metadata?.cacheStatus || 'cache'}).`);
         return englishTitle;
       }
     } catch (err) {
-      console.warn('[UniversalTitle] Errore Jikan, provo fallback TMDB:', err);
+      console.warn('[UniversalTitle] Errore Tenrai, provo fallback TMDB:', err);
     }
   }
   if (tmdbId && tmdbKey) {

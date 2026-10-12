@@ -20,17 +20,11 @@ COPY pnpm-lock.yaml ./
 # Installa TUTTE le dipendenze (dev incluse necessarie per build)
 RUN pnpm install --frozen-lockfile
 
-# Fix per il problema undici su ARM/Raspberry Pi
-RUN pnpm add undici@6.19.8
-
 # Copia il resto del progetto
 COPY . .
 
 # Esegue il build
 RUN pnpm run build
-
-# Copia public/ dentro dist/ (build-copy.js non lo fa)
-RUN cp -r public dist/
 
 # ============================
 # Stage 2: Production Runner
@@ -47,9 +41,15 @@ ENV NODE_ENV=production \
 RUN addgroup -g 1001 -S nodejs && \
     adduser -u 1001 -S appuser -G nodejs
 
+# Directory for persistent SQLite metadata cache (mounted as a named volume)
+RUN mkdir -p /app/data && chown appuser:nodejs /app/data && chmod 700 /app/data
+
 # Copia build artifacts
 COPY --from=builder --chown=appuser:nodejs /app/dist ./dist
 COPY --from=builder --chown=appuser:nodejs /app/node_modules ./node_modules
+COPY --from=builder --chown=appuser:nodejs /app/addon-config.json ./addon-config.json
+COPY --from=builder --chown=appuser:nodejs /app/config ./config
+COPY --from=builder --chown=appuser:nodejs /app/public ./public
 
 # Switcha a utente non-root
 USER appuser

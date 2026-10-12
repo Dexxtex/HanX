@@ -1,1273 +1,404 @@
-# 🏗️ Architettura Completa — HanX Addon
+# HanX — Architettura Runtime
 
-> **Versione documento**: 1.0  
-> **Ultimo aggiornamento**: 2026-10-11  
-> **Addon**: HanX v12.4.23 — `org.stremio.hanx`
-
----
-
-## 📋 Indice
-
-1. [Panoramica](#1-panoramica)
-2. [Flusso Richiesta Completo](#2-flusso-richiesta-completo)
-3. [Struttura del Progetto](#3-struttura-del-progetto)
-4. [Entrypoint & Server](#4-entrypoint--server)
-5. [Manifest & Configurazione](#5-manifest--configurazione)
-6. [ID System](#6-id-system)
-7. [Provider Anime](#7-provider-anime)
-8. [Anime-Core (Infrastruttura Condivisa)](#8-anime-core-infrastruttura-condivisa)
-9. [Estrazione Stream](#9-estrazione-stream)
-10. [Normalizzazione Titoli](#10-normalizzazione-titoli)
-11. [Config Parsing System](#11-config-parsing-system)
-12. [Provider Cache System](#12-provider-cache-system)
-13. [Streaming Backend](#13-streaming-backend)
-14. [VixSrc Proxy Fallback System](#14-vixsrc-proxy-fallback-system)
-15. [VixSynthetic Endpoint (HLS Master Playlist Rewriter)](#15-vixsynthetic-endpoint-hls-master-playlist-rewriter)
-16. [MediaFlow Proxy](#16-mediaflow-proxy)
-17. [VixCloud / Streamtape Extraction](#17-vixcloud--streamtape-extraction)
-18. [Unificazione Stream](#18-unificazione-stream)
-19. [Caching](#19-caching)
-20. [AnimeGate (Rilevamento Anime)](#20-animegate-rilevamento-anime)
-21. [Title Resolver (Kitsu / MAL / TMDB / IMDB)](#21-title-resolver)
-22. [Landing Page & UI](#22-landing-page--ui)
-23. [DNS Safety & Security](#23-dns-safety--security)
-20. [Workflow GitHub Automations](#20-workflow-github-automations)
-21. [Docker & Deployment](#21-docker--deployment)
+> **Ambito:** comportamento del processo addon e dei percorsi effettivamente raggiunti dalle richieste runtime. I moduli presenti nel repository ma non collegati al flusso normale degli stream sono elencati separatamente.
+>
+> **Verificato il:** 2026-10-12
+> **Versione package:** `1.0.0` (`package.json`)
+> **ID addon:** `org.stremio.hanx`
 
 ---
 
-## 1. Panoramica
+## Indice
 
-**HanX** è un addon per [Stremio](https://stremio.com) e [NUVIO](https://nuvio.app) dedicato esclusivamente agli anime. Aggrega link di streaming da tre fonti italiane:
-
-| Provider | Sito | Protocollo |
-|----------|------|------------|
-| **AnimeUnity** | animeunity.so | Scraper HTML + Mapping API + VixCloud |
-| **AnimeSaturn** | animesaturn.cx | Scraper HTML + Kitsu fallback |
-| **AnimeWorld** | animeworld.so | Scraper HTML + Mapping API |
-
-### Cosa fa l'addon:
-1. Riceve un ID (MAL, Kitsu, IMDB, TMDB) da Stremio
-2. Risolve il titolo dell'anime usando API esterne (Jikan, Kitsu, TMDB, Haglund)
-3. Cerca lo stream su **tutti e tre i provider** in parallelo
-4. Estrae i link video dai player embedding (VixCloud, Mixdrop, Streamtape, ecc.)
-5. Offre 3 modalità di streaming: **Direct**, **Proxy (EasyProxy)**, **MediaFlow Proxy**
-6. Unifica e ordina tutti gli stream in una risposta Stremio-compliant
+1. [Sintesi](#1-sintesi)
+2. [Avvio e server HTTP](#2-avvio-e-server-http)
+3. [Manifest e configurazione addon](#3-manifest-e-configurazione-addon)
+4. [Richiesta stream e configurazione effettiva](#4-richiesta-stream-e-configurazione-effettiva)
+5. [Provider e risoluzione dei titoli](#5-provider-e-risoluzione-dei-titoli)
+6. [Composizione, ordinamento e cache degli stream](#6-composizione-ordinamento-e-cache-degli-stream)
+7. [Infrastruttura condivisa usata dai provider](#7-infrastruttura-condivisa-usata-dai-provider)
+8. [Endpoint Express aggiuntivi](#8-endpoint-express-aggiuntivi)
+9. [Mappa dei moduli runtime](#9-mappa-dei-moduli-runtime)
+10. [Build e deployment](#10-build-e-deployment)
+11. [Variabili d’ambiente principali](#11-variabili-dambiente-principali)
+12. [Codice presente ma non integrato nel flusso stream](#12-codice-presente-ma-non-integrato-nel-flusso-stream)
 
 ---
 
-## 2. Flusso Richiesta Completo
+## 1. Sintesi
 
-```
-Stremio/NUVIO
+HanX è un addon Stremio dedicato alla ricerca di stream anime sui provider AnimeUnity, AnimeSaturn e AnimeWorld. Il server è implementato in `src/addon.ts` con Express e `stremio-addon-sdk`.
+
+Il percorso runtime principale è:
+
+```text
+Client Stremio
     │
-    ▼ /stream/anime/{id}.json
-    │
-    ├─> ID Parsing (ttXXX, mal:XXX, kitsu:XXX, tmdb:XXX)
-    │
-    ├─> Config Resolution (requestConfig > env vars > defaults)
-    │
-    ├─> Provider Cache Check (SHA-256 key)
-    │     └─ HIT → Ritorna stream cached
-    │     └─ MISS → Continua
-    │
-    ├─> AnimeGate (è un anime? → sì/no)
-    │     └─ Se no → fallback TMDB generico
-    │
-    ├─> Title Resolution
-    │     ├─ kitsu:XXX → Kitsu API → titolo + MAL ID
-    │     ├─ mal:XXX  → Jikan API → titolo inglese
-    │     ├─ ttXXX    → TMDB Find (IMDB→TMDB) → titolo + TMDB ID
-    │     └─ tmdb:XXX → TMDB API → titolo
-    │
-    ├─> Fan-out Providers (parallelo, timeout 30s ciascuno)
-    │     ├─ AnimeUnity Provider
-    │     ├─ AnimeSaturn Provider
-    │     └─ AnimeWorld Provider
-    │           │
-    │           ▼ Per ogni provider:
-    │           ├─ handleTitleRequest()
-    │           │   ├─ Universal Title Normalization
-    │           │   ├─ Provider Title Normalization
-    │           │   ├─ Search on provider site
-    │           │   ├─ Filter results
-    │           │   └─ Extract episodes
-    │           │
-    │           └─ extractStreamsFromAnimePath()
-    │               ├─ Parse episode page
-    │               ├─ Resolve video URL
-    │               └─ Build stream objects
-    │
-    ├─> Post-Processing
-    │     ├─ unifyStreams() — formatta titoli multilinea
-    │     ├─ sortStreamsByPriority() — ordinamento alfabetico
-    │     └─ Provider ordering — AnimeUnity > AnimeSaturn > AnimeWorld
-    │
-    ├─> Provider Cache Write
-    │
-    └─> Response { streams: [...] }
+    ├── manifest /stream/... ──> Express ──> router Stremio SDK
+    │                                      │
+    │                                      ▼
+    │                                stream handler
+    │                                      │
+    │             parse ID + config + cache │
+    │                                      ▼
+    │                       AnimeUnity ─┐
+    │                       AnimeSaturn ├─ fan-out parallelo
+    │                       AnimeWorld ─┘
+    │                                      │
+    │                     mapping o ricerca titolo
+    │                                      │
+    │                        scraping pagine/episodi
+    │                                      │
+    │                     raccolta e formattazione stream
+    │                                      │
+    └──────────────────────── { streams: [...] }
 ```
 
----
-
-## 3. Struttura del Progetto
-
-```
-HanX/
-├── src/
-│   ├── addon.ts                  # Entry point principale (500+ righe)
-│   ├── extractor.ts              # VixCloud/stream extraction (900+ righe)
-│   ├── landingPage.ts            # UI web di configurazione
-│   ├── stremio-addon-sdk.d.ts    # Type definitions SDK
-│   │
-│   ├── config/
-│   │   └── imdbToTmdb.json       # Mapping statico IMDB→TMDB
-│   │
-│   ├── providers/
-│   │   ├── anime-core/           # Infrastruttura condivisa
-│   │   │   ├── index.ts          # Barrel export
-│   │   │   ├── cache.ts          # TTL cache + inflight dedup
-│   │   │   ├── fetch-resource.ts # HTTP fetch con cache
-│   │   │   ├── helpers.ts        # Sanitize, inferSourceTag, parseEpisode
-│   │   │   ├── mapping-api.ts    # Mapping API interaction
-│   │   │   └── provider-urls.ts  # Dynamic URL resolution
-│   │   │
-│   │   ├── animesaturn-provider.ts  # ~1400 righe
-│   │   ├── animeunity-provider.ts   # ~1300 righe
-│   │   ├── animeworld-provider.ts   # ~1500 righe
-│   │   ├── kitsu.ts                 # Wrapper API Kitsu
-│   │   └── flaresolverr.ts          # Cloudflare bypass
-│   │
-│   ├── types/
-│   │   ├── animeunity.ts          # Interfacce TypeScript
-│   │   └── sax.d.ts               # SAX parser types
-│   │
-│   └── utils/
-│       ├── animeGate.ts           # Rilevamento anime (TMDB/Jikan)
-│       ├── animeTitleResolver.ts  # Risoluzione titoli da ID esterni
-│       ├── config.ts
-│       ├── domains.ts             # Dynamic domain resolution
-│       ├── mediaflow.ts           # MediaFlow URL formatting
-│       ├── packed.ts
-│       ├── tmdbResolver.ts        # IMDB→TMDB resolution
-│       └── unifiedNames.ts        # Stream name formatting
-│
-├── config/
-│   ├── domains.json               # Domini provider (aggiornabili)
-│   ├── provider_urls.json         # URL provider (aggiornabili)
-│   └── addon-config.json          # Config overrides
-│
-├── scripts/                       # Build e automazioni
-├── public/                        # Assets statici
-├── Dockerfile
-├── docker-compose.yml
-├── package.json
-├── pnpm-workspace.yaml
-└── tsconfig.json
-```
+Il manifest dichiara i tipi `movie`, `series` e `anime`, ma non dichiara cataloghi (`catalogs: []`). Il meta handler attualmente restituisce `{ meta: null }`. La funzione principale dell’addon è quindi l’handler `stream`.
 
 ---
 
-## 4. Entrypoint & Server
+## 2. Avvio e server HTTP
 
-### `src/addon.ts` — Il Cuore
+### Entry point
 
-**Responsabilità:**
-- Definizione del manifest Stremio
-- Creazione del builder SDK
-- Handler per risorse `stream` e `meta`
-- Parsing della configurazione
-- Fan-out dei provider
-- Unificazione e ordinamento degli stream
-- Server Express per endpoint custom e landing page
+`package.json` definisce:
 
-**Flusso `createBuilder()`:**
-1. Carica manifest (da config custom o base)
-2. Definisce `defineMetaHandler` — ritorna `null` (placeholder)
-3. Definisce `defineStreamHandler` — logica principale
-4. Espone router Express su `/stream/*`
-5. Avvia server sulla porta configurata
+| Comando | Comportamento |
+|---|---|
+| `pnpm run build` | Compila `src/` con TypeScript e copia le configurazioni in `dist/config/`. |
+| `pnpm start` | Avvia `node dist/addon.js`. |
+| `pnpm dev` | Avvia `src/addon.ts` tramite `tsx`. |
 
-**Server Express:**
-```typescript
-const app = express();
-// Middleware: parsing config da query params / body
-// Router: /stream/:type/:id.json
-// Landing page: GET /
-```
+Il progetto è ESM (`"type": "module"`); `src/addon.ts` inizializza il builder e il router globali, crea l’app Express e ascolta su `0.0.0.0`, usando `PORT` oppure la porta `7000`.
 
-### `src/extractor.ts` — Estrattore Video
+### Routing
 
-**Responsabilità:**
-- Estrazione stream da VixCloud e altri host
-- Gestione proxy MediaFlow / EasyProxy
-- Parsing playlist HLS
-- Risoluzione URL video finali
-- Costruzione stream sintetici (FHD)
+Le route Express aggiuntive sono registrate in `src/addon.ts`:
 
-**Funzioni chiave:**
-| Funzione | Scopo |
-|----------|-------|
-| `getUrl()` | Costruisce URL target dal tipo/id |
-| `getStreamContent()` | Estrae tutti gli stream possibili |
-| `getDirectStream()` | Modalità direct (senza proxy) |
-| `getProxyStream()` | Modalità proxy MediaFlow |
-| `buildSyntheticBase()` | Crea stream sintetici FHD |
-| `buildSyntheticProxyWrapper()` | Wrapper proxy per sintetici |
-| `finalize()` | Formatta stream finali con nomi unificati |
-| `finalizeAndFilter()` | Applica filtri e deduplica |
+- `GET /vixsynthetic` e `GET /vixsynthetic.m3u8`: riscrittura HLS descritta nella sezione [Endpoint Express aggiuntivi](#8-endpoint-express-aggiuntivi).
+- `/public/*`: static file server, configurato per leggere `../public` rispetto alla directory del modulo compilato.
+- Le altre richieste passano attraverso un middleware che analizza l’eventuale configurazione nel segmento URL e le inoltra al router generato da `getRouter()`.
+- La route `GET /` per la landing page è dichiarata **dopo** il middleware del router SDK; nello smoke test locale e nel container il router lascia proseguire la richiesta e la landing risponde HTTP 200.
+
+Il middleware contiene anche una trasformazione della query catalog AnimeWorld, ma il manifest corrente non dichiara cataloghi: non è un catalogo registrato dall’addon.
 
 ---
 
-## 5. Manifest & Configurazione
+## 3. Manifest e configurazione addon
 
-### Manifest Base
+### Manifest
+
+Il manifest base definito in `src/addon.ts` dichiara:
 
 ```json
 {
   "id": "org.stremio.hanx",
   "version": "12.4.23",
-  "name": "HanX | Elfhosted",
+  "name": "HanX",
   "types": ["movie", "series", "anime"],
   "idPrefixes": ["tt", "kitsu", "mal", "tmdb"],
+  "catalogs": [],
   "resources": ["stream", "meta"],
   "behaviorHints": { "configurable": true }
 }
 ```
 
-### Config UI (10 campi)
+Il manifest offre questi campi di configurazione:
 
-| Chiave | Tipo | Default | Descrizione |
-|--------|------|---------|-------------|
-| `tmdbApiKey` | text | — | Chiave API TMDB |
-| `mediaFlowProxyUrl` | text | — | URL MediaFlow Proxy |
-| `mediaFlowProxyPassword` | text | — | Password MediaFlow |
-| `useMediaFlow` | checkbox | false | Usa MediaFlow (vs EasyProxy) |
-| `animeunityEnabled` | checkbox | true | Abilita AnimeUnity |
-| `animeunityDirect` | checkbox | — | Direct locale |
-| `animeunityDirectFhd` | checkbox | — | Synthetic FHD locale |
-| `animeunityProxy` | checkbox | — | Proxy cross-IP |
-| `animesaturnEnabled` | checkbox | true | Abilita AnimeSaturn |
-| `animeworldEnabled` | checkbox | true | Abilita AnimeWorld |
+| Chiave | Ruolo runtime |
+|---|---|
+| `tmdbApiKey` | Chiave TMDB personale. |
+| `mediaFlowProxyUrl`, `mediaFlowProxyPassword` | URL e password del proxy, se usati. |
+| `useMediaFlow` | Flag interpretato dall’handler e passato nella configurazione provider. I provider correnti non lo leggono per selezionare il formato dell’URL stream, quindi il suo effetto sul backend non è dimostrato dal percorso runtime. |
+| `animeunityEnabled`, `animesaturnEnabled`, `animeworldEnabled` | Abilitazione dei provider. |
+| `animeunityDirect`, `animeunityDirectFhd`, `animeunityProxy` | Flag specifici per gli stream AnimeUnity. |
+| `personalTmdbKey`, `mediaflowMaster` | Toggle helper UI; non sono opzioni lette dalla logica stream per selezionare un provider o backend. |
 
-### Risoluzione Configurazione (Priorità)
+Sono quindi **12 voci** nello schema del manifest, di cui le ultime due sono helper UI.
 
-```
-1. requestConfig (da UI Stremio)
-2. Env vars (MFP_URL, MFP_PSW, ecc.)
-3. Defaults hardcoded
+### Override del manifest
+
+`loadCustomConfig()` cerca `addon-config.json` nella directory padre di `src/` o `dist/` e sovrascrive nome, ID, descrizione, versione e immagini del manifest base.
+
+Nel checkout locale `addon-config.json` è nella root e imposta `org.stremio.hanx`, nome `HanX` e versione `1.0.0`. L’immagine Docker corrente non copia questo file nella root `/app`: nel container il loader ripiega quindi sul manifest base, versione `12.4.23`.
+
+---
+
+## 4. Richiesta stream e configurazione effettiva
+
+### Formati ID gestiti
+
+L’handler normalizza anche i tipi legacy `film` → `movie` e `serie` → `series`. Per gli ID riconosciuti instrada:
+
+| Forma ID | Interpretazione runtime |
+|---|---|
+| `kitsu:ID` | Kitsu senza episodio esplicito. |
+| `kitsu:ID:EP` | Episodio Kitsu. |
+| `kitsu:ID:STAGIONE:EP` | Stagione ed episodio Kitsu. |
+| `mal:ID` | MAL senza episodio esplicito. |
+| `mal:ID:EP` | Episodio MAL. |
+| `mal:ID:STAGIONE:EP` | Stagione ed episodio MAL. |
+| `ttID` / `ttID:EP` / `ttID:STAGIONE:EP` | IMDb; stagione ed episodio sono ricavati dai segmenti dopo `:`. Un ID senza segmenti aggiuntivi è trattato come film. |
+| `tmdb:ID` / `tmdb:ID:EP` / `tmdb:ID:STAGIONE:EP` | TMDB; un ID senza segmenti aggiuntivi è trattato come film. |
+
+I provider restituiscono una lista vuota per ID non riconosciuti o quando nessun provider è abilitato.
+
+### Parsing e precedenza delle impostazioni
+
+La configurazione può arrivare come oggetto SDK o come stringa JSON, JSON URL-encoded o Base64. Il middleware tenta di decodificare il segmento configurazione della richiesta; per Base64 valido riscrive il segmento in JSON URL-encoded prima dell’inoltro al router SDK. `normalizeConfig()` converte i booleani riconosciuti, elimina gli slash finali dall’URL MFP, fa trim della chiave TMDB e preserva esattamente la password.
+
+La precedenza **varia in base al campo**:
+
+| Campo | Risoluzione effettiva |
+|---|---|
+| URL MFP | Configurazione richiesta, poi `MFP_URL`. |
+| Password MFP | `mediaFlowProxyPassword`, poi `MFP_PSW`, poi `MFP_PASSWORD`. Una stringa vuota esplicita prevale sui fallback. |
+| Flag backend proxy | L’handler calcola `useMediaFlow` da un booleano esplicito; altrimenti da `PROXY_BACKEND` o `MFP_BACKEND` uguale a `mediaflow`/`mfp`; altrimenti `false`. Il valore entra nella firma cache ed è passato ai provider, ma questi non lo leggono nel codice corrente per cambiare la URL stream. |
+| Chiave TMDB | Configurazione richiesta, poi `TMDB_API_KEY`, poi il fallback interno passato ai provider. |
+| Abilitazione provider | Variabile d’ambiente corrispondente, se presente, prevale sulla richiesta. Il valore ambiente abilita solo se è esattamente `true` (case-insensitive). In assenza di flag ambiente, la richiesta abilita i provider con flag `true`. Se la richiesta non contiene nessuno dei tre flag provider, il percorso API li considera tutti abilitati. |
+
+Il percorso «API diretta» è rilevato dall’assenza dei campi `animeunityEnabled`, `animesaturnEnabled` e `animeworldEnabled`, non dalla totale assenza di qualsiasi configurazione.
+
+### Passi dell’handler
+
+1. Normalizza il tipo e la configurazione della richiesta.
+2. Risolve le impostazioni proxy e l’abilitazione dei tre provider.
+3. Per `tt…` e `tmdb:…`, interpreta film/episodio/stagione.
+4. Per ID `kitsu:`, `mal:`, `tt…` e `tmdb:`, costruisce la firma della configurazione e verifica la cache stream.
+5. Se manca una cache hit, avvia in parallelo ogni provider abilitato con timeout di 30 secondi per provider.
+6. Unisce, formatta e ordina gli stream; salva in cache solo risposte non vuote.
+7. In caso di errore generale dell’handler restituisce `{ streams: [] }`.
+
+Il timeout usa `Promise.race`: il timeout chiude l’attesa dell’handler ma non è un meccanismo di cancellazione della richiesta HTTP in corso.
+
+---
+
+## 5. Provider e risoluzione dei titoli
+
+I provider sono implementati in moduli separati. AnimeUnity è importato direttamente da `addon.ts`; AnimeSaturn e AnimeWorld vengono caricati dinamicamente quando si esegue il relativo task.
+
+| Provider | Percorso runtime |
+|---|---|
+| **AnimeUnity** (`src/providers/animeunity-provider.ts`) | Gestisce i quattro formati ID. Usa Mapping API quando applicabile e, in caso di miss, ricerca per titolo e parsing delle pagine anime/episodio. Per IMDb/TMDB applica AnimeGate. |
+| **AnimeSaturn** (`src/providers/animesaturn-provider.ts`) | Gestisce i quattro formati ID. Usa Mapping API e fallback per titolo quando applicabile; per AnimeSaturn la lookup Mapping API richiede la lingua `it`. Per IMDb/TMDB applica AnimeGate. |
+| **AnimeWorld** (`src/providers/animeworld-provider.ts`) | Gestisce i quattro formati ID. Usa Mapping API e fallback per titolo quando applicabile; analizza le pagine AnimeWorld e costruisce stream dai link media trovati. Per IMDb/TMDB applica AnimeGate. |
+
+### Produzione degli stream e proxy
+
+- **AnimeUnity:** legge i dati anime/episodi dalla pagina e seleziona l’episodio richiesto. L’estrazione HLS dall’embed è disabilitata nel provider corrente; resta il fallback MP4 condizionato e la costruzione di un URL proxy MFP per l’embed. Le opzioni `animeunityDirect`, `animeunityDirectFhd` e `animeunityProxy` controllano quali stream vengono restituiti; il flag `DirectFhd` non è sufficiente a dimostrare che venga costruita una playlist sintetica.
+- **AnimeWorld:** estrae link MP4 dalla pagina di riproduzione; senza URL MFP restituisce il link con gli header/referer nel `behaviorHints`, mentre con URL MFP costruisce un URL `/proxy/stream`.
+- **AnimeSaturn:** estrae e normalizza gli stream dalle pagine anime/episodio e dai player collegati. Nel codice provider corrente non risulta una lettura delle opzioni MFP o `useMediaFlow`.
+
+La selezione del backend proxy non è quindi un comportamento uniforme tra i tre provider.
+
+### Differenze nel lookup
+
+- **Kitsu:** i provider provano il mapping Kitsu e possono usare i metadati Kitsu per un titolo rapido; se il mapping non produce stream, passano alla risoluzione del titolo e alla ricerca sul sito.
+- **MAL:** i provider ricavano il titolo da Tenrai (`GET /v1/anime/{id}`) e poi cercano sui siti; il percorso MAL non usa la Mapping API. Tenrai sostituisce l’API pubblica Jikan, dismessa il 1º ottobre 2026 ([annuncio maintainer](https://github.com/jikan-me/jikan-rest/issues/613)). La richiesta metadata è condivisa fra i provider e persistita in SQLite con ETag.
+- **IMDb/TMDB:** AnimeGate precede la ricerca in ogni provider. Se il gate consente la richiesta, viene tentato il mapping specifico del provider; in caso di miss segue la risoluzione del titolo e la ricerca testuale.
+- Il mapping IMDb può avere un secondo tentativo con l’ID TMDB quando la risposta non contiene percorsi specifici del provider e l’ID TMDB è disponibile.
+
+La Mapping API è condivisa in `src/providers/anime-core/mapping-api.ts`; i provider estraggono dal payload i propri percorsi. Il resolver di mapping genera richieste del tipo `/{provider}/{id}?ep=…`, aggiunge `s=…` se presente e può aggiungere `lang=it`.
+
+### AnimeGate
+
+`checkIsAnimeById()` è chiamato dai tre provider per ID IMDb e TMDB, non per Kitsu o MAL. Se `ANIME_GATE_ENABLED` è diverso da `false`, il gate:
+
+1. risolve IMDb→TMDB quando necessario;
+2. accetta un mapping MAL/Kitsu trovato tramite Haglund;
+3. altrimenti, se `ANIME_GATE_TMDB_FALLBACK` non è `false`, verifica su TMDB animazione e origine/lingua giapponese;
+4. se non è anime, il provider restituisce zero stream.
+
+Senza chiave TMDB il gate è permissivo. L’helper `buildAnimeIdWarningStream()` esiste, ma non è invocato dagli handler correnti; non viene restituito uno stream generico come fallback per un ID non-anime.
+
+---
+
+## 6. Composizione, ordinamento e cache degli stream
+
+### Formattazione e ordinamento
+
+`addon.ts` applica la formattazione nel proprio `unifyStreams()` (non tramite `buildUnifiedStreamName()`): titolo su più righe, etichetta provider, indicazione ITA/SUB, rilevamento del proxy e `behaviorHints.bingeGroup` per i provider.
+
+L’ordinamento è eseguito in due passaggi: prima alfabetico per titolo, poi per priorità provider **AnimeUnity → AnimeSaturn → AnimeWorld**. Poiché l’ordinamento JavaScript è stabile, all’interno dello stesso provider viene mantenuto l’ordine alfabetico del primo passaggio.
+
+### Cache completa della risposta provider
+
+La cache in `src/addon.ts` è una `Map` in memoria, condivisa dal processo:
+
+- chiave: tipo, ID e digest SHA-256 della configurazione effettiva;
+- TTL predefinito: 5 minuti (`PROVIDER_CACHE_TTL_MS`);
+- limite predefinito: 500 entry (`PROVIDER_CACHE_MAX_ENTRIES`);
+- disattivazione: `PROVIDER_CACHE_DISABLE=1` (sono riconosciuti anche `true`, `on`, `yes`);
+- risposte vuote non memorizzate;
+- al superamento del limite elimina prima le entry scadute e poi quelle più vecchie;
+- i dati vengono serializzati/deserializzati per materializzare le stringhe degli stream.
+
+Le cache ausiliarie dei provider sono anch’esse in memoria e distinte per modulo/provider. Non esiste una cache persistente condivisa dal processo per gli stream restituiti.
+
+### Cache persistente metadati MAL (Tenrai)
+
+`src/providers/anime-core/tenrai-metadata.ts` usa SQLite (`node:sqlite`) per conservare i titoli MAL anche dopo il riavvio:
+
+- una riga per MAL ID; i titoli positivi non vengono espulsi automaticamente;
+- rispetta `Cache-Control` (default Tenrai: `max-age=3600`) e salva l’ETag;
+- alla scadenza fa una richiesta condizionale `If-None-Match`: `304` rinnova la validazione senza riscaricare il payload, `200` sostituisce i dati;
+- in caso di timeout/errore usa il dato stale se disponibile e applica backoff; `404` è memorizzato con TTL negativo;
+- deduplica le chiamate in-flight tra AnimeUnity, AnimeSaturn e AnimeWorld;
+- limiter persistente in SQLite: default prudenziale 3 RPS / 100 RPM, entro i limiti pubblici documentati da Tenrai. `Retry-After` viene rispettato;
+- DB locale default `./data/tenrai-metadata.sqlite`; in Docker il volume `hanx-data` conserva `/app/data`.
+
+Le riconvalide consumano comunque richieste API, ma non trasferiscono il corpo quando il contenuto è invariato. I dati rimangono in archivio finché non vengono invalidati da Tenrai (`404`), mentre gli errori temporanei non cancellano l’ultima copia valida.
+
+---
+
+## 7. Infrastruttura condivisa usata dai provider
+
+`src/providers/anime-core/` fornisce funzioni realmente importate dai provider:
+
+- `cache.ts`: helper per mappe TTL con scadenza e creazione delle mappe HTTP, mapping e in-flight per provider;
+- `fetch-resource.ts`: fetch con timeout configurabile, cache HTTP opzionale e deduplicazione in-flight tramite tali mappe;
+- `mapping-api.ts`: parsing ID/episodio, lookup API, cache Mapping di 2 minuti ed estrazione dei percorsi provider;
+- `tenrai-metadata.ts`: store SQLite MAL persistente con ETag, rate limit, backoff e single-flight condiviso;
+- `provider-urls.ts`: risoluzione dinamica di URL provider e Mapping API;
+- `helpers.ts`: normalizzazione episodio/titolo/URL, selezione episodi, estrazione link e limitazione della concorrenza.
+
+`fetchResource()` è il livello HTTP comune per le chiamate che lo usano; i provider contengono anche fetch diretti e logica HTTP specifica, quindi non tutte le richieste esterne transitano da questo wrapper.
+
+### Risoluzione di URL e domini
+
+Per provider riconosciuti, `getProviderUrl()` cerca nell’ordine:
+
+1. `config/domains.json` tramite `getDomain()`;
+2. dati JSON locali/remoti gestiti da `provider_urls.ts`;
+3. variabili d’ambiente specificate dal chiamante.
+
+Il file JSON locale viene ricontrollato in base a mtime (intervallo predefinito 1,5 secondi). Il refresh remoto è asincrono, predefinito ogni 10 secondi, e aggiorna la stessa mappa usata per i valori JSON. `domains.json` ha invece una cache in memoria di 12 ore. I valori file attuali sono in `config/domains.json` e `config/provider_urls.json`.
+
+---
+
+## 8. Endpoint Express aggiuntivi
+
+### `/vixsynthetic` e `/vixsynthetic.m3u8`
+
+L’endpoint in `src/addon.ts` accetta `src`, `lang` e le opzioni multi-lingua. Il codice:
+
+- limita destinazioni e protocollo tramite whitelist HTTPS;
+- risolve e controlla gli indirizzi DNS iniziali e quelli dei redirect;
+- segue manualmente al massimo cinque redirect;
+- scarica una playlist, risolve gli URI relativi e, per un master HLS, seleziona la variante con risoluzione/banda più alta;
+- seleziona la traccia audio richiesta (default `it`) oppure include le rendition pertinenti in modalità multi.
+
+Questo endpoint è registrato nel server Express, ma il flusso dei provider attivi non è stato trovato a generare URL verso di esso. Non va quindi descritto come parte della pipeline automatica degli stream. Inoltre, benché il codice costruisca un `https.Agent` con gli IP verificati, l’oggetto `currentAgent` non viene passato alla chiamata `globalThis.fetch`: il codice effettua i controlli DNS, ma non dimostra il DNS pinning descritto nei commenti.
+
+### Landing page e asset
+
+`GET /` genera HTML tramite `src/landingPage.ts`; il contenuto include il modulo web di configurazione. `/public/*` è registrato con `express.static()`. La posizione filesystem configurata per gli asset è relativa alla root del progetto quando si avvia il build locale; per la differenza nel container vedere [Build e deployment](#10-build-e-deployment).
+
+---
+
+## 9. Mappa dei moduli runtime
+
+```text
+src/
+├── addon.ts                         Express, manifest, SDK, handler e orchestrazione
+├── landingPage.ts                   HTML della landing page
+├── providers/
+│   ├── animeunity-provider.ts       Provider AnimeUnity
+│   ├── animesaturn-provider.ts      Provider AnimeSaturn
+│   ├── animeworld-provider.ts       Provider AnimeWorld
+│   ├── kitsu.ts                    Parsing ID e helper Kitsu usato dai provider
+│   └── anime-core/                 Cache, fetch, mapping, Tenrai/SQLite e helper condivisi
+├── utils/
+│   ├── animeGate.ts                Gate IMDb/TMDB e normalizzazione titolo condivisa
+│   ├── domains.ts                  Lettura/cache di config/domains.json
+│   ├── mediaflow.ts                Formattazione URL MediaFlow usata da AnimeUnity
+│   ├── tmdbResolver.ts             Risoluzione IMDb→TMDB usata dai percorsi attivi
+│   └── unifiedNames.ts             Etichette provider; la composizione principale è inline in addon.ts
+└── config/
+    └── imdbToTmdb.json             Dati statici usati dal resolver TMDB
+
+config/
+├── domains.json
+└── provider_urls.json
+
+addon-config.json                   Override manifest nella root del repository
 ```
 
 ---
 
-## 6. ID System
+## 10. Build e deployment
 
-### Formati Supportati
+### Build locale
 
-| Formato | Esempio | Descrizione |
-|---------|---------|-------------|
-| **Kitsu** | `kitsu:12345` | ID Kitsu anime |
-| **Kitsu + Ep** | `kitsu:12345:5` | Kitsu + episodio |
-| **Kitsu + S/E** | `kitsu:12345:2:5` | Kitsu + stagione + episodio |
-| **MAL** | `mal:12345` | ID MyAnimeList |
-| **IMDB** | `tt1234567` | ID IMDb (movie) |
-| **IMDB + S/E** | `tt1234567:1:5` | IMDb + stagione + episodio |
-| **TMDB** | `tmdb:12345` | ID TMDB (movie) |
-| **TMDB + S/E** | `tmdb:12345:2:5` | TMDB + stagione + episodio |
+`pnpm run build` esegue `tsc` e `scripts/build-copy.js`. Lo script copia `config/` e i JSON di `src/config/` in `dist/config/`; non copia `addon-config.json` né `public/`. In un normale checkout questi ultimi restano nella root e sono raggiunti tramite i percorsi relativi definiti dal codice.
 
-### Parsing nel Stream Handler
+### Docker
 
-```typescript
-// Kitsu/MAL → passati direttamente ai provider
-// IMDB → convertito a TMDB via TMDB Find API
-// TMDB → usato per lookup mapping API
-```
+Il `Dockerfile` corrente:
 
----
+- usa `node:26-alpine` sia per build sia per runner;
+- compila l’addon e nello stage finale copia in `/app` `dist/`, `node_modules/`, `addon-config.json`, `config/` e `public/`;
+- crea `/app/data` accessibile solo all’utente non-root; Compose lo monta sul volume persistente `hanx-data`;
+- carica le variabili runtime da `.env` via `env_file`; `.env` resta escluso dal contesto immagine e dal versionamento; `.env.example` è il template;
+- espone la porta 7000 e avvia `node dist/addon.js` come utente non-root.
 
-## 7. Provider Anime
+**Verifica effettiva del container dopo la correzione del Dockerfile:**
 
-### 7.1 AnimeUnity Provider
+- `addon-config.json` è presente in `/app`; `GET /manifest.json` restituisce HTTP 200 con ID `org.stremio.hanx`, nome `HanX` e versione `1.0.0`.
+- `/app/public/` contiene gli asset attesi: `GET /public/icon.png` e `/public/background.png` restituiscono entrambi HTTP 200 (`image/png`).
+- `domains.json` e `provider_urls.json` sono presenti nel percorso runtime `/app/config/`. Una verifica eseguita dal container ha letto `animeunity.so` dai domini e `https://anime.stremio-italia.eu` come Mapping API.
+- Il container è rimasto in stato `running` e l’health check Docker ha raggiunto `healthy`. `GET /` ha restituito HTTP 200 HTML; `/vixsynthetic` senza parametro `src` ha restituito HTTP 400, come previsto.
+- La build dell’immagine è riuscita usando Docker Desktop 4.95.0 / Engine 29.8.2, target `linux/amd64`. Il container usa `undici` `8.11.2`, corrispondente al lockfile e compatibile con la dichiarazione `^8.11.2` in `package.json`; il pin Docker ad `6.19.8` è stato rimosso.
+- Verifica migrazione: `GET /stream/anime/mal:1.json` ha restituito HTTP 200 con 2 stream AnimeWorld. Il DB del container ha una sola riga per MAL ID `1` e un solo evento Tenrai nonostante il fan-out a tre provider; l’ETag è stato persistito. Il volume di prova e la cache ETag sono stati inoltre testati con risposte `304` e aggiornamento `200`.
+- Dopo aver rimosso e ricreato il container usando lo stesso volume, `mal:1` ha restituito ancora 2 stream HTTP 200 senza una seconda richiesta Tenrai: riga SQLite, ETag e limiter sono sopravvissuti al riavvio.
+- `pnpm test`: 6 test superati per deduplicazione, persistenza, ETag, stale-on-error, `Retry-After` concorrente, cache negativa e budget richieste persistente.
 
-**File:** `src/providers/animeunity-provider.ts` (~1300 righe)
-
-**Metodi di ingresso:**
-| Metodo | ID Supportato |
-|--------|--------------|
-| `handleKitsuRequest()` | `kitsu:XXX` |
-| `handleMalRequest()` | `mal:XXX` |
-| `handleImdbRequest()` | `ttXXX` |
-| `handleTmdbRequest()` | `tmdb:XXX` |
-
-**Flusso:**
-1. Risolve titolo da Kitsu/MAL/TMDB
-2. Cerca su Mapping API (se disponibile) per percorsi diretti
-3. Fallback: ricerca titolo su sito AnimeUnity
-4. Estrae pagine episodio
-5. Risolve video da player embed
-
-**Modalità streaming:**
-- `Direct` — accesso diretto (locale, IP-bound)
-- `DirectFHD` — versione synthetica Full HD
-- `Proxy` — via EasyProxy (cross-IP)
-
-### 7.2 AnimeSaturn Provider
-
-**File:** `src/providers/animesaturn-provider.ts` (~1400 righe)
-
-**Differenze da AnimeUnity:**
-- Non usa Mapping API (usa ricerca diretta)
-- Ha fallback Kitsu integrato
-- Supporta `CR ITA` (Crunchyroll Italia) detection
-- Filtraggio risultati più aggressivo (`filterAnimeResults`)
-
-**Flusso:**
-1. `handleTitleRequest()` → normalizza titolo
-2. `searchAllVersions()` → cerca su AnimeSaturn
-3. `filterAnimeResults()` → filtra per similarità titolo
-4. Estrae pagine episodio → risolvi stream
-
-### 7.3 AnimeWorld Provider
-
-**File:** `src/providers/animeworld-provider.ts` (~1500 righe)
-
-**Differenze:**
-- Usa Mapping API + fallback ricerca
-- Ha `exactMap` separata con `resolveExactMapKey()`
-- Supporta `strict base slug filter` per filtraggio
-- Ha `fallbackFilterYearSearch` basato su data Kitsu
-- Language detection più sofisticata (`playLangCache`)
-
-**Flusso:**
-1. `handleTitleRequest()` → normalizza + cerca exactMap
-2. `searchWithLogging()` → cerca su AnimeWorld
-3. `strict base filter` → filtra per slug
-4. `fallbackFilterYearSearch()` → fallback per anno
-5. Estrae stream → language detection
+Sono state provate ricerche reali con `kitsu:1` e `mal:1` (Cowboy Bebop). La richiesta Kitsu ha restituito 4 stream HTTPS tramite Mapping API; quella MAL, dopo la migrazione Tenrai, ha restituito 2 stream AnimeWorld. Non è stata verificata la riproduzione dei media. Durante il test MAL AnimeUnity ha ricevuto HTTP 405 e AnimeSaturn HTTP 404 dal percorso di ricerca, ma il provider AnimeWorld ha prodotto stream.
 
 ---
 
-## 8. Anime-Core (Infrastruttura Condivisa)
+## 11. Variabili d’ambiente principali
 
-### 8.1 Cache (`cache.ts`)
+Le variabili lette dai percorsi runtime documentati includono:
 
-```typescript
-interface CacheEntry<T> {
-  value: T;
-  expiresAt: number;  // TTL-based expiration
-}
-```
+| Variabile | Uso |
+|---|---|
+| `PORT` | Porta HTTP; default `7000`. |
+| `TMDB_API_KEY` | Chiave TMDB di fallback quando non fornita nella configurazione addon. |
+| `MFP_URL`, `MFP_PSW`, `MFP_PASSWORD` | URL e credenziali proxy di fallback. |
+| `PROXY_BACKEND`, `MFP_BACKEND` | Letti dall’handler per calcolare `useMediaFlow`; l’effetto sulla URL stream non è dimostrato perché i provider non leggono il flag. |
+| `ANIMEUNITY_ENABLED`, `ANIMESATURN_ENABLED`, `ANIMEWORLD_ENABLED` | Override ambiente dell’abilitazione provider. |
+| `ANIME_GATE_ENABLED`, `ANIME_GATE_TMDB_FALLBACK` | Abilitazione e fallback TMDB del gate per IMDb/TMDB. |
+| `ADDON_BASE_URL` | Base URL addon passata al provider AnimeUnity. |
+| `PROVIDER_CACHE_TTL_MS`, `PROVIDER_CACHE_MAX_ENTRIES`, `PROVIDER_CACHE_DISABLE` | Parametri della cache stream di `addon.ts`. |
+| `ANIME_FETCH_TIMEOUT_MS` | Timeout predefinito del fetch condiviso dai provider. |
+| `ANIMEUNITY_FETCH_TIMEOUT_MS`, `ANIMESATURN_FETCH_TIMEOUT_MS`, `ANIMEWORLD_FETCH_TIMEOUT_MS` | Timeout specifici definiti nei provider. |
+| `AU_PROXY`, `AS_PROXY`, `AW_PROXY`, `PROXY` | Proxy HTTP dei fetch provider, dove usato dal relativo percorso. |
+| `PROVIDER_URLS_FILE`, `PROVIDER_URLS_URL`, `PROVIDER_URLS_RELOAD_MS`, `PROVIDER_URLS_REMOTE_RELOAD_MS` | Sorgenti e intervalli per gli URL provider. |
+| `TENRAI_API_BASE_URL`, `TENRAI_CACHE_DB_PATH` | Endpoint metadata e percorso del DB SQLite persistente. |
+| `TENRAI_REQUEST_TIMEOUT_MS`, `TENRAI_CACHE_TTL_MS`, `TENRAI_NEGATIVE_CACHE_TTL_MS`, `TENRAI_STALE_IF_ERROR` | Timeout, freshness cap, cache ID mancanti e fallback stale. La validità effettiva non supera il `max-age` della risposta Tenrai. |
+| `TENRAI_MAX_REQUESTS_PER_SECOND`, `TENRAI_MAX_REQUESTS_PER_MINUTE`, `TENRAI_MAX_PENDING_REQUESTS`, `TENRAI_MAX_QUEUE_WAIT_MS` | Throttling persistente e limiti della coda metadata; di default 3 RPS / 100 RPM. |
+| `TENRAI_FAILURE_BACKOFF_MS`, `TENRAI_MAX_BACKOFF_MS`, `TENRAI_SERVER_KEY` | Backoff su errori; chiave server opzionale, inviata solo all’host ufficiale Tenrai. |
+| `.env` / `.env.example` | Configurazione locale e template versionato dei parametri Tenrai; `.env` è ignorato da Git e Docker build. |
+| `DEBUG_LOG` | Abilita i log diagnostici condizionali dell’handler/middleware. |
 
-**Funzioni:**
-- `getCached(map, key)` — legge con auto-pruning
-- `setCached(map, key, value, ttlMs)` — scrive con expiry
-- `uniqueStrings(values)` — deduplica array
-- `createCaches()` — crea set di cache per provider
-
-### 8.2 Fetch Resource (`fetch-resource.ts`)
-
-**Caratteristiche:**
-- TTL cache su HTTP responses
-- **Inflight deduplication** — richieste duplicate condividono stessa Promise
-- Timeout configurabile (`ANIME_FETCH_TIMEOUT_MS`, default 10s)
-- Proxy auto-detection per provider (AU/AS/AW)
-- User-Agent configurabile per provider
-
-**Flusso `fetchResource()`:**
-```
-1. Check TTL cache → se hit, ritorna
-2. Check inflight map → se running, attendi
-3. Esegui fetch con proxy/timeout
-4. Salva in cache se ttl > 0
-5. Rimuovi da inflight
-```
-
-### 8.3 Provider URLs (`provider-urls.ts`)
-
-**Risoluzione URL in 3 step:**
-1. **Local JSON** (`provider_urls.json`) — reload ogni 1.5s
-2. **Remote JSON** (GitHub raw) — refresh ogni 10s
-3. **Env vars** — fallback finale
-
-**Alias supportati:**
-```
-animeunity → animeunuty, anime_unity
-animeworld → anime_world
-animesaturn → anime_saturn
-mapping_api → mappingapi, mapping_api_url, mapping_url
-```
-
-### 8.4 Mapping API (`mapping-api.ts`)
-
-**Interazione con API di mapping esterna** (easystreams-style):
-
-```
-GET {mappingApiBase}/{provider}/{externalId}?ep={episode}&s={season}&lang={it|default}
-```
-
-**Funzioni:**
-- `parseExplicitRequestId()` — parse ID da stringa
-- `resolveLookupRequest()` — build lookup da ID + contesto
-- `fetchMappingPayload()` — fetch con cache 2min TTL
-- `extractProviderPaths()` — estrai percorsi provider dal payload
-- `resolveEpisodeFromMappingPayload()` — risolvi numero episodio
-
-### 8.5 Helpers (`helpers.ts`)
-
-**Funzioni condivise:**
-| Funzione | Scopo |
-|----------|-------|
-| `sanitizeAnimeTitle()` | Pulisce suffissi provider e marker lingua |
-| `inferSourceTag()` | Rileva ITA vs SUB dal titolo/pat |
-| `resolveLanguageEmoji()` | Mappa source tag → emoji bandiera |
-| `parsePositiveInt()` | Parse sicuro intero positivo |
-| `normalizeRequestedEpisode()` | Normalizza numero episodio |
-| `normalizeRequestedSeason()` | Normalizza numero stagione |
-| `parseEpisodeNumber()` | Estrae numero da stringa episodio |
-| `toAbsoluteUrl()` | Converte episodio numerico in assoluto |
-| `collectMediaLinksFromEmbedHtml()` | Estrae link da HTML embed |
-| `BLOCKED_DOMAINS` | Lista domini bloccati per sicurezza |
+La lista non include variabili usate solo da script di manutenzione o componenti fuori dal flusso runtime degli stream.
 
 ---
 
-## 9. Estrazione Stream
+## 12. Codice presente ma non integrato nel flusso stream
 
-### 9.1 Pipeline di Estrazione
+I seguenti moduli esistono nel repository, ma non risultano componenti invocati dal normale fan-out dei provider:
 
-```
-AnimePage (HTML)
-    │
-    ▼ parseVideoPlayerJson()
-    │
-    ├─> embed_url → Player iframe
-    ├─> mp4_url → Direct MP4
-    └─> episode_page → Episode detail page
-          │
-          ▼ Episode Page HTML
-          │
-          ├─> Video sources (MP4/M3U8)
-          ├─> Embed URLs (VixCloud, Mixdrop, ecc.)
-          └─> Play URLs (redirect a player)
-```
+- `src/extractor.ts`: contiene codice di estrazione VixSrc/HLS, ma non è importato dai provider attivi né chiamato da `addon.ts`.
+- `src/utils/animeTitleResolver.ts`: esporta un resolver, ma i provider usano funzioni di risoluzione locali e non importano questo modulo.
+- `src/providers/flaresolverr.ts`: espone `fetchPage`; `addon.ts` lo importa, ma non ne usa il simbolo nel codice dell’handler. Non è il fetcher del percorso provider corrente.
+- `buildAnimeIdWarningStream()` in `src/utils/animeGate.ts`: helper non richiamato dagli handler.
+- `buildUnifiedStreamName()` in `src/utils/unifiedNames.ts`: helper non usato dalla composizione inline degli stream in `addon.ts`.
 
-### 9.2 Player Extraction
-
-**VixCloud / Mixdrop / Streamtape / Doodstream / ecc.**
-
-L'extractor (`extractor.ts`) gestisce:
-1. Fetch pagina embed con headers anti-bot
-2. Parsing HTML con Cheerio
-3. Estrazione token/auth da script tags
-4. Costruzione URL stream finale
-5. Supporto HLS (`.m3u8`) con parsing playlist
-
-### 9.3 Proxy Modes
-
-| Modalità | Descrizione | Uso |
-|----------|-------------|-----|
-| **Direct** | Accesso diretto al video | Locale, IP-bound |
-| **Proxy (EasyProxy)** | Via proxy intermedio | Cross-IP, consigliato |
-| **MediaFlow** | Via MediaFlow Proxy | Avanzato, con password |
+Questi elementi non sono rappresentati come stadi operativi nel diagramma del flusso stream. La loro eventuale integrazione futura richiede una verifica separata.
 
 ---
 
-### 9.4 Estrattore Video (`extractor.ts`)
-
-**File:** `src/extractor.ts` (~1600 righe)
-
-#### 9.4.1 Interfacce
-
-```typescript
-interface ExtractorConfig {
-  tmdbApiKey?: string;
-  mfpUrl?: string;
-  mfpPsw?: string;
-  useMediaFlow?: boolean;
-  vixLocal?: boolean;
-  addonBase?: string;
-  vixDual?: boolean;
-  vixDirect?: boolean;
-  vixDirectFhd?: boolean;
-  vixProxy?: boolean;
-  vixProxyFhd?: boolean;
-}
-
-interface VixCloudStreamInfo {
-  name: string;
-  streamUrl: string;
-  referer: string;
-  source: 'proxy' | 'direct';
-  sizeBytes?: number;
-  isSyntheticFhd?: boolean;
-  originalName?: string;
-  detectedLang?: string;
-}
-```
-
-#### 9.4.2 Funzioni Principali
-
-| Funzione | Scopo |
-|----------|-------|
-| `getUrl()` | Costruisce URL target VixSrc dal tipo/id |
-| `getStreamContent()` | Estrae tutti gli stream possibili (direct+proxy+synthetic) |
-| `getDirectStream()` | Modalità direct — token extraction da embed page |
-| `getProxyStream()` | Modalità proxy — costruzione URL MediaFlow/EasyProxy |
-| `buildSyntheticBase()` | Crea stream sintetico FHD via /vixsynthetic.m3u8 |
-| `buildSyntheticProxyWrapper()` | Wrapper proxy per stream sintetico |
-| `parseManifestLanguages()` | Rileva lingue audio da master HLS |
-| `fetchVixCloudSiteVersion()` | Ottiene versione site per X-Inertia header |
-| `checkUrlExists()` | Verifica se URL esiste via HEAD request |
-
-#### 9.4.3 Token Extraction Pipeline
-
-```
-1. Fetch embed page (con X-Inertia header)
-2. Parse HTML con Cheerio
-3. Trova script con 'token' e 'expires'
-4. Estrai: token, expires, serverUrl
-5. Rileva FHD: window.canPlayFHD = true
-6. Costruisci URL: /playlist/{id}?b=1&token={t}&expires={e}&h=1
-7. Rileva lingue: parseManifestLanguages(masterUrl)
-```
-
-#### 9.4.4 URL Master Playlist Normalization
-
-Parametri preservati (ordine):
-1. `b=1` — se presente nell'originale
-2. `token` — token di autenticazione
-3. `expires` — timestamp scadenza
-4. `h=1` — flag FHD
-
----
-
-### 9.5 FlareSolverr Integration
-
-**File:** `src/providers/flaresolverr.ts`
-
-#### 9.5.1 Scopo
-
-Bypass Cloudflare challenge per provider che usano protezione Cloudflare.
-
-#### 9.5.2 Caratteristiche
-
-- **Cache HTTP** — TTL 15min per status 200
-- **Challenge Detection** — rileva `cf-turnstile`, `__cf_chl_`, "Just a moment"
-- **Proxy Fallback** — tenta proxy alternativo se primary bloccato
-- **Cookie Persistence** — salva `cf_clearance` per host
-- **User-Agent Rotation** — memorizza UA per host
-- **Retry su 5xx** — max 1 retry
-
-#### 9.5.3 Error Mapping
-
-| Status | Errore |
-|--------|--------|
-| 404 | `not_found` |
-| 403 / challenge | `cloudflare_challenge` |
-| 429 | `too_many_requests` |
-| 451 | `cloudflare_censor` |
-| 5xx | retry |
-
-#### 9.5.4 Stream Cache
-
-Cache file-based su `config/mostraguarda_cache.json` per risultati stream.
-
----
-
-### 9.6 Scripts Directory
-
-**File:** `scripts/`
-
-| Script | Scopo |
-|--------|-------|
-| `auto_normalize.py` | Genera PR per AnimeSaturn normalizzazioni |
-| `auto_normalize_animeunity.py` | Genera PR per AnimeUnity normalizzazioni |
-| `auto_normalize_animeworld.py` | Genera PR per AnimeWorld normalizzazioni |
-| `build-copy.js` | Copia assets durante build |
-| `check_domains.cjs` | Verifica domini provider |
-| `update_domains.py` | Aggiorna domini provider |
-
----
-
-## 10. Normalizzazione Titoli
-
-### 10.1 Pipeline di Normalizzazione
-
-```
-Titolo Input
-    │
-    ▼ [1] Universal Title Normalization
-    │   (animeGate.ts — condiviso)
-    │   One-Punch Man → One Punch Man
-    │   Season 2/3 handling
-    │
-    ▼ [2] Provider Title Normalization
-    │   (normalizeTitleForSearch — per-provider)
-    │   exactMap → mappatura precisa
-    │   genericMap → sostituzioni generiche
-    │
-    ▼ [3] Unicode → ASCII
-    │   (normalizeUnicodeToAscii)
-    │   ' → ' (apostrofi smart)
-    │   : → : (due punti Unicode)
-    │
-    ▼ Ricerca su Provider
-    │
-    ▼ [4] Filter Results
-    │   (filterAnimeResults — AnimeSaturn)
-    │   Similarità titolo normalizzato
-    │
-    ▼ [5] Sanitize Output
-    │   (sanitizeAnimeTitle)
-    │   Rimuove suffissi e marker
-```
-
-### 10.2 Confronto Provider
-
-| Feature | AnimeUnity | AnimeSaturn | AnimeWorld |
-|---------|-----------|-------------|------------|
-| Exact Map | ~1 voce | ~25 voci | ~10 voci |
-| Generic Map | Nessuna | 3 voci | Nessuna |
-| Replacements | 4 (case-insensitive) | 3 (case-sensitive) | 5 (case-insensitive) |
-| Rimuove trattini | SÌ (tutti) | No (solo ` - `) | No (solo `-`) |
-| Skip filter se exact | No | No | SÌ |
-
-### 10.3 Contributo Automatico
-
-Sistema GitHub Actions per aggiungere normalizzazioni:
-1. Issue con template `[NORMALIZZA]`
-2. Workflow rileva issue con label `normalizzazione`
-3. Script Python genera PR con nuova voce
-4. Commit: `feat(normalize): add "Titolo"`
-
----
-
-## 11. Config Parsing System
-
-### 11.1 Multi-Format Parsing (`parseConfigFromArgs`)
-
-La configurazione può arrivare in **3 formati** diversi, provati in ordine:
-
-1. **JSON diretto** — `JSON.parse(args)`
-2. **URL-encoded** — `decodeURIComponent(args)` → JSON
-3. **Base64** — `Buffer.from(base64, 'base64')` → JSON
-
-Supporta anche estrazione JSON da stringa decodificata se contiene `{...}`.
-
-### 11.2 Config Normalization (`normalizeConfig`)
-
-Normalizza tutti i valori:
-- **URL** → rimuove trailing slash
-- **Booleani** → da stringa/numero/bool a booleano effettivo
-- **Password** → preserva ESATTAMENTE (no trim!)
-- **API Key** → solo trim
-
----
-
-## 12. Provider Cache System
-
-### 12.1 Cache Key Construction
-
-```typescript
-SHA-256({
-  type, mfpUrl, mfpPswHash, useMediaFlow,
-  tmdbKey, addonBase,
-  animeunityEnabled, animesaturnEnabled, animeworldEnabled,
-  animeunityDirect, animeunityDirectFhd, animeunityProxy
-})
-```
-
-### 12.2 Memory Leak Prevention
-
-**Problema:** I titoli degli stream contengono `sliced-string` views dell'HTML sorgente, che pinna ~2MB di HTML per entry in heap.
-
-**Soluzione:** JSON roundtrip per materializzare le stringhe:
-```typescript
-JSON.parse(JSON.stringify(streams))  // Flattizza tutto
-```
-
-### 12.3 LRU-ish Eviction
-
-- **Max entries:** 500 (configurabile con `PROVIDER_CACHE_MAX_ENTRIES`)
-- **TTL:** 5 min (configurabile con `PROVIDER_CACHE_TTL_MS`)
-- **Disabilitabile:** `PROVIDER_CACHE_DISABLE=1`
-- **Eviction:** prima elimina expired, poi le più vecchie
-
----
-
-## 13. Streaming Backend
-
-### 13.1 Modalità di Streaming (VixSrc)
-
-Il sistema VixSrc supporta **4 modalità** combinate tra loro:
-
-| Checkbox | Flag Interno | Descrizione |
-|----------|-------------|-------------|
-| `vixDirect` | `vixLocal=true` | Direct (token IP-bound, locale) |
-| `vixDirectFhd` | `vixDual=true` + synthetic | Synthetic FHD (server riscrive HLS) |
-| `vixProxy` | — | MFP Proxy (tutto via proxy) |
-| `vixProxyFhd` | `vixDual=true` + synthetic | Synthetic MFP (synthetic + proxy) |
-
-**Default:** se nessuna checkbox selezionata → Synthetic MFP (default cross-IP)
-
-### 13.2 Direct Mode
-
-```
-VixSrc Page → API Endpoint → Token/Expires → Master Playlist (M3U8)
-```
-
-- Nessun proxy intermedio
-- Richiede IP compatibile con VixSrc
-- Supporta MP4 e M3U8
-- Estrae token, expires, h=1 (FHD flag) dalla pagina embed
-- Rileva lingue audio dal manifest HLS
-- Ordine parametri URL: `b=1?token=...&expires=...&h=1`
-
-### 13.3 MediaFlow Proxy Mode
-
-```
-VixSrc Page → MediaFlow /extractor/video.m3u8 → Video Stream
-```
-
-- Proxy avanzato con autenticazione
-- URL: `{mfpUrl}/extractor/video.m3u8?host=VixCloud&d={encodedUrl}&max_res=true`
-- Password via `api_password` param
-
-### 13.4 Synthetic FHD Mode
-
-```
-Master Playlist → /vixsynthetic.m3u8?src={masterUrl} → Mini Master (1080p ITA)
-```
-
-- Il server **riscrive la playlist HLS** selezionando solo:
-  - Variante video con risoluzione massima
-  - Traccia audio italiana
-- Endpoint: `{addonBase}/vixsynthetic.m3u8?src={masterUrl}&lang=it&max=1&multi=1`
-- Badge FHD aggiunto nel nome stream (🔓FHD / 🔒 FHD)
-
-### 13.5 MFP Proxy Puro Mode
-
-Quando l'utente seleziona SOLO `vixProxy`:
-- **Nessuna chiamata server→vixsrc.to**
-- Costruzione diretta URL proxy verso MFP
-- Il client Stremio fa tutto il lavoro di fetch
-- Rilevamento lingua audio disabilitato (default: ITA+ENG)
-
----
-
-### 13.6 Matrice Scenari VixSrc
-
-Il sistema genera varianti stream basandosi su 4 scenari:
-
-| Scenario | vixLocal | vixDual | Stream Generati |
-|----------|----------|---------|-----------------|
-| **1** | ✅ | ❌ | Direct + Proxy (base) |
-| **2** | ✅ | ✅ | Direct + Proxy + Synthetic FHD + Proxy Synthetic FHD |
-| **3** | ❌ | ✅ | Synthetic FHD + Proxy Synthetic FHD |
-| **4** | ❌ | ❌ | Proxy solo |
-
----
-
-## 14. VixSrc Proxy Fallback System
-
-### 14.1 Proxy Round-Robin
-
-```typescript
-PROXY     → primary proxy URL
-PROXY_BACKUP → backup proxy URL
-```
-
-Alternanza round-robin tra i due proxy per distribuire il traffico.
-
-### 14.2 `vixsrcFetch()` — Drop-in Replacement per fetch()
-
-```
-1. Se proxy mode attivo → tenta diretto (timeout 1.5s)
-2. Se diretto OK → ritorna
-3. Se diretto bloccato → retry via PROXY
-4. Se PROXY fallisce → retry via PROXY_BACKUP
-5. Se tutti falliscono → ritorna ultimo errore
-```
-
-### 14.3 Status Bloccati
-
-```
-0 (null), 401, 403, 429, 500-599
-```
-
-### 14.4 Proxy Implementation
-
-- **SOCKS5** → `socks-proxy-agent` + `axios`
-- **HTTP/S** → `undici.ProxyAgent`
-
----
-
-## 15. VixSynthetic Endpoint (HLS Master Playlist Rewriter)
-
-### 15.1 Endpoint
-
-```
-GET /vixsynthetic?src={url}&lang={it}&max={1}&multi={0|1}
-GET /vixsynthetic.m3u8?src={url}&lang={it}&max={1}&multi={0|1}
-```
-
-### 15.2 Funzionalità
-
-Riceve un URL di master playlist HLS e restituisce una **mini master** con:
-
-1. **Seleziona variante video** con risoluzione massima
-2. **Filtra traccia audio** per lingua (`lang=it` default)
-3. **Supporta multi-lingua** (`multi=1` include tutte le tracce)
-4. **Risolve URI relativi** rispetto all'upstream
-5. **Gestisce redirect** (max 5, con validazione DNS per ciascuno)
-
-### 15.3 HLS Parsing
-
-```
-1. Fetch master playlist (con redirect handling)
-2. Parse #EXT-X-STREAM-INF → varianti (resolution, bandwidth)
-3. Parse #EXT-X-MEDIA → renditions (AUDIO, SUBTITLES)
-4. Seleziona migliore variante video (height → bandwidth)
-5. Seleziona traccia audio corrispondente (GROUP-ID matching)
-6. Ricostruisce master con sola variante selezionata
-```
-
-### 15.4 Redirect Handling
-
-- Max 5 redirect
-- Ogni redirect validato con DNS safety check
-- DNS pinned agent per prevenire DNS rebinding
-- Rewrite URI relativi dopo redirect
-
----
-
-## 16. MediaFlow Proxy
-
-### 16.1 Formattazione URL
-
-```typescript
-formatMediaFlowUrl(mp4Url, mfpUrl, mfpPassword)
-  → {mfpUrl}/proxy/stream/{filename}?d={encodedUrl}&api_password={psw}
-```
-
-### 16.2 Configurazione
-
-| Env Var | Descrizione |
-|---------|-----------|
-| `MFP_URL` | URL base MediaFlow |
-| `MFP_PSW` / `MFP_PASSWORD` | Password API |
-| `PROXY_BACKEND` / `MFP_BACKEND` | `mediaflow` o `mfp` |
-| `useMediaFlow` (config) | Override per-request |
-
----
-
-## 17. VixCloud / Streamtape Extraction
-
-### 17.1 Host Supportati
-
-```
-mixdrop, dropload, streamtape, supervideo, doodstream,
-deltabit, loadm, maxstream, streamhg, audinifer
-```
-
-### 17.2 Pipeline
-
-```
-1. Fetch embed page con headers realistici
-2. Estrai iframe src
-3. Fetch iframe page
-4. Parsa script tags per token/auth
-5. Costruisci URL stream finale
-6. Supporto HLS (m3u8) con playlist parsing
-```
-
-### 17.3 Anti-Detection
-
-- User-Agent realistici (Chrome 137)
-- Headers `Referer`, `Origin`, `Accept-Language`
-- Proxy rotation (socks/https)
-- Timeout configurabile per request
-
----
-
-## 18. Unificazione Stream
-
-### 18.1 Format Titolo Multilinea
-
-```
-🎬 Titolo Anime
-🗣 🇮🇹 [ITA]  ← o [SUB]
-💾 1.5GB    ← opzionale
-▶️ VixCloud  ← opzionale
-🌐 Proxy (ON/OFF)
-🤌 Anime Unity ⛩️ 🅵🅷🅳  ← opzionale
-```
-
-### 18.2 Binge Grouping
-
-**Logica per provider:**
-
-| Provider | Binge Group |
-|----------|------------|
-| AnimeUnity | `animeunity-std-ita` / `animeunity-std-sub` |
-| AnimeSaturn | `animesaturn-std-ita` / `animesaturn-std-sub` |
-| AnimeWorld | `animeworld-std-ita` / `animeworld-std-sub` |
-| VixSrc | `vixsrc-direct` / `vixsrc-directFHD` / `vixsrc-proxy` / `vixsrc-proxyFHD` |
-
-### 18.3 Ordinamento
-
-1. **Primo:** Ordinamento alfabetico per titolo (`sortStreamsByPriority`)
-2. **Secondo:** Priorità provider: AnimeUnity (1) > AnimeSaturn (2) > AnimeWorld (3)
-
----
-
-## 19. Caching
-
-### 19.1 Livelli di Cache
-
-| Livello | Chiave | TTL | Scopo |
-|---------|--------|-----|-------|
-| **HTTP** | `{as}:{method}:{url}:{body}` | Configurabile | Cache fetch HTTP |
-| **Mapping** | `{provider}:{id}:s={season}:ep={ep}:lang={lang}` | 2 min | Cache mapping API |
-| **Inflight** | `http:{key}` | Finché request viva | Deduplication richieste |
-| **Provider** | `{type}:{id}:{configHash}` | Sessione | Cache stream completi |
-| **Domains** | — | 12 ore | Cache domini provider |
-| **PlayLang** | `{slug}` | Sessione | Cache lingua play page |
-
-### 19.2 Provider Cache Key
-
-```typescript
-SHA-256({
-  type, mfpUrl, mfpPswHash, useMediaFlow,
-  tmdbKey, addonBase,
-  animeunityEnabled, animesaturnEnabled, animeworldEnabled,
-  animeunityDirect, animeunityDirectFhd, animeunityProxy
-})
-```
-
----
-
-## 20. AnimeGate (Rilevamento Anime)
-
-### 20.1 Strategia
-
-```
-1. Haglund Mappings (MAL/Kitsu da TMDB ID)
-   └─ Se trovato → isAnime = true
-2. TMDB Fallback
-   └─ Genres include "Animation" AND (JP country OR ja language)
-   └─ Configurabile con ANIME_GATE_TMDB_FALLBACK
-```
-
-### 20.2 Funzioni
-
-| Funzione | Scopo |
-|----------|-------|
-| `checkIsAnimeById(type, id)` | Verifica se ID è un anime |
-| `applyUniversalAnimeTitleNormalization(title)` | Normalizza varianti titolo |
-| `buildAnimeIdWarningStream(source)` | Stream warning se non trovato |
-
-### 20.3 Env Vars
-
-| Variabile | Default | Descrizione |
-|-----------|---------|-------------|
-| `ANIME_GATE_ENABLED` | `true` | Abilita tutto il sistema |
-| `ANIME_GATE_TMDB_FALLBACK` | `true` | Usa fallback TMDB |
-| `ANIME_GATE_PLACEHOLDER_ENABLED` | `true` | Mostra stream placeholder |
-
----
-
-## 21. Title Resolver
-
-### 21.1 File: `animeTitleResolver.ts`
-
-**Responsabilità:** Risoluzione titoli inglesi da ID esterni.
-
-### 21.2 Fonti Dati
-
-```
-1. Kitsu API → titolo inglese + MAL ID + TMDB ID
-2. Jikan API (MAL) → titolo inglese
-3. TMDB API → titolo + dettagli
-4. Haglund API → mapping TMDB↔MAL↔Kitsu
-5. Anime Mapping API → mapping provider-specific
-```
-
-### 21.3 Funzioni Principali
-
-| Funzione | Input | Output |
-|----------|-------|--------|
-| `resolveAnimeTitle()` | ID + tipo | `AnimeResolvedTitle` |
-| `resolveFromKitsu()` | kitsuId | titolo, MAL ID, TMDB ID, data |
-| `resolveFromMal()` | malId | titolo inglese |
-| `resolveFromImdb()` | imdbId | titolo, mapping, episodi |
-| `resolveFromTmdb()` | tmdbId | titolo, mapping, episodi |
-
-### 21.4 Episode Mode
-
-Il resolver determina la modalità episodio:
-- **Absolute** — episodi numerati in assoluto (es. One Piece)
-- **Season-based** — episodi per stagione (standard)
-
----
-
-## 22. Landing Page & UI
-
-### 22.1 Template
-
-**File:** `src/landingPage.ts`
-
-Pagina HTML generata dinamicamente con:
-- Form configurazione
-- Toggle provider (AU/AS/AW)
-- Input MFP URL/password
-- Select proxy backend
-- Info versione e link GitHub
-
-### 22.2 Accessibile su
-
-```
-http://localhost:7000/
-```
-
----
-
-## 23. DNS Safety & Security
-
-### 23.1 DNS Verifier
-
-**File:** `addon.ts` (righe ~1199-1262)
-
-Verifica che gli URL di stream puntino a domini sicuri prima di essere restituiti:
-
-```typescript
-verifyDnsSafety(url) → { safe: boolean, addresses: string[] }
-```
-
-### 23.2 Controlli
-
-| Controllo | Descrizione |
-|-----------|-------------|
-| **Private IPv4** | Blocca 10.x, 192.168.x, 172.16.x |
-| **Private IPv6** | Blocca fc00::, fe80::, ::1 |
-| **Loopback** | Blocca 127.x, ::1 |
-| **Link-local** | Blocca 169.254.x |
-| **Allowed hosts** | Whitelist host consentiti |
-
-### 23.3 Blocked Domains
-
-Lista di domini bloccati definita in `anime-core/helpers.ts` (`BLOCKED_DOMAINS`).
-
----
-
-## 24. Workflow GitHub Automations
-
-### 24.1 Normalizzazione Automatica
-
-| Workflow | Trigger | Scopo |
-|----------|---------|-------|
-| `auto-normalization.yml` | Issue aperta | PR per AnimeSaturn |
-| `auto-normalization-animeunity.yml` | Issue aperta | PR per AnimeUnity |
-| `auto-normalization-animeworld.yml` | Issue aperta | PR per AnimeWorld |
-| `issue-release-bump.yml` | Release | Versionamento automatico |
-
-### 24.2 Template Issue
-
-| Template | Prefisso Issue |
-|----------|---------------|
-| `nuova_normalizzazione.yml` | `[NORMALIZZA]: ` |
-| `nuova_normalizzazione_animeunity.yml` | `[NORMALIZZA AU]: ` |
-| `nuova_normalizzazione_animeworld.yml` | `[NORMALIZZA AW]: ` |
-
-### 24.3 Script Python
-
-| Script | Scopo |
-|--------|-------|
-| `scripts/auto_normalize.py` | Genera PR AnimeSaturn |
-| `scripts/auto_normalize_animeunity.py` | Genera PR AnimeUnity |
-| `scripts/auto_normalize_animeworld.py` | Genera PR AnimeWorld |
-
----
-
-## 25. Docker & Deployment
-
-### 25.1 Dockerfile
-
-```dockerfile
-# Build stage
-FROM node:20-alpine
-WORKDIR /app
-COPY package.json pnpm-lock.yaml ./
-RUN corepack enable && pnpm install --frozen-lockfile
-COPY . .
-RUN pnpm run build
-
-# Production stage
-FROM node:20-alpine
-WORKDIR /app
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/config ./config
-COPY --from=builder /app/public ./public
-EXPOSE 7000
-CMD ["node", "dist/addon.js"]
-```
-
-### 25.2 Docker Compose
-
-```yaml
-services:
-  hanx:
-    build: .
-    ports:
-      - "7000:7000"
-    environment:
-      - PORT=7000
-      - TMDB_API_KEY=xxx
-      - MFP_URL=xxx
-      - ANIMEUNITY_ENABLED=true
-      # ...
-```
-
-### 25.3 Variabili Ambiente Chiave
-
-| Variabile | Default | Descrizione |
-|-----------|---------|-------------|
-| `PORT` | `7000` | Porta server |
-| `TMDB_API_KEY` | — | Chiave API TMDB |
-| `MFP_URL` | — | URL MediaFlow Proxy |
-| `MFP_PSW` | — | Password MediaFlow |
-| `ANIMEUNITY_ENABLED` | `true` | Abilita AnimeUnity |
-| `ANIMESATURN_ENABLED` | `true` | Abilita AnimeSaturn |
-| `ANIMEWORLD_ENABLED` | `true` | Abilita AnimeWorld |
-| `ADDON_BASE_URL` | — | Base URL addon |
-| `DEBUG_LOG` | `false` | Debug logging |
-| `PROXY_URL` | — | Proxy URL generico |
-| `AU_PROXY` / `AS_PROXY` / `AW_PROXY` | — | Proxy per-provider |
-| `AU_USER_AGENT` | — | User-Agent AnimeUnity |
-| `ANIME_FETCH_TIMEOUT_MS` | `10000` | Timeout fetch anime |
-| `PROVIDER_URLS_URL` | GitHub raw | URL remote provider config |
-
----
-
-## 🧩 Riepilogo Dipendenze
-
-### Runtime (28 pacchetti)
-
-| Categoria | Pacchetti |
-|-----------|-----------|
-| **HTTP/Fetch** | `axios`, `got-scraping`, `undici`, `node-fetch` |
-| **Proxy** | `https-proxy-agent`, `socks-proxy-agent` |
-| **HTML Parsing** | `cheerio`, `jsdom` |
-| **XML/HLS** | `xml2js`, `sax` |
-| **Caching** | `@keyv/sqlite`, `cacheable` |
-| **Web Framework** | `express` |
-| **Logging** | `winston` |
-| **Utilities** | `bytes`, `randomstring`, `slugify`, `mime-types`, `tough-cookie`, `async-mutex`, `unpacker` |
-| **Stremio** | `stremio-addon-sdk` |
-
-### Dev Dependencies
-
-| Pacchetto | Scopo |
-|-----------|-------|
-| `typescript` | Compilation |
-| `tsx` | TypeScript execution (dev) |
-| `ts-node` | TypeScript execution |
-| `@types/*` | Type definitions |
-
----
-
-## 📐 Pattern Architetturali
-
-### 1. Provider Plugin Architecture
-Ogni provider è una classe indipendente che implementa la stessa interfaccia:
-- `handleKitsuRequest(id)` → `{ streams }`
-- `handleMalRequest(id)` → `{ streams }`
-- `handleImdbRequest(id, season, episode, isMovie)` → `{ streams }`
-- `handleTmdbRequest(id, season, episode, isMovie)` → `{ streams }`
-
-### 2. Fan-out Parallel Pattern
-Tutti i provider abilitati vengono eseguiti in parallelo con `Promise.all()`:
-```typescript
-const providerPromises: Promise<Stream[]>[] = [];
-scheduleProviderRun('AnimeUnity', enabled, handler, ...);
-scheduleProviderRun('AnimeSaturn', enabled, handler, ...);
-scheduleProviderRun('AnimeWorld', enabled, handler, ...);
-const allResults = await Promise.all(providerPromises);
-```
-
-### 3. Cache-Aside Pattern
-Prima di ogni operazione costosa, si controlla la cache:
-```typescript
-const cached = _providerCacheGet(type, id, configHash);
-if (cached) return { streams: cached };
-```
-
-### 4. Retry with Fallback Pattern
-Se un provider non trova risultati:
-1. Prova con titolo normalizzato
-2. Prova con varianti apostrofi
-3. Prova con ricerca per anno (Kitsu fallback)
-4. Prova con ricerca loose (senza MAL ID)
-
-### 5. Inflight Deduplication Pattern
-Richieste HTTP duplicate per la stessa URL condividono la stessa Promise:
-```typescript
-const running = caches.inflight.get(inflightKey);
-if (running) return running;  // Condividi la richiesta in corso
-```
-
----
-
-## 🔄 Diagramma Sequenza Completo
-
-```
-Stremio Client                HanX Addon                 Provider Sites        External APIs
-     │                            │                           │                      │
-     │── /stream/anime/tt12345 ──>│                           │                      │
-     │                            │── [1] Parse ID (tt→IMDB) │                      │
-     │                            │── [2] Check Provider Cache│                     │
-     │                            │                          │                      │
-     │                            │── [3] TMDB Find (IMDB→TMDB)                    │
-     │                            │───────────────────────────────────────────────>│
-     │                            │<────────────────────────────────────────────────│
-     │                            │     TMDB ID + Title    │                      │
-     │                            │                          │                      │
-     │                            │── [4] Fan-out Providers (parallelo)             │
-     │                            │                          │                      │
-     │                            │──> AnimeUnity          │                      │
-     │                            │──> AnimeSaturn         │                      │
-     │                            │──> AnimeWorld          │                      │
-     │                            │                          │                      │
-     │                            │     │                    │                      │
-     │                            │     │── [5] Search Title ──────────────────────>│
-     │                            │     │                    │   AnimeUnity/Saturn/World
-     │                            │     │<───────────────────│                      │
-     │                            │     │   Results          │                      │
-     │                            │     │                    │                      │
-     │                            │     │── [6] Parse Pages ───────────────────────>│
-     │                            │     │                    │   Embed pages
-     │                            │     │<───────────────────│                      │
-     │                            │     │   HTML             │                      │
-     │                            │     │                    │                      │
-     │                            │     │── [7] Extract Video ─────────────────────>│
-     │                            │     │                    │   VixCloud/Mixdrop/etc
-     │                            │     │<───────────────────│                      │
-     │                            │     │   Stream URLs      │                      │
-     │                            │                          │                      │
-     │                            │── [8] Unify & Sort       │                      │
-     │                            │── [9] Cache Result       │                      │
-     │                            │                          │                      │
-     │<── { streams: [...] } ────│                          │                      │
-     │                            │                          │                      │
-
-     │  ┌─────────────────────────────────────────────────┐ │
-     │  │ Stream Format (per ogni stream):                │ │
-     │  │  - title: multilinea con emoji                   │ │
-     │  │  - url: video URL o proxy URL                    │ │
-     │  │  - name: "🤌 Anime Unity ⛩️"                     │ │
-     │  │  - behaviorHints.bingeGroup: "animeunity-std-ita"│ │
-     │  └─────────────────────────────────────────────────┘ │
-```
-
----
-
-*Documento generato automaticamente dall'analisi completa del codicebase HanX v12.4.23.*
+*Documento basato sul percorso runtime nel sorgente e sulla configurazione di build/deploy presenti nel repository alla data di verifica.*

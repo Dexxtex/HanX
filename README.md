@@ -33,6 +33,7 @@ Supporta identificatori da **MyAnimeList**, **Kitsu**, **IMDb** e **TMDB**.
 ```bash
 git clone https://github.com/Dexxtex/HanX.git
 cd HanX
+cp .env.example .env
 docker compose up -d
 ```
 
@@ -40,9 +41,11 @@ docker compose up -d
 
 ```bash
 pnpm install
-pnpm run build
-node dist/addon.js
+cp .env.example .env # se .env non esiste già
+pnpm start
 ```
+
+Per lo sviluppo usa `pnpm dev`; entrambi i comandi caricano `.env` se presente.
 
 ## ⚙️ Configurazione
 
@@ -57,6 +60,12 @@ Variabili d'ambiente (`.env` o `docker-compose.yml`):
 | `ANIMEWORLD_ENABLED` | Abilita AnimeWorld | `true` |
 | `MFP_URL` | URL MediaFlow Proxy | — |
 | `MFP_PSW` | Password MediaFlow Proxy | — |
+| `TENRAI_API_BASE_URL` | Base API metadata MAL/Tenrai | `https://api.tenrai.org/v1` |
+| `TENRAI_CACHE_DB_PATH` | SQLite persistente per titoli/ETag e limiter | `./data/tenrai-metadata.sqlite` |
+| `TENRAI_CACHE_TTL_MS` | Massima freshness locale, mai superiore al `max-age` upstream | `3600000` |
+| `TENRAI_MAX_REQUESTS_PER_SECOND` / `TENRAI_MAX_REQUESTS_PER_MINUTE` | Limiti conservativi per l’IP di uscita | `3` / `100` |
+
+Le righe `.env.example` configurano Tenrai; puoi aggiungere le tue chiavi TMDB o MediaFlow nello stesso `.env`. Docker Compose persiste il database nel volume `hanx-data`. Le credenziali restano locali e non vanno committate.
 
 Interfaccia web: `http://localhost:7000/`
 

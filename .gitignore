@@ -7,8 +7,10 @@ dist/
 # File sensibili
 .env
 .env.*
+!.env.example
 *.log
 server.log
+data/
 
 # Test locali
 test-provider*.ps1
