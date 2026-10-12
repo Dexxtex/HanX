@@ -1,40 +1,64 @@
-# Scegli un'immagine Node.js di base
-FROM node:26-slim
+# syntax=docker/dockerfile:1
 
-# Installa python3 e curl (usati nei workflow GitHub)
-USER root
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 curl ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+# ============================
+# Stage 1: Build
+# ============================
+FROM node:26-alpine AS builder
 
-# Crea un symlink per python
-RUN ln -s /usr/bin/python3 /usr/bin/python
+WORKDIR /app
 
-# Imposta la directory di lavoro nell'immagine
-WORKDIR /usr/src/app
+# Installa certificati e curl (usati nei workflow GitHub)
+RUN apk add --no-cache ca-certificates curl
 
-# Installa pnpm
-RUN npm install -g pnpm@12.10.1
+# Installa pnpm direttamente
+RUN npm install -g pnpm@12.11.2
 
-# Copia i file del progetto nella directory di lavoro
+# Copia manifest e lockfile per cache ottimale
+COPY package.json pnpm-workspace.yaml ./
+COPY pnpm-lock.yaml ./
+
+# Installa TUTTE le dipendenze (dev incluse necessarie per build)
+RUN pnpm install --frozen-lockfile
+
+# Copia il resto del progetto
 COPY . .
 
-# Fissa i permessi per l'utente node
-RUN chown -R node:node /usr/src/app
-
-# Torna all'utente node per le operazioni di pnpm e l'esecuzione dell'app
-USER node
-
-# Installa dipendenze
-RUN rm -rf node_modules .pnpm-store dist 2>/dev/null || true
-RUN pnpm install --prod=false
-
-# Fix per il problema undici su ARM/Raspberry Pi
-RUN pnpm add undici@6.19.8
-
-# Esegui il build dell'applicazione TypeScript
+# Esegue il build
 RUN pnpm run build
 
+# ============================
+# Stage 2: Production Runner
+# ============================
+FROM node:26-alpine AS runner
 
-# Avvio diretto dell'addon (lo script wrapper /start per Beamup non serve più)
-ENTRYPOINT ["node", "dist/addon.js"]
+WORKDIR /app
+
+# Imposta ambiente produzione
+ENV NODE_ENV=production \
+    NODE_OPTIONS="--enable-source-maps"
+
+# Crea utente non-root con uid/gid espliciti (best practice Node.js Docker docs)
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -u 1001 -S appuser -G nodejs
+
+# Directory for persistent SQLite metadata cache (mounted as a named volume)
+RUN mkdir -p /app/data && chown appuser:nodejs /app/data && chmod 700 /app/data
+
+# Copia build artifacts
+COPY --from=builder --chown=appuser:nodejs /app/dist ./dist
+COPY --from=builder --chown=appuser:nodejs /app/node_modules ./node_modules
+COPY --from=builder --chown=appuser:nodejs /app/addon-config.json ./addon-config.json
+COPY --from=builder --chown=appuser:nodejs /app/config ./config
+COPY --from=builder --chown=appuser:nodejs /app/public ./public
+
+# Switcha a utente non-root
+USER appuser
+
+EXPOSE 7000
+
+# Health check per orchestrator (Docker/Kubernetes)
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD node -e "require('http').get('http://localhost:7000/', (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"
+
+# CMD exec form (non shell) per corretto signal handling
+CMD ["node", "dist/addon.js"]

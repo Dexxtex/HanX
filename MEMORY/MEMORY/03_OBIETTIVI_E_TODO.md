@@ -1,5 +1,13 @@
 # 🎯 OBIETTIVI E STATO LAVORO — HanX
 
+## ✅ Migrazione metadata MAL da Jikan a Tenrai + cache SQLite (2026-10-12)
+
+- Tutti i riferimenti runtime a `api.jikan.moe` rimossi; i tre provider condividono il resolver Tenrai.
+- Metadata MAL persistiti in SQLite tramite `node:sqlite`; cache positiva con ETag/`If-None-Match`, update su `200`, conferma su `304`, negative cache su `404` e stale-on-error.
+- Single-flight per ID, rate limiter persistente in SQLite (default 3 RPS / 100 RPM), gestione `Retry-After` e backoff.
+- Configurazione in `.env` / `.env.example`; Docker Compose carica `.env` e conserva il DB nel volume `hanx-data`.
+- Verifica: `pnpm test` (6/6); image Docker/Compose costruita; `mal:1` in container ha restituito 2 stream AnimeWorld. La cache ETag e il limiter persistono al riavvio del container.
+
 
 ## 🚀 ROADMAP MODERNIZZAZIONE (Fase futura)
 

@@ -12,6 +12,8 @@ import {
   extractProviderPaths,
   extractTmdbIdFromMappingPayload,
   resolveEpisodeFromMappingPayload,
+  getMalAnimeMetadata,
+  getPreferredMalTitle,
 } from './anime-core/index.js';
 
 // --- Type definitions for external API responses ---
@@ -62,22 +64,6 @@ interface KitsuIncludedMapping {
 
 interface KitsuAnimeWithMappingsResponse {
   included?: KitsuIncludedMapping[];
-}
-
-interface JikanTitle {
-  type?: string;
-  title?: string;
-}
-
-interface JikanData {
-  titles?: JikanTitle[];
-  title_english?: string;
-  title?: string;
-  title_japanese?: string;
-}
-
-interface JikanAnimeResponse {
-  data?: JikanData;
 }
 
 // Cache semplice in-memory per titoli tradotti per evitare chiamate ripetute
@@ -666,14 +652,14 @@ async function getEnglishTitleFromAnyId(id: string, type: 'imdb'|'tmdb'|'kitsu'|
     tmdbId = id;
     try { const haglundResp = (await (await fetch(`https://arm.haglund.dev/api/v2/themoviedb?id=${tmdbId}&include=kitsu,myanimelist`)).json()) as HaglundResponseItem[]; malId = haglundResp[0]?.myanimelist?.toString() || null; } catch {}
   } else if (type === 'kitsu') {
-    // 1. Prova a ottenere MAL mapping per poter usare Jikan (English ufficiale)
+    // 1. Prova a ottenere MAL mapping per risolvere il titolo tramite Tenrai
     try {
       const mappingsResp = (await (await fetch(`https://kitsu.io/api/edge/anime/${id}/mappings`)).json()) as KitsuMappingsResponse;
       const malMapping = mappingsResp.data?.find((m: any) => m.attributes.externalSite === 'myanimelist/anime');
       malId = malMapping?.attributes?.externalId?.toString() || null;
       console.log('[AnimeWorld][UTitle][Kitsu] primary mappings malId=', malId);
     } catch {}
-    // 2. Precarica candidato canonico ma NON restituire ancora (lasciamo chance a Jikan)
+    // 2. Precarica candidato canonico come fallback se Tenrai non ha il mapping
     try {
       const animeResp = (await (await fetch(`https://kitsu.io/api/edge/anime/${id}`)).json()) as KitsuAnimeResponse;
       const attr = animeResp.data?.attributes || {};
@@ -700,21 +686,14 @@ async function getEnglishTitleFromAnyId(id: string, type: 'imdb'|'tmdb'|'kitsu'|
   }
   if (malId) {
     try {
-      const jikanResp = (await (await fetch(`https://api.jikan.moe/v4/anime/${malId}`)).json()) as JikanAnimeResponse;
-      let englishTitle = '';
-      if (jikanResp.data && Array.isArray(jikanResp.data.titles)) {
-        const en = jikanResp.data.titles.find((t: any) => t.type === 'English');
-        englishTitle = en?.title || '';
-      }
-      if (!englishTitle && jikanResp.data) {
-        englishTitle = jikanResp.data.title_english || jikanResp.data.title || jikanResp.data.title_japanese || '';
-      }
+      const metadata = await getMalAnimeMetadata(malId);
+      const englishTitle = getPreferredMalTitle(metadata) || '';
       if (englishTitle) {
         englishTitleCache.set(cacheKey, englishTitle);
-        console.log('[AnimeWorld][UTitle] resolved via Jikan', { type, id, malId, englishTitle });
+        console.log('[AnimeWorld][UTitle] resolved via Tenrai', { type, id, englishTitle });
         return englishTitle;
       }
-      console.log('[AnimeWorld][UTitle] Jikan no EnglishTitle, will fallback', { type, id, malId });
+      console.log('[AnimeWorld][UTitle] Tenrai has no English title; using title fallback', { type, id });
     } catch {}
   }
   if (tmdbId && tmdbKey) {
@@ -1222,7 +1201,7 @@ export class AnimeWorldProvider {
     try {
       const { kitsuId, seasonNumber, episodeNumber, isMovie } = this.kitsuProvider.parseKitsuId(kitsuIdString);
       // Single quick Kitsu call: canonical title (for stream label) + startDate (for fallback filter-year)
-      // Heavy resolution (mappings, include=mappings, Jikan) deferred to fallback path only
+      // Heavy resolution (mappings, include=mappings, Tenrai) deferred to fallback path only
       let quickTitle = kitsuId;
       try {
         const metaResp = await fetch(`https://kitsu.io/api/edge/anime/${kitsuId}`);

@@ -4,6 +4,12 @@ package-lock.json
 
 # Build
 dist
+data
+
+# Secrets and local environment files
+.env
+.env.*
+!.env.example
 
 # Git
 .git
@@ -20,6 +26,7 @@ dist
 Thumbs.db
 
 # Test
+tests
 test-provider.ps1
 test-provider-mal.ps1
 server.log

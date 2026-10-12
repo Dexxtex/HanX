@@ -26,6 +26,9 @@ import {
   inferSourceTag,
   collectMediaLinksFromEmbedHtml,
   sanitizeAnimeTitle,
+  getMalAnimeMetadata,
+  getPreferredMalTitle,
+  getMalTitleCandidates,
 } from './anime-core/index.js';
 
 // --- Type definitions for external API responses ---
@@ -61,22 +64,6 @@ interface KitsuData {
 
 interface KitsuMainResponse {
   data?: KitsuData;
-}
-
-interface JikanTitle {
-  type?: string;
-  title?: string;
-}
-
-interface JikanData {
-  titles?: JikanTitle[];
-  title_english?: string;
-  title?: string;
-  title_japanese?: string;
-}
-
-interface JikanAnimeResponse {
-  data?: JikanData;
 }
 
 const USER_AGENT =
@@ -131,6 +118,43 @@ function isRetryableError(err: any): boolean {
 }
 
 /**
+ * Messaggio di errore dettagliato per log diagnostici (status + body della risposta).
+ */
+function describeHttpError(err: any): string {
+  const status = err?.response?.status;
+  const rawBody = err?.response?.data;
+  const body = rawBody
+    ? String(typeof rawBody === 'string' ? rawBody : JSON.stringify(rawBody)).replace(/\s+/g, ' ').slice(0, 300)
+    : '';
+  return `status=${status ?? 'n/a'} msg=${err?.message || err}${body ? ` body="${body}"` : ''}`;
+}
+
+/**
+ * POST che segue i redirect MANTENENDO il metodo HTTP.
+ * axios (follow-redirects) di default converte POST in GET sui redirect 301/302:
+ * con AnimeUnity (redirect da http:// o da host senza www) il GET risultante su
+ * /livesearch o /archivio/get-animes produce HTTP 405. Qui gestiamo i redirect
+ * manualmente ri-emettendo il POST verso la Location.
+ */
+async function axiosPostKeepMethod(url: string, data: any, config: any = {}, maxRedirects = 3): Promise<any> {
+  let currentUrl = url;
+  for (let hop = 0; hop <= maxRedirects; hop++) {
+    const resp = await axios.post(currentUrl, data, {
+      ...config,
+      maxRedirects: 0,
+      validateStatus: (status: number) => status >= 200 && status < 400,
+    });
+    if (resp.status < 300) return resp;
+    const location = resp.headers?.location;
+    if (!location) return resp;
+    const nextUrl = new URL(String(location), currentUrl).toString();
+    console.log(`[AnimeUnity][Proxy] POST redirect ${resp.status}: ${currentUrl} -> ${nextUrl} (metodo POST mantenuto)`);
+    currentUrl = nextUrl;
+  }
+  throw new Error(`POST ${url}: superato il limite di redirect (${maxRedirects})`);
+}
+
+/**
  * axios GET con retry proxy: tenta prima DIRETTO (3s timeout), poi con proxy se fallisce.
  */
 async function auAxiosGet(url: string, config: any = {}): Promise<any> {
@@ -141,8 +165,7 @@ async function auAxiosGet(url: string, config: any = {}): Promise<any> {
     console.log(`[AnimeUnity][Proxy] GET diretto OK (${resp.status}) <- ${url}`);
     return resp;
   } catch (directErr: any) {
-    const directMsg = directErr?.message || String(directErr);
-    console.warn(`[AnimeUnity][Proxy] GET diretto FALLITO: ${directMsg} <- ${url}`);
+    console.warn(`[AnimeUnity][Proxy] GET diretto FALLITO: ${describeHttpError(directErr)} <- ${url}`);
     if (!proxyAgent) {
       console.warn('[AnimeUnity][Proxy] Nessun proxy configurato, errore definitivo');
       throw directErr;
@@ -159,7 +182,7 @@ async function auAxiosGet(url: string, config: any = {}): Promise<any> {
     console.log(`[AnimeUnity][Proxy] GET con proxy OK (${resp.status}) <- ${url}`);
     return resp;
   } catch (proxyErr: any) {
-    console.error(`[AnimeUnity][Proxy] GET FALLITO anche con proxy: ${proxyErr?.message || proxyErr} <- ${url}`);
+    console.error(`[AnimeUnity][Proxy] GET FALLITO anche con proxy: ${describeHttpError(proxyErr)} <- ${url}`);
     throw proxyErr;
   }
 }
@@ -170,12 +193,11 @@ async function auAxiosGet(url: string, config: any = {}): Promise<any> {
 async function auAxiosPost(url: string, data: any, config: any = {}): Promise<any> {
   console.log(`[AnimeUnity][Proxy] POST diretto (${DIRECT_TIMEOUT}ms) -> ${url}`);
   try {
-    const resp = await axios.post(url, data, { ...config, timeout: DIRECT_TIMEOUT, httpAgent: undefined, httpsAgent: undefined });
+    const resp = await axiosPostKeepMethod(url, data, { ...config, timeout: DIRECT_TIMEOUT, httpAgent: undefined, httpsAgent: undefined });
     console.log(`[AnimeUnity][Proxy] POST diretto OK (${resp.status}) <- ${url}`);
     return resp;
   } catch (directErr: any) {
-    const directMsg = directErr?.message || String(directErr);
-    console.warn(`[AnimeUnity][Proxy] POST diretto FALLITO: ${directMsg} <- ${url}`);
+    console.warn(`[AnimeUnity][Proxy] POST diretto FALLITO: ${describeHttpError(directErr)} <- ${url}`);
     if (!proxyAgent) {
       console.warn('[AnimeUnity][Proxy] Nessun proxy configurato, errore definitivo');
       throw directErr;
@@ -187,11 +209,11 @@ async function auAxiosPost(url: string, data: any, config: any = {}): Promise<an
   }
   console.log(`[AnimeUnity][Proxy] Retry POST con proxy (${PROXY_TYPE}) -> ${url}`);
   try {
-    const resp = await axios.post(url, data, { ...config, timeout: config.timeout || FETCH_TIMEOUT, httpAgent: proxyAgent, httpsAgent: proxyAgent });
+    const resp = await axiosPostKeepMethod(url, data, { ...config, timeout: config.timeout || FETCH_TIMEOUT, httpAgent: proxyAgent, httpsAgent: proxyAgent });
     console.log(`[AnimeUnity][Proxy] POST con proxy OK (${resp.status}) <- ${url}`);
     return resp;
   } catch (proxyErr: any) {
-    console.error(`[AnimeUnity][Proxy] POST FALLITO anche con proxy: ${proxyErr?.message || proxyErr} <- ${url}`);
+    console.error(`[AnimeUnity][Proxy] POST FALLITO anche con proxy: ${describeHttpError(proxyErr)} <- ${url}`);
     throw proxyErr;
   }
 }
@@ -264,9 +286,18 @@ interface AnimeUnityStreamData {
 
 function getUnityBaseUrl(): string {
   const configured = getProviderUrl('animeunity', ['ANIMEUNITY_BASE_URL', 'AU_BASE_URL']);
-  if (configured) return configured.replace(/\/+$/, '');
-  const host = getDomain('animeunity') || 'animeunity.so';
-  return `https://www.${host}`.replace(/\/+$/, '');
+  const raw = String(configured || getDomain('animeunity') || 'animeunity.so').trim().replace(/\/+$/, '');
+  // Forza sempre https + www: AnimeUnity risponde con redirect 301 per http:// e per
+  // gli host senza www. axios, seguendo il redirect, converte POST in GET e Laravel
+  // restituisce 405 ("The GET method is not supported for this route") su /livesearch.
+  try {
+    const u = new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`);
+    if (!/^www\./i.test(u.hostname)) u.hostname = `www.${u.hostname}`;
+    return u.origin;
+  } catch {
+    const host = raw.replace(/^https?:\/\//i, '').replace(/^www\./i, '');
+    return `https://www.${host || 'animeunity.so'}`;
+  }
 }
 
 function normalizeAnimePath(pathOrUrl: string | null | undefined): string | null {
@@ -556,21 +587,14 @@ async function getEnglishTitleFromAnyId(id: string, type: 'imdb' | 'tmdb' | 'kit
   }
   if (malId) {
     try {
-      const jikanResp = (await (await fetch(`https://api.jikan.moe/v4/anime/${malId}`)).json()) as JikanAnimeResponse;
-      let englishTitle = '';
-      if (jikanResp.data && Array.isArray(jikanResp.data.titles)) {
-        const en = jikanResp.data.titles.find((t: any) => t.type === 'English');
-        englishTitle = en?.title || '';
-      }
-      if (!englishTitle && jikanResp.data) {
-        englishTitle = jikanResp.data.title_english || jikanResp.data.title || jikanResp.data.title_japanese || '';
-      }
+      const metadata = await getMalAnimeMetadata(malId);
+      const englishTitle = getPreferredMalTitle(metadata) || '';
       if (englishTitle) {
-        console.log(`[UniversalTitle] Titolo inglese trovato da Jikan: ${englishTitle}`);
+        console.log(`[UniversalTitle] Titolo inglese trovato da Tenrai (${metadata?.cacheStatus || 'cache'}).`);
         return englishTitle;
       }
     } catch (err) {
-      console.warn('[UniversalTitle] Errore Jikan, provo fallback TMDB:', err);
+      console.warn('[UniversalTitle] Errore Tenrai, provo fallback TMDB:', err);
     }
   }
   if (tmdbId && tmdbKey) {
@@ -1073,7 +1097,7 @@ export class AnimeUnityProvider {
     try {
       const { kitsuId, seasonNumber, episodeNumber, isMovie } = this.kitsuProvider.parseKitsuId(kitsuIdString);
       // Single quick Kitsu call for canonical title (stream label only)
-      // Heavy resolution (mappings, include=mappings, Jikan) deferred to fallback path only
+      // Heavy resolution (mappings, include=mappings, Tenrai) deferred to fallback path only
       let quickTitle = kitsuId;
       try {
         const metaResp = await fetch(`https://kitsu.io/api/edge/anime/${kitsuId}`);
@@ -1215,19 +1239,15 @@ export class AnimeUnityProvider {
     let animeVersions = await this.searchAllVersions(normalizedTitle);
     // Fallback: se non trova nulla, prova anche con titoli alternativi
     if (!animeVersions.length) {
-      // Prova a ottenere titoli alternativi da Jikan (se hai il MAL ID)
+        // Prova a ottenere titoli alternativi da Tenrai se il titolo contiene un MAL ID.
       let fallbackTitles: string[] = [];
       try {
         // Prova a estrarre MAL ID dal titolo (se è un numero)
         const malIdMatch = title.match && title.match(/\d+/);
         const malId = malIdMatch ? malIdMatch[0] : null;
         if (malId) {
-          const jikanResp = (await (await fetch(`https://api.jikan.moe/v4/anime/${malId}`)).json()) as JikanAnimeResponse;
-          fallbackTitles = [
-            jikanResp.data?.title_japanese,
-            jikanResp.data?.title,
-            jikanResp.data?.title_english
-          ].filter(Boolean) as string[];
+          const metadata = await getMalAnimeMetadata(malId);
+          fallbackTitles = getMalTitleCandidates(metadata);
         }
       } catch { }
       // Prova fallback con titoli alternativi

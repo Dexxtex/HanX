@@ -32,6 +32,17 @@ export {
   getProviderUrlsFilePath,
 } from './provider-urls.js';
 
+// Persistent Tenrai metadata cache with ETag revalidation and request throttling
+export {
+  getMalAnimeMetadata,
+  getPreferredMalTitle,
+  getMalTitleCandidates,
+  TenraiMetadataStore,
+  TenraiMetadataError,
+  type MalAnimeMetadata,
+  type TenraiMetadataStoreOptions,
+} from './tenrai-metadata.js';
+
 // Mapping API interaction
 export {
   parseExplicitRequestId,

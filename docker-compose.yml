@@ -2,8 +2,12 @@ services:
   hanx:
     container_name: HanX
     build: .
+    env_file:
+      - .env
     ports:
       - "7000:7000"
+    volumes:
+      - hanx-data:/app/data
     environment:
       - PORT=7000
       # Opzionale: chiavi API
@@ -18,3 +22,6 @@ services:
       # - ANIMESATURN_ENABLED=true
       # - ANIMEWORLD_ENABLED=true
     restart: unless-stopped
+
+volumes:
+  hanx-data:
