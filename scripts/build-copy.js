@@ -31,9 +31,11 @@ function copyRecursive(src, dest) {
   }
 }
 
-// cp src/config/*.json dist/config/
+// cp src/config/*.json dist/config/ (directory is optional)
 function copyConfigFiles() {
   const srcConfig = path.join(root, 'src', 'config');
+  if (!fs.existsSync(srcConfig)) return;
+
   const distConfig = path.join(root, 'dist', 'config');
   mkdirp(distConfig);
 
