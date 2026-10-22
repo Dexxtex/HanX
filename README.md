@@ -76,7 +76,9 @@ Le righe `.env.example` configurano Tenrai e il mapping; puoi aggiungere le tue 
 
 Nel campo **Additional env file (optional)** lascia vuoto, a meno che tu non abbia davvero un secondo file nel repository (es. `.env.production`). Il campo accetta un nome relativo alla directory dello stack e non crea il file mancante.
 
-Il `docker-compose.yml` rende `.env` opzionale e legge anche `.env.dockhand`, il file generato da Dockhand con le variabili non-secret dell'Environment tab. Le variabili secret vengono passate tramite le mappature `environment: ${VAR}` già presenti per chiavi API ed EasyProxy. Non serve creare `.env` nel clone Git, ma puoi farlo se preferisci gestire tutto da file.
+Il `docker-compose.yml` rende `.env` opzionale e legge anche `.env.dockhand`, il file generato da Dockhand con le variabili non-secret dell'Environment tab. Le variabili secret vengono passate tramite le mappature `environment: ${VAR}` già presenti per chiavi API, EasyProxy e proxy di scraping. Non serve creare `.env` nel clone Git, ma puoi farlo se preferisci gestire tutto da file.
+
+`EASYPROXY_URL` serve per la riproduzione degli stream, non per lo scraping. Se AnimeUnity/AnimeSaturn/AnimeWorld rispondono `429` o `403`, configura un forward proxy HTTP/SOCKS in `PROXY` oppure nei proxy specifici `AU_PROXY`, `AS_PROXY`, `AW_PROXY`.
 
 La landing page permette anche di inserire TMDB API Key, TVDB API Key e TVDB PIN direttamente nel link personale: se un campo resta vuoto, HanX usa la variabile d'ambiente corrispondente quando presente. Le chiavi non vengono salvate sul server e restano nel manifest URL.
 
