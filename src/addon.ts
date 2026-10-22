@@ -511,7 +511,8 @@ function createBuilder() {
                     animeUnityEnabled: !!animeUnityEnabled,
                     animeSaturnEnabled: !!animeSaturnEnabled,
                     animeWorldEnabled: !!animeWorldEnabled,
-                    hasProxy: !!easyProxyUrl,
+                    easyProxyPlayback: !!easyProxyUrl,
+                    scrapingProxy: !!(process.env.PROXY || process.env.AU_PROXY || process.env.AS_PROXY || process.env.AW_PROXY),
                 });
 
                 if ((id.startsWith('kitsu:') || id.startsWith('mal:') || id.startsWith('tt') || id.startsWith('tmdb:') || id.startsWith('tvdb:')) && (animeUnityEnabled || animeSaturnEnabled || animeWorldEnabled)) {
