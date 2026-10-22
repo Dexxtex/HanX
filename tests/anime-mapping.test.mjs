@@ -55,7 +55,7 @@ process.env.ANIME_MAPPING_FILE = fixtureFile;
 
 const { parseRequestId, resolveMappingRequest, toNumericId } = await import('../dist/mapping/request.js');
 const { resolveLocalTarget, resolveSeasonFallbackTitle, getMappingVersion, resetMappingCache } = await import('../dist/mapping/index.js');
-const { resolveLiveTarget } = await import('../dist/mapping/live.js');
+const { resolveLiveTarget, fetchKitsuAnime } = await import('../dist/mapping/live.js');
 
 function targetFor(id) {
   const request = resolveMappingRequest(id);
@@ -208,6 +208,36 @@ test('parser handles TVDB and no S/E movies', () => {
   assert.equal(movie.episode, null);
 
   assert.equal(toNumericId('tvdb:377543:3:13'), '377543');
+});
+
+test('Kitsu requests use the JSON:API Accept header', async () => {
+  const originalFetch = globalThis.fetch;
+  let accept = '';
+
+  globalThis.fetch = async (input, init) => {
+    assert.match(String(input), /kitsu\.io\/api\/edge\/anime\/244001/);
+    accept = new Headers(init?.headers).get('accept') || '';
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        data: {
+          type: 'anime',
+          id: '244001',
+          attributes: { canonicalTitle: 'Kitsu Header Test', titles: { en: 'Kitsu Header Test' } },
+        },
+      }),
+    };
+  };
+
+  try {
+    const anime = await fetchKitsuAnime('244001');
+    assert.equal(accept, 'application/vnd.api+json');
+    assert.equal(anime?.title, 'Kitsu Header Test');
+  } finally {
+    globalThis.fetch = originalFetch;
+    resetMappingCache();
+  }
 });
 
 test('live TVDB resolution aligns a Kitsu entry by air date (mocked fetch)', async () => {

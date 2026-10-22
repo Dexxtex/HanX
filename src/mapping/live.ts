@@ -58,9 +58,12 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   for (let attempt = 0; attempt < RETRY_ATTEMPTS; attempt++) {
     try {
       debug(4, 'Mapping/HTTP', 'request', { endpoint, attempt: attempt + 1 });
+      const accept = new URL(url).hostname.endsWith('kitsu.io')
+        ? 'application/vnd.api+json'
+        : 'application/json';
       const response = await fetch(url, {
         ...init,
-        headers: { accept: 'application/json', ...(init?.body ? { 'content-type': 'application/json' } : {}), ...(init?.headers || {}) },
+        headers: { accept, ...(init?.body ? { 'content-type': 'application/json' } : {}), ...(init?.headers || {}) },
       });
       if (response.ok) {
         debug(4, 'Mapping/HTTP', 'ok', { endpoint, status: response.status });
