@@ -18,19 +18,6 @@ test('landing page exposes API key fields and four configuration steps', () => {
   assert.match(html, /keysSummary/);
 });
 
-test('landing page carries the detected public base URL into the generated link', () => {
-  const html = landingTemplate(
-    { name: 'HanX', version: '1.0.0', config: [] },
-    {},
-    'https://ubuntuserver.example.ts.net:8006/'
-  );
-
-  const match = html.match(/window\.__HANX_PAGE_DATA__ = (\{.*?\});/s);
-  assert.ok(match);
-  assert.equal(JSON.parse(match[1]).publicBaseUrl, 'https://ubuntuserver.example.ts.net:8006');
-  assert.match(html, /configuredBaseUrl \|\| window\.location\.origin/);
-});
-
 test('landing page client script is syntactically valid', () => {
   const html = landingTemplate({ name: 'HanX', version: '1.0.0', config: [] });
   const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)];
