@@ -3,24 +3,25 @@ services:
     container_name: HanX
     build: .
     env_file:
-      - .env
+      # .env is optional and usually absent in git stacks.
+      - path: .env
+        required: false
+      # Dockhand writes non-secret Environment-tab overrides here.
+      - path: .env.dockhand
+        required: false
     ports:
       - "7000:7000"
     volumes:
       - hanx-data:/app/data
     environment:
       - PORT=7000
-      # Opzionale: chiavi API
-      # - TMDB_API_KEY=your_key_here
-      # - TVDB_API_KEY=your_key_here
-      # - TVDB_PIN=your_pin
-      # Opzionale: EasyProxy (servizio esterno)
-      # - EASYPROXY_URL=http://host.docker.internal:7860
-      # - EASYPROXY_PASSWORD=your_password
-      # Opzionale: abilita/disabilita provider
-      # - ANIMEUNITY_ENABLED=true
-      # - ANIMESATURN_ENABLED=true
-      # - ANIMEWORLD_ENABLED=true
+      # Explicit mappings also carry Dockhand secrets, which are injected
+      # into the compose process environment but not written to a file.
+      - TMDB_API_KEY=${TMDB_API_KEY:-}
+      - TVDB_API_KEY=${TVDB_API_KEY:-}
+      - TVDB_PIN=${TVDB_PIN:-}
+      - EASYPROXY_URL=${EASYPROXY_URL:-}
+      - EASYPROXY_PASSWORD=${EASYPROXY_PASSWORD:-}
     restart: unless-stopped
 
 volumes:
