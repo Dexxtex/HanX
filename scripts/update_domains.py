@@ -6,10 +6,11 @@ Aggiorna:
 - config/domains.json
 - config/provider_urls.json
 
-Legge i domini dal pastebin, ma applica solo indirizzi realmente
-raggiungibili. Se il pastebin è stale o irraggiungibile, prova i domini
-correnti e i fallback noti, così AnimeSaturn, AnimeUnity e AnimeWorld
-non vengono mai puntati a un host morto.
+Legge i domini dal pastebin e dai siti ufficiali dei link (animesaturn.me,
+animeworlditalia.com), ma applica solo indirizzi realmente raggiungibili.
+Se le fonti sono stale o irraggiungibili, prova i domini correnti e i
+fallback noti, così AnimeSaturn, AnimeUnity e AnimeWorld non vengono mai
+puntati a un host morto.
 Eseguito dal workflow GitHub ogni 6 ore.
 """
 import json, sys, re, urllib.request
@@ -17,6 +18,11 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 PASTEBIN_RAW = 'https://pastebin.com/raw/KgQ4jTy6'
+# Fonti ufficiali: elencano solo i domini di streaming validi.
+OFFICIAL_SOURCES = {
+    'animesaturn': 'https://www.animesaturn.me/',
+    'animeworld': 'https://www.animeworlditalia.com/',
+}
 DOMAINS_FILE = Path('config/domains.json')
 PROVIDER_URLS_FILE = Path('config/provider_urls.json')
 BACKUP_FILE = Path('config/domains.jsonbk')
@@ -25,17 +31,20 @@ ATTENTION_FILE = Path('attenzione.check')
 KEY_ORDER = ['animesaturn', 'animeunity', 'animeworld']
 
 KEY_HINTS = {
-    'animesaturn': re.compile(r'animesaturn\.[a-z]{2,}'),
-    'animeunity': re.compile(r'animeunity\.[a-z]{2,}'),
-    'animeworld': re.compile(r'animeworld\.[a-z]{2,}'),
+    'animesaturn': re.compile(r'^(?:animesaturn|animemars)\.[a-z]{2,}$'),
+    'animeunity': re.compile(r'^animeunity\.[a-z]{2,}$'),
+    'animeworld': re.compile(r'^animeworld\.[a-z]{2,}$'),
 }
+
+# Domini che elencano i link ma non sono siti di streaming.
+SOURCE_ONLY_HOSTS = {'animesaturn.me', 'animeworlditalia.com'}
 
 # Fallback usati solo se il pastebin non offre un host raggiungibile.
 # Verificati manualmente: animeunity.so è morto, animeunity.at è il canonical.
 KNOWN_HOSTS = {
-    'animesaturn': ['animesaturn.net', 'animesaturn.me'],
+    'animesaturn': ['animesaturn.net', 'animemars.org', 'animesaturn.cx', 'animesaturn.cc', 'animesaturn.com'],
     'animeunity': ['animeunity.at', 'animeunity.io'],
-    'animeworld': ['animeworld.ac'],
+    'animeworld': ['animeworld.ac', 'animeworld.so', 'animeworld.tv'],
 }
 
 DEFAULT_DOMAINS = {
@@ -44,7 +53,7 @@ DEFAULT_DOMAINS = {
     'animeworld': 'animeworld.ac',
 }
 
-HOST_RE = re.compile(r'https?://(?:www\.)?([^/\s]+)', re.I)
+HOST_RE = re.compile(r'https?://(?:www\.)?([a-z0-9.-]+)', re.I)
 CHALLENGE_RE = re.compile(
     r'cf-turnstile|Just a moment|__cf_chl_|challenge-platform|'
     r'enable javascript and cookies to continue',
@@ -78,15 +87,16 @@ def extract_hosts(text: str):
     seen = set()
     for match in HOST_RE.finditer(text):
         host = normalize_host(match.group(1))
-        if host and host not in seen:
+        if host and host not in SOURCE_ONLY_HOSTS and host not in seen:
             seen.add(host)
             hosts.append(host)
     return hosts
 
 
-def candidate_hosts(key: str, paste_hosts, current):
+def candidate_hosts(key: str, paste_hosts, current, official_hosts=()):
     hint = KEY_HINTS[key]
-    ordered = [host for host in paste_hosts if hint.search(host)]
+    ordered = [host for host in official_hosts if hint.search(host)]
+    ordered.extend(host for host in paste_hosts if hint.search(host))
     ordered.append(current.get(key, ''))
     ordered.extend(KNOWN_HOSTS.get(key, []))
 
@@ -94,7 +104,7 @@ def candidate_hosts(key: str, paste_hosts, current):
     seen = set()
     for value in ordered:
         host = normalize_host(value)
-        if host and host not in seen:
+        if host and host not in SOURCE_ONLY_HOSTS and host not in seen:
             seen.add(host)
             result.append(host)
     return result
@@ -164,12 +174,16 @@ def main():
     current = load_json(DOMAINS_FILE) or dict(DEFAULT_DOMAINS)
     provider_urls = load_json(PROVIDER_URLS_FILE)
     paste_hosts = extract_hosts(paste_txt)
+    official_hosts = {
+        key: extract_hosts(fetch(url))
+        for key, url in OFFICIAL_SOURCES.items()
+    }
     updated = dict(current)
     changed = {}
     failures = []
 
     for key in KEY_ORDER:
-        chosen = choose_host(key, candidate_hosts(key, paste_hosts, current))
+        chosen = choose_host(key, candidate_hosts(key, paste_hosts, current, official_hosts.get(key, ())))
         if not chosen:
             failures.append(key)
             continue
