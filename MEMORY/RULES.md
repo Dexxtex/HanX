@@ -36,12 +36,12 @@
 | File/Campo | Stato | Note |
 |------------|-------|------|
 | `easyproxyDvr.ts` | ✅ RIMOSSO | DVR non usato da anime |
-| **EasyProxy SERVIZIO** | ✅ MANTENERE | Proxy alternativo |
+| **EasyProxy SERVIZIO** | ✅ MANTENERE | Unico proxy media |
 | Normalizzazioni anime | ✅ MANTENERE | Non modificare |
-| `mediaFlowProxyUrl/Psw` | ✅ MANTENERE | Infrastruttura proxy |
+| `easyProxyUrl/Psw` | ✅ MANTENERE | Infrastruttura proxy |
 | `tmdbApiKey` | ✅ MANTENERE | Metadati anime |
 | `personalTmdbKey` | ✅ MANTENERE | UI helper (landingPage) |
-| `mediaflowMaster` | ✅ MANTENERE | UI helper (landingPage) |
+| `easyProxyMaster` | ✅ MANTENERE | UI helper (landingPage) |
 
 ---
 

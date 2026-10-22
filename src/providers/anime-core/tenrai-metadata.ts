@@ -553,13 +553,13 @@ export class TenraiMetadataStore {
       }
 
       if (!response.ok) {
-        const retryAfter = this.recordFailure(malId, row);
+        this.recordFailure(malId, row);
         return this.staleRow(row) || this.waitForRetry(row);
       }
 
       const contentLength = Number(response.headers.get('content-length') || 0);
       if (contentLength > MAX_RESPONSE_BYTES) {
-        const retryAfter = this.recordFailure(malId, row);
+        this.recordFailure(malId, row);
         return this.staleRow(row) || this.waitForRetry(row);
       }
       const contentType = (response.headers.get('content-type') || '').toLowerCase();

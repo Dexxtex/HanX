@@ -185,10 +185,10 @@ FROM node:26-slim
 ## 📝 REGOLE CRITICHE
 
 1. **EasyProxy FILE** (`easyproxyDvr.ts`): ✅ RIMOSSO (non usato)
-2. **EasyProxy SERVIZIO**: ✅ MANTENUTO (proxy alternativo)
+2. **EasyProxy SERVIZIO**: ✅ MANTENUTO (unico proxy media)
 3. **Normalizzazioni anime**: ✅ NON MODIFICARE
-4. **Dipendenze proxy**: ✅ MANTENERE (`mediaFlowProxyUrl`, `mediaFlowProxyPassword`, `useMediaFlow`, `tmdbApiKey`)
-5. **UI helper**: ✅ MANTENERE (`personalTmdbKey`, `mediaflowMaster`)
+4. **Dipendenze proxy**: ✅ MANTENERE (`easyProxyUrl`, `easyProxyPassword`, `tmdbApiKey`)
+5. **UI helper**: ✅ MANTENERE (`personalTmdbKey`, `easyProxyMaster`)
 6. **Conteggio righe**: ✅ Usare sempre **editor**, mai terminale
 
 ---

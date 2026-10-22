@@ -3,14 +3,13 @@
  * Barrel export for all shared anime provider infrastructure.
  *
  * Usage in providers:
- *   import { fetchResource, createCaches, resolveLookupRequest, ... } from './anime-core';
+ *   import { fetchResource, createCaches, getProviderUrl, ... } from './anime-core';
  */
 
 // Cache utilities
 export {
   getCached,
   setCached,
-  uniqueStrings,
   createCaches,
   type CacheEntry,
 } from './cache.js';
@@ -28,8 +27,6 @@ export {
 // Provider URL resolution
 export {
   getProviderUrl,
-  getMappingApiBase,
-  getProviderUrlsFilePath,
 } from './provider-urls.js';
 
 // Persistent Tenrai metadata cache with ETag revalidation and request throttling
@@ -43,21 +40,6 @@ export {
   type TenraiMetadataStoreOptions,
 } from './tenrai-metadata.js';
 
-// Mapping API interaction
-export {
-  parseExplicitRequestId,
-  resolveLookupRequest,
-  fetchMappingPayload,
-  extractProviderPaths,
-  extractTmdbIdFromMappingPayload,
-  resolveEpisodeFromMappingPayload,
-  resolveEpisodeFromMappingPayloadExtended,
-  type ExplicitRequestId,
-  type LookupRequest,
-  type ProviderContext,
-  type MappingPayload,
-} from './mapping-api.js';
-
 // Shared helpers
 export {
   parsePositiveInt,
@@ -65,12 +47,9 @@ export {
   normalizeRequestedSeason,
   parseEpisodeNumber,
   toAbsoluteUrl,
-  isDirectMediaPath,
   normalizePlayableMediaUrl,
   sanitizeAnimeTitle,
   inferSourceTag,
-  resolveLanguageEmoji,
-  extractQualityHint,
   normalizeHostLabel,
   mapLimit,
   normalizeEpisodesList,

@@ -5,11 +5,13 @@
  */
 
 import { getCached, setCached, type CacheEntry } from './cache.js';
+import { debug, redactUrl } from '../../utils/logger.js';
 
 // Node.js 18+ has native fetch — no fallback needed.
 const fetchImpl: typeof globalThis.fetch = globalThis.fetch;
+import nodeFetch from 'node-fetch';
+import { fetch as undiciFetch, ProxyAgent } from 'undici';
 import { SocksProxyAgent } from 'socks-proxy-agent';
-import { HttpsProxyAgent } from 'https-proxy-agent';
 
 export const DEFAULT_USER_AGENT =
   process.env.AU_USER_AGENT ||
@@ -21,6 +23,46 @@ export const DEFAULT_FETCH_TIMEOUT = Number.parseInt(
   process.env.ANIME_FETCH_TIMEOUT_MS || '10000',
   10
 ) || 10000;
+
+// Riusa lo stesso agent: crearne uno per richiesta lascia pool di connessioni aperti.
+const proxyAgents = new Map<string, any>();
+
+function getProxyAgent(proxyUrl: string): any {
+  const cached = proxyAgents.get(proxyUrl);
+  if (cached) return cached;
+  debug(4, 'Fetch', 'proxy agent created', redactUrl(proxyUrl));
+  const agent = proxyUrl.startsWith('socks')
+    ? new SocksProxyAgent(proxyUrl)
+    : new ProxyAgent(proxyUrl);
+  proxyAgents.set(proxyUrl, agent);
+  return agent;
+}
+
+type ProxyPlatform = 'animeunity' | 'animesaturn' | 'animeworld';
+
+/** Ordine richiesto: proxy della piattaforma, poi proxy globale, poi diretto. */
+function getProxyChain(url: string, platformOverride?: ProxyPlatform): { label: string; url: string }[] {
+  const platformName = platformOverride
+    || (url.includes('animesaturn') ? 'animesaturn'
+      : url.includes('animeworld') ? 'animeworld'
+      : url.includes('animeunity') ? 'animeunity'
+      : null);
+  const platform = platformName === 'animesaturn'
+    ? { label: 'AS_PROXY', url: String(process.env.AS_PROXY || '').trim() }
+    : platformName === 'animeworld'
+    ? { label: 'AW_PROXY', url: String(process.env.AW_PROXY || '').trim() }
+    : platformName === 'animeunity'
+    ? { label: 'AU_PROXY', url: String(process.env.AU_PROXY || '').trim() }
+    : null;
+
+  const chain = [
+    ...(platform ? [platform] : []),
+    { label: 'PROXY', url: String(process.env.PROXY || '').trim() },
+  ];
+  return chain.filter((entry, index, all) =>
+    entry.url && all.findIndex((other) => other.url === entry.url) === index
+  );
+}
 
 /**
  * Caches object — each provider should create its own via createCaches().
@@ -49,6 +91,8 @@ export interface FetchResourceOptions {
   timeoutMs?: number;
   /** Proxy Agent */
   agent?: any;
+  /** Forza la piattaforma per la catena PROXY -> *_PROXY -> diretto (utile per CDN). */
+  proxyPlatform?: ProxyPlatform;
 }
 
 /**
@@ -67,7 +111,17 @@ export async function fetchWithTimeout(
   const { agent, ...restOptions } = options;
 
   try {
-    const response = await fetchImpl(url, { ...restOptions, agent, signal: controller.signal as any });
+    // node-fetch honors agent; native fetch only honors an undici dispatcher.
+    if (agent instanceof SocksProxyAgent) {
+      return await nodeFetch(url, { ...restOptions, agent, signal: controller.signal as any });
+    }
+    const init: any = { ...restOptions, signal: controller.signal };
+    // Global fetch is a different undici copy on Node 22/24; its dispatcher must come from that copy.
+    if (agent instanceof ProxyAgent) {
+      return await undiciFetch(url, { ...init, dispatcher: agent });
+    }
+    init.agent = agent;
+    const response = await fetchImpl(url, init);
     return response;
   } finally {
     clearTimeout(timeoutId);
@@ -101,43 +155,74 @@ export async function fetchResource(
     timeoutMs = DEFAULT_FETCH_TIMEOUT,
   } = options;
 
+  debug(4, 'Fetch', 'request', {
+    method,
+    url: redactUrl(url),
+    as,
+    ttlMs,
+    timeoutMs,
+    proxyPlatform: options.proxyPlatform || 'auto',
+  });
+
+  // Proxy piattaforma -> proxy globale -> diretto. Ogni hop ha una cache
+  // separata, così un fallback diretto non bypassa il proxy ai fetch successivi.
+  const hasExplicitAgent = 'agent' in options && options.agent !== undefined;
+  if (!hasExplicitAgent) {
+    const chain = getProxyChain(url, options.proxyPlatform);
+    if (chain.length > 0) {
+      for (const proxy of chain) {
+        debug(4, 'Fetch', 'proxy hop', { label: proxy.label, url: redactUrl(url) });
+        try {
+          return await fetchResource(url, caches, {
+            ...options,
+            agent: getProxyAgent(proxy.url),
+            cacheKey: `${cacheKey}#${proxy.label}`,
+          });
+        } catch (error) {
+          debug(3, 'Fetch', 'proxy hop failed', {
+            label: proxy.label,
+            url: redactUrl(url),
+            error: (error as any)?.message || String(error),
+          });
+          // Prova il prossimo hop.
+        }
+      }
+      debug(4, 'Fetch', 'direct fallback', redactUrl(url));
+      return await fetchResource(url, caches, {
+        ...options,
+        agent: null,
+        cacheKey: `${cacheKey}#diretto`,
+      });
+    }
+  }
+
   const key = `${as}:${method}:${cacheKey}:${typeof body === 'string' ? body : ''}`;
 
   // 1. Check TTL cache
   if (ttlMs > 0) {
     const cached = getCached(caches.http, key);
-    if (cached !== undefined) return cached;
+    if (cached !== undefined) {
+      debug(4, 'Fetch', 'cache hit', redactUrl(url));
+      return cached;
+    }
   }
 
   // 2. Inflight deduplication
   const inflightKey = `http:${key}`;
   const running = caches.inflight.get(inflightKey);
-  if (running) return running;
+  if (running) {
+    debug(4, 'Fetch', 'inflight dedup', redactUrl(url));
+    return running;
+  }
 
   // 3. Execute fetch
+  const startedAt = Date.now();
   const task = (async () => {
     let resolvedAgent: any = undefined;
 
-    // Se l'agent è stato passato esplicitamente nelle opzioni, usalo (anche se null/false = nessun proxy)
+    // Se l'agent è stato passato esplicitamente nelle opzioni, usalo (anche null = diretto).
     if ('agent' in options && options.agent !== undefined) {
       resolvedAgent = options.agent || undefined;
-    } else {
-      // Auto-detect proxy in base al dominio target
-      const proxyUrl = url.includes('animesaturn')
-        ? (process.env.AS_PROXY || process.env.PROXY || '')
-        : url.includes('animeworld')
-        ? (process.env.AW_PROXY || process.env.PROXY || '')
-        : url.includes('animeunity')
-        ? (process.env.AU_PROXY || process.env.PROXY || '')
-        : '';
-
-      if (proxyUrl) {
-        if (proxyUrl.startsWith('socks')) {
-          resolvedAgent = new SocksProxyAgent(proxyUrl);
-        } else {
-          resolvedAgent = new HttpsProxyAgent(proxyUrl);
-        }
-      }
     }
 
     const response = await fetchWithTimeout(
@@ -157,11 +242,23 @@ export async function fetchResource(
     );
 
     if (!response.ok) {
+      debug(2, 'Fetch', 'http error', {
+        url: redactUrl(url),
+        status: response.status,
+        statusText: response.statusText,
+        ms: Date.now() - startedAt,
+      });
       throw new Error(`HTTP ${response.status} ${response.statusText} for ${url}`);
     }
 
     const payload = as === 'json' ? await response.json() : await response.text();
     if (ttlMs > 0) setCached(caches.http, key, payload, ttlMs);
+    debug(4, 'Fetch', 'ok', {
+      url: redactUrl(url),
+      status: response.status,
+      ms: Date.now() - startedAt,
+      bytes: typeof payload === 'string' ? payload.length : undefined,
+    });
     return payload;
   })();
 

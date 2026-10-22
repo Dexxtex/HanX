@@ -12,11 +12,11 @@ services:
       - PORT=7000
       # Opzionale: chiavi API
       # - TMDB_API_KEY=your_key_here
-      # Opzionale: MediaFlow Proxy
-      # - MFP_URL=http://localhost:3000
-      # - MFP_PSW=your_password
-      # Opzionale: URL base addon per evitare loop con VixSrc
-      # - ADDON_BASE_URL=https://tuo-dominio.com
+      # - TVDB_API_KEY=your_key_here
+      # - TVDB_PIN=your_pin
+      # Opzionale: EasyProxy (servizio esterno)
+      # - EASYPROXY_URL=http://host.docker.internal:7860
+      # - EASYPROXY_PASSWORD=your_password
       # Opzionale: abilita/disabilita provider
       # - ANIMEUNITY_ENABLED=true
       # - ANIMESATURN_ENABLED=true

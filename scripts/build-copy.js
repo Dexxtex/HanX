@@ -52,4 +52,16 @@ mkdirp(distConfig);
 copyRecursive(path.join(root, 'config'), distConfig);
 copyConfigFiles();
 
+// Anime mapping data (JSON) + optional overrides
+const mappingDataSrc = path.join(root, 'src', 'mapping', 'data');
+const mappingDataDest = path.join(root, 'dist', 'mapping', 'data');
+if (fs.existsSync(mappingDataSrc)) {
+  copyRecursive(mappingDataSrc, mappingDataDest);
+}
+const mappingOverrides = path.join(root, 'src', 'mapping', 'overrides.json');
+if (fs.existsSync(mappingOverrides)) {
+  mkdirp(path.join(root, 'dist', 'mapping'));
+  fs.copyFileSync(mappingOverrides, path.join(root, 'dist', 'mapping', 'overrides.json'));
+}
+
 console.log('✅ Build copy scripts completed');

@@ -66,7 +66,7 @@ export function toAbsoluteUrl(href: string | null | undefined, baseUrl: string):
 /**
  * Check if a URL/path points to a directly playable media file (.mp4 / .m3u8).
  */
-export function isDirectMediaPath(value: string | null | undefined): boolean {
+function isDirectMediaPath(value: string | null | undefined): boolean {
   const text = String(value || '').trim();
   if (!text) return false;
 
@@ -163,28 +163,12 @@ export function sanitizeAnimeTitle(rawTitle: string | null | undefined): string 
  * Infer a language source tag from title and path.
  * Returns 'ITA' if Italian dub markers found, otherwise 'SUB'.
  */
-export function inferSourceTag(title: string | null | undefined, animePath: string | null | undefined): string {
+export function inferSourceTag(title: string | null | undefined, animePath: string | null | undefined): 'ITA' | 'SUB' {
   const titleText = String(title || '').toLowerCase();
   const pathText = String(animePath || '').toLowerCase();
   if (/(?:^|[^\w])ita(?:[^\w]|$)/i.test(titleText)) return 'ITA';
   if (/(?:^|[-_/])ita(?:[-_/]|$)/i.test(pathText)) return 'ITA';
   return 'SUB';
-}
-
-/**
- * Convert a source tag to a language emoji.
- */
-export function resolveLanguageEmoji(sourceTag: string | null | undefined): string {
-  return String(sourceTag || '').toUpperCase() === 'ITA' ? '🇮🇹' : '🇯🇵';
-}
-
-/**
- * Extract a quality hint from a URL or filename (e.g. "1080p", "720p").
- */
-export function extractQualityHint(value: string | null | undefined): string {
-  const text = String(value || '');
-  const match = text.match(/(\d{3,4}p)/i);
-  return match ? match[1] : 'Unknown';
 }
 
 /**

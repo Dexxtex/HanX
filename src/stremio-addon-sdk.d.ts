@@ -7,12 +7,10 @@ declare module 'stremio-addon-sdk' {
   /** Costruttore usato con `new addonBuilder(...)` */
   export class addonBuilder {
     constructor(manifest: Manifest);
-    defineStreamHandler(handler: (args: { type: string; id: string; config?: any }) => Promise<{ streams: Stream[] }>): void;
-    /* Altri metodi del vero SDK non indispensabili al compile-time     */
-    defineCatalogHandler?: any;
-    defineMetaHandler?: any;
-    defineSubtitlesHandler?: any;
-    defineSubtitleHandler?: any;
+    defineStreamHandler(handler: (args: { type: string; id: string; config?: any; extra?: any }) => Promise<{ streams: Stream[]; cacheMaxAge?: number }>): void;
+    defineMetaHandler(handler: (args: { type: string; id: string; config?: any; extra?: any }) => Promise<{ meta: any; cacheMaxAge?: number }>): void;
+    defineCatalogHandler(handler: (args: any) => Promise<any>): void;
+    defineSubtitlesHandler(handler: (args: any) => Promise<any>): void;
     getInterface(): any;
   }
 
@@ -29,6 +27,8 @@ declare module 'stremio-addon-sdk' {
     name: string;
     description?: string;
     icon?: string;
+    logo?: string;
+    favicon?: string;
     background?: string;
 
     resources: string[];
@@ -51,6 +51,4 @@ declare module 'stremio-addon-sdk' {
     [k: string]: any;
   }
 
-  /** Alias usato nel codice per evitare errori di namespace */
-  export type ContentType = any;
 }

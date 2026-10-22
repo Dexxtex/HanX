@@ -522,15 +522,15 @@ Se ne trova, aggiungere `.js` all'estensione.
 **File corretti nel Punto 7**:
 | File | Import corretti |
 |------|------------------|
-| `src/providers/anime-core/index.ts` | `./cache.js`, `./fetch-resource.js`, `./provider-urls.js`, `./mapping-api.js`, `./helpers.js` |
-| `src/providers/anime-core/mapping-api.ts` | `./cache.js`, `./fetch-resource.js`, `./provider-urls.js`, `./helpers.js` |
+| `src/providers/anime-core/index.ts` | `./cache.js`, `./fetch-resource.js`, `./provider-urls.js`, `./helpers.js` |
+| `src/mapping/index.ts` | `./types.js`, `./request.js`, `./live.js` |
 | `src/providers/anime-core/fetch-resource.ts` | `./cache.js` |
 | `src/providers/animesaturn-provider.ts` | `../types/animeunity.js`, `./kitsu.js`, `../utils/domains.js`, `../utils/animeGate.js`, `./anime-core/index.js`, dynamic `../utils/tmdbResolver.js` (×2) |
-| `src/providers/animeunity-provider.ts` | `./kitsu.js`, `../utils/domains.js`, `../utils/mediaflow.js`, `../types/animeunity.js`, `../utils/animeGate.js`, `./anime-core/index.js`, dynamic `../utils/tmdbResolver.js` |
+| `src/providers/animeunity-provider.ts` | `./kitsu.js`, `../utils/domains.js`, `../utils/easyproxy.js`, `../types/animeunity.js`, `../utils/animeGate.js`, `./anime-core/index.js`, dynamic `../utils/tmdbResolver.js` |
 | `src/providers/animeworld-provider.ts` | `./kitsu.js`, `../utils/domains.js`, `../types/animeunity.js`, `../utils/animeGate.js`, `./anime-core/index.js`, dynamic `../utils/tmdbResolver.js` |
 | `src/providers/kitsu.ts` | `../types/animeunity.js` |
 | `src/utils/animeGate.ts` | `../types/animeunity.js`, dynamic `./tmdbResolver.js` |
-| `src/utils/animeTitleResolver.ts` | dynamic `./tmdbResolver.js` |
+| `src/utils/animeTitleResolver.ts` | rimosso in 12.5.0 (modulo non utilizzato) |
 | `src/addon.ts` | dynamic `./providers/animesaturn-provider.js`, `./providers/animeworld-provider.js` |
 
 ---

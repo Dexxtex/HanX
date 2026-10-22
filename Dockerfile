@@ -7,11 +7,11 @@ FROM node:26-alpine AS builder
 
 WORKDIR /app
 
-# Installa certificati e curl (usati nei workflow GitHub)
-RUN apk add --no-cache ca-certificates curl
+# Installa i certificati CA per le chiamate HTTPS
+RUN apk add --no-cache ca-certificates
 
-# Installa pnpm direttamente
-RUN npm install -g pnpm@12.11.2
+# Installa la stessa versione di pnpm dichiarata in package.json
+RUN npm install -g pnpm@12.10.1
 
 # Copia manifest e lockfile per cache ottimale
 COPY package.json pnpm-workspace.yaml ./
@@ -23,8 +23,8 @@ RUN pnpm install --frozen-lockfile
 # Copia il resto del progetto
 COPY . .
 
-# Esegue il build
-RUN pnpm run build
+# Esegue il build e rimuove le dipendenze di sviluppo dall'immagine finale
+RUN pnpm run build && pnpm prune --prod
 
 # ============================
 # Stage 2: Production Runner
@@ -47,6 +47,7 @@ RUN mkdir -p /app/data && chown appuser:nodejs /app/data && chmod 700 /app/data
 # Copia build artifacts
 COPY --from=builder --chown=appuser:nodejs /app/dist ./dist
 COPY --from=builder --chown=appuser:nodejs /app/node_modules ./node_modules
+COPY --from=builder --chown=appuser:nodejs /app/package.json ./package.json
 COPY --from=builder --chown=appuser:nodejs /app/addon-config.json ./addon-config.json
 COPY --from=builder --chown=appuser:nodejs /app/config ./config
 COPY --from=builder --chown=appuser:nodejs /app/public ./public
@@ -58,7 +59,7 @@ EXPOSE 7000
 
 # Health check per orchestrator (Docker/Kubernetes)
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD node -e "require('http').get('http://localhost:7000/', (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"
+  CMD node -e "const port = process.env.PORT || 7000; require('http').get('http://127.0.0.1:' + port + '/', (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"
 
 # CMD exec form (non shell) per corretto signal handling
 CMD ["node", "dist/addon.js"]

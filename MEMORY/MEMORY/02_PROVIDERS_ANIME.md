@@ -9,22 +9,18 @@
 
 ### 1. AnimeUnity (`src/providers/animeunity-provider.ts`)
 - Scraping AnimeUnity, proxy support, cache multi-livello, retry automatico
-- Dipendenze: anime-core, kitsu, animeGate
+- Dipendenze: anime-core, animeGate
 - In addon.ts: `scheduleProviderRun('AnimeUnity', ...)`
 
 ### 2. AnimeSaturn (`src/providers/animesaturn-provider.ts`)
 - Scraping AnimeSaturn, base URL dinamico, path normalization
-- Dipendenze: anime-core, kitsu, animeGate
+- Dipendenze: anime-core, animeGate
 - In addon.ts: `scheduleProviderRun('AnimeSaturn', ...)`
 
 ### 3. AnimeWorld (`src/providers/animeworld-provider.ts`)
 - Scraping AnimeWorld, bypass Cloudflare SecurityAW2 (cookie challenge)
-- Dipendenze: anime-core, kitsu, animeGate, flaresolverr
+- Dipendenze: anime-core, animeGate
 - In addon.ts: `scheduleProviderRun('AnimeWorld', ...)`
-
-### 4. Kitsu (`src/providers/kitsu.ts`)
-- API database anime per risoluzione titoli e metadati
-- Dipendenze: anime-core
 
 ---
 
@@ -38,8 +34,21 @@
 | `cache.ts` | Cache in-memory (getCached, setCached, uniqueStrings) |
 | `fetch-resource.ts` | Fetch HTTP con cache e dedup inflight |
 | `helpers.ts` | Parsing episode, normalizzazione, URL, BLOCKED_DOMAINS |
-| `mapping-api.ts` | API mapping (animemapping.stremio.dpdns.org) |
 | `provider-urls.ts` | Risoluzione URL provider da config/env |
+
+---
+
+## MAPPING ANIME (`src/mapping/`)
+
+| File | Scopo |
+|------|-------|
+| `request.ts` | Parsing ID Stremio/Nuvio (`kitsu`, `imdb`, `tmdb`, `tvdb`, `mal`) |
+| `index.ts` | Indice locale versionato + risoluzione `{kitsuId, kitsuEpisode, title}` |
+| `live.ts` | Fallback API ufficiali: Kitsu, TMDB, TVDB v4 (aired order) |
+| `data/anime-seasons.json` | Indice generato, schema v1 |
+| `overrides.json` | Override manuali |
+
+Generazione: `pnpm mapping:build` (richiede `TMDB_API_KEY` e `TVDB_API_KEY`), validazione `pnpm mapping:check`.
 
 ---
 
@@ -49,13 +58,10 @@
 |------|-------|
 | `tmdbResolver.ts` | IMDB→TMDB mapping, playlist HLS |
 | `animeGate.ts` | Verifica Stremio ID anime, normalizzazione titoli |
-| `animeTitleResolver.ts` | Stremio IDs → titolo inglese (animemapping→Jikan→Kitsu→TMDB) |
-| `unifiedNames.ts` | providerLabel, buildUnifiedStreamName, langToFlag |
+| `unifiedNames.ts` | Etichette provider (`providerLabel`) |
 | `shortenerResolver.ts` | Risoluzione URL shortener |
 | `domains.ts` | Gestione domini dinamici |
-| `mediaflow.ts` | Formattazione URL MediaFlow proxy |
-| `packed.ts` | Decodifica packed/eval JavaScript |
-| `config.ts` | Interfaccia Config da env vars |
+| `easyproxy.ts` | Costruzione URL EasyProxy |
 
 ---
 

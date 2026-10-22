@@ -15,11 +15,9 @@ HanX/
 │       │   ├── animeunity-provider.ts
 │       │   ├── animesaturn-provider.ts
 │       │   ├── kitsu.ts
-│       │   ├── flaresolverr.ts
 │       │   └── ... (cache, helpers, mapping)
 │       └── utils/
-│           ├── animeTitleResolver.ts
-│           ├── mediaflow.ts
+│           ├── easyproxy.ts
 │           ├── shortenerResolver.ts
 │           └── unifiedNames.ts
 ├── config/
@@ -56,15 +54,10 @@ HanX/
 
 ```
 Stremio Request → addon.ts (router anime)
-  ├── Title Resolver (animeTitleResolver.ts)
-  │   └── animemapping → Jikan → Kitsu → TMDB
-  ├── Mapping API (anime-core/mapping-api.ts)
-  ├── Provider (AU/AS/AW) → scraping + VixSrc embed
-  ├── extractor.ts (VixCloud/VixSrc)
-  │   ├── Token extraction, HLS manifest parsing
-  │   └── Direct/Proxy/Synthetic streams
+  ├── Mapping locale/ufficiale (src/mapping: Kitsu/TMDB/TVDB)
+  ├── Provider (AU/AS/AW) → scraping + HLS
   ├── shortenerResolver.ts (se necessario)
-  └── mediaflow.ts (proxy formatting)
+  └── easyproxy.ts (proxy formatting)
 ```
 
 ---
@@ -82,8 +75,7 @@ Stremio Request → addon.ts (router anime)
 
 | Proxy | Stato | Note |
 |-------|-------|------|
-| **MediaFlow** | ✅ Attivo | Proxy esterno principale |
-| **EasyProxy** | ✅ Attivo | Fallback alternativo |
+| **EasyProxy** | ✅ Attivo | Unico proxy media, servizio esterno |
 
 ---
 
@@ -95,19 +87,18 @@ Stremio Request → addon.ts (router anime)
 |-----------|-------|
 | `PORT` | Porta server (default: 7000) |
 | `TMDB_API_KEY` | Metadati anime |
-| `MFP_URL`, `MFP_PSW` | MediaFlow proxy |
+| `EASYPROXY_URL`, `EASYPROXY_PASSWORD` | EasyProxy |
 | `ANIME_GATE_ENABLED` | Gate verifica anime |
-| `DEBUG_LOG` | Debug logging |
-| `ADDON_BASE_URL` | URL base addon (opzionale) |
+| `DEBUG_LEVEL` | Debug logging 0-4 (`DEBUG_LOG` compatibile) |
 
 ### Config fields (baseManifest)
 
 | Campo | Note |
 |-------|------|
-| `tmdbApiKey`, `mediaFlowProxyUrl/Psw`, `useMediaFlow` | Infrastruttura |
-| `animeunityEnabled/Direct/DirectFhd/Proxy` | AnimeUnity |
+| `tmdbApiKey`, `easyProxyUrl/Psw` | Infrastruttura |
+| `animeunityEnabled/Direct/Proxy` | AnimeUnity |
 | `animesaturnEnabled`, `animeworldEnabled` | Provider toggle |
-| `personalTmdbKey`, `mediaflowMaster` | UI helper |
+| `personalTmdbKey`, `easyProxyMaster` | UI helper |
 
 ---
 

@@ -1,26 +1,35 @@
 import * as cheerio from 'cheerio';
-import { KitsuProvider } from './kitsu.js';
 import { getDomain } from '../utils/domains.js';
+import { debug, redactUrl } from '../utils/logger.js';
 import { AnimeWorldConfig, AnimeWorldResult, AnimeWorldEpisode, StreamForStremio } from '../types/animeunity.js';
 import { checkIsAnimeById, applyUniversalAnimeTitleNormalization } from '../utils/animeGate.js';
+import { buildEasyProxyHlsUrl, buildEasyProxyStreamUrl } from '../utils/easyproxy.js';
+import {
+  animeSlugBase as animeWorldSlugBase,
+  buildTitleFallbackQueries,
+  normalizeSearchTitleKey,
+  normalizeTitleForSearch,
+  resolveExactMapKey,
+  type TitleNormalizationOptions,
+} from '../utils/anime-title-normalization.js';
 import {
   createCaches,
   fetchResource,
   getProviderUrl,
-  resolveLookupRequest,
-  fetchMappingPayload,
-  extractProviderPaths,
-  extractTmdbIdFromMappingPayload,
-  resolveEpisodeFromMappingPayload,
   getMalAnimeMetadata,
   getPreferredMalTitle,
 } from './anime-core/index.js';
+import {
+  resolveMappingRequest,
+  resolveAnimeTarget,
+  resolveSeasonFallbackTitle,
+  getKitsuTitle,
+  getKitsuMalIdForTmdb,
+  getTvdbTitle,
+  type MappingRequest,
+} from '../mapping/index.js';
 
 // --- Type definitions for external API responses ---
-interface HaglundResponseItem {
-  myanimelist?: string;
-}
-
 interface TmdbTitleResponse {
   name?: string;
   title?: string;
@@ -137,7 +146,7 @@ async function awFetchHtml(
     const extracted = extractSecurityCookieFromHtml(html);
     if (extracted) {
       awSecurityCookie = extracted;
-      console.log('[AnimeWorld][Challenge] captured SecurityAW2 cookie, replaying with d=1');
+      debug(4, 'AnimeWorld', '[AnimeWorld][Challenge] captured SecurityAW2 cookie, replaying with d=1');
       html = await fetchResource(appendDParam(url), awCaches, {
         ttlMs,
         cacheKey: cacheKey ? `${cacheKey}:d=1:retry` : undefined,
@@ -196,7 +205,7 @@ async function fetchAnimePageContext(animeUrl: string, cacheKeySuffix: string): 
     const extracted = extractSecurityCookieFromHtml(html);
     if (extracted) {
       awSecurityCookie = extracted;
-      console.log('[AnimeWorld][Challenge][PageCtx] captured SecurityAW2, replaying with d=1');
+      debug(4, 'AnimeWorld', '[AnimeWorld][Challenge][PageCtx] captured SecurityAW2, replaying with d=1');
       response = await doFetch(appendDParam(animeUrl), awSecurityCookie);
       html = response.ok ? await response.text() : '';
       setCookie = response.headers.get('set-cookie') || '';
@@ -512,7 +521,7 @@ async function awExtractEpisodeStreamFromPlayPage(slug: string, episodeNumber: n
   }
   const urlToken = findEpisodeUrlTokenInHtml(playHtml, episodeNumber == null ? null : Number(episodeNumber));
   if (!urlToken) {
-    console.log('[AnimeWorld][Stream] no urlToken found for', slug, 'ep=', episodeNumber);
+    debug(3, 'AnimeWorld', '[AnimeWorld][Stream] no urlToken found for', slug, 'ep=', episodeNumber);
     return null;
   }
 
@@ -539,7 +548,7 @@ async function awExtractEpisodeStreamFromPlayPage(slug: string, episodeNumber: n
 
     const fromApi = collectMediaLinksFromHtml(String(playerHtml || ''))[0] || null;
     if (fromApi) return fromApi;
-    console.log('[AnimeWorld][Stream] no media link in serverPlayer payload for', slug, urlToken);
+    debug(3, 'AnimeWorld', '[AnimeWorld][Stream] no media link in serverPlayer payload for', slug, 'ep=', episodeNumber);
   } catch (err: any) {
     console.warn('[AnimeWorld][Stream] serverPlayer request failed, fallback to episode HTML:', slug, urlToken, err?.message || err);
   }
@@ -555,7 +564,7 @@ async function awExtractEpisodeStreamFromPlayPage(slug: string, episodeNumber: n
   }
   const mp4 = collectMediaLinksFromHtml(epHtml)[0] || null;
   if (!mp4) {
-    console.log('[AnimeWorld][Stream] no mp4 link in episode page for', slug, urlToken);
+    debug(3, 'AnimeWorld', '[AnimeWorld][Stream] no mp4 link in episode page for', slug, 'ep=', episodeNumber);
   }
   return mp4;
 }
@@ -572,8 +581,8 @@ function getAnimeWorldStreamHeaders(slug: string): Record<string, string> {
   };
 }
 
-function buildAnimeWorldStreamOutput(
-  mp4Url: string,
+export function buildAnimeWorldStreamOutput(
+  mediaUrl: string,
   slug: string,
   config: AnimeWorldConfig,
   extraBehaviorHints: Record<string, any> = {}
@@ -588,16 +597,18 @@ function buildAnimeWorldStreamOutput(
     ...extraBehaviorHints,
   };
 
-  const proxyBase = String(config.mfpUrl || '').trim().replace(/\/+$/, '');
-  if (!proxyBase) return { url: mp4Url, behaviorHints };
+  const proxyUrl = String(config.proxyUrl || '').trim();
+  if (!proxyUrl) return { url: mediaUrl, behaviorHints };
 
-  const params = new URLSearchParams({ d: mp4Url });
-  if (config.mfpPassword) params.set('api_password', config.mfpPassword);
-  params.set('h_Referer', requestHeaders.Referer);
-  params.set('h_User-Agent', requestHeaders['User-Agent']);
-
+  const proxyHeaders = {
+    Referer: requestHeaders.Referer,
+    'User-Agent': requestHeaders['User-Agent'],
+  };
+  const isHls = /\.m3u8(?:[?#]|$)/i.test(mediaUrl);
   return {
-    url: `${proxyBase}/proxy/stream?${params.toString()}`,
+    url: isHls
+      ? buildEasyProxyHlsUrl(mediaUrl, proxyUrl, config.proxyPassword, proxyHeaders)
+      : buildEasyProxyStreamUrl(mediaUrl, proxyUrl, config.proxyPassword, proxyHeaders),
     behaviorHints,
   };
 }
@@ -645,19 +656,18 @@ async function getEnglishTitleFromAnyId(id: string, type: 'imdb'|'tmdb'|'kitsu'|
     tmdbId = await getTmdbIdFromImdbId(imdbIdOnly, tmdbKey, 'tv');
     if (!tmdbId) throw new Error('TMDB ID non trovato per IMDB: ' + id);
     try {
-      const haglundResp = (await (await fetch(`https://arm.haglund.dev/api/v2/themoviedb?id=${tmdbId}&include=kitsu,myanimelist`)).json()) as HaglundResponseItem[];
-      malId = haglundResp[0]?.myanimelist?.toString() || null;
+      malId = await getKitsuMalIdForTmdb(tmdbId);
     } catch {}
   } else if (type === 'tmdb') {
     tmdbId = id;
-    try { const haglundResp = (await (await fetch(`https://arm.haglund.dev/api/v2/themoviedb?id=${tmdbId}&include=kitsu,myanimelist`)).json()) as HaglundResponseItem[]; malId = haglundResp[0]?.myanimelist?.toString() || null; } catch {}
+    try { malId = await getKitsuMalIdForTmdb(tmdbId); } catch {}
   } else if (type === 'kitsu') {
     // 1. Prova a ottenere MAL mapping per risolvere il titolo tramite Tenrai
     try {
       const mappingsResp = (await (await fetch(`https://kitsu.io/api/edge/anime/${id}/mappings`)).json()) as KitsuMappingsResponse;
       const malMapping = mappingsResp.data?.find((m: any) => m.attributes.externalSite === 'myanimelist/anime');
       malId = malMapping?.attributes?.externalId?.toString() || null;
-      console.log('[AnimeWorld][UTitle][Kitsu] primary mappings malId=', malId);
+      debug(3, 'AnimeWorld', '[AnimeWorld][UTitle][Kitsu] primary mappings malId=', malId);
     } catch {}
     // 2. Precarica candidato canonico come fallback se Tenrai non ha il mapping
     try {
@@ -665,7 +675,7 @@ async function getEnglishTitleFromAnyId(id: string, type: 'imdb'|'tmdb'|'kitsu'|
       const attr = animeResp.data?.attributes || {};
       const canonical = attr.titles?.en || attr.title_en || attr.titles?.en_jp || attr.canonicalTitle || attr.slug || null;
       if (canonical) fallbackTitle = canonical;
-      console.log('[AnimeWorld][UTitle][Kitsu] canonical fallback candidate=', fallbackTitle);
+      debug(3, 'AnimeWorld', '[AnimeWorld][UTitle][Kitsu] canonical fallback candidate=', fallbackTitle);
     } catch {}
     // 3. Se ancora nessun malId prova endpoint include=mappings (alcuni casi differiscono)
     if (!malId) {
@@ -675,7 +685,7 @@ async function getEnglishTitleFromAnyId(id: string, type: 'imdb'|'tmdb'|'kitsu'|
         for (const inc of included) {
           if (inc.type === 'mappings' && inc.attributes?.externalSite === 'myanimelist/anime') {
             malId = inc.attributes.externalId?.toString() || null;
-            console.log('[AnimeWorld][UTitle][Kitsu] include=mappings malId=', malId);
+            debug(4, 'AnimeWorld', '[AnimeWorld][UTitle][Kitsu] include=mappings malId=', malId);
             break;
           }
         }
@@ -690,10 +700,10 @@ async function getEnglishTitleFromAnyId(id: string, type: 'imdb'|'tmdb'|'kitsu'|
       const englishTitle = getPreferredMalTitle(metadata) || '';
       if (englishTitle) {
         englishTitleCache.set(cacheKey, englishTitle);
-        console.log('[AnimeWorld][UTitle] resolved via Tenrai', { type, id, englishTitle });
+        debug(3, 'AnimeWorld', '[AnimeWorld][UTitle] resolved via Tenrai', { type, id, englishTitle });
         return englishTitle;
       }
-      console.log('[AnimeWorld][UTitle] Tenrai has no English title; using title fallback', { type, id });
+      debug(3, 'AnimeWorld', '[AnimeWorld][UTitle] Tenrai has no English title; using title fallback', { type, id });
     } catch {}
   }
   if (tmdbId && tmdbKey) {
@@ -710,7 +720,7 @@ async function getEnglishTitleFromAnyId(id: string, type: 'imdb'|'tmdb'|'kitsu'|
   // Ultimo fallback: se abbiamo un fallbackTitle derivato da TMDB o Kitsu lo usiamo; altrimenti prova a usare id stesso (non ideale ma evita crash)
   if (fallbackTitle) {
     englishTitleCache.set(cacheKey, fallbackTitle);
-    console.log('[AnimeWorld][UTitle] using fallbackTitle', { type, id, fallbackTitle });
+    debug(3, 'AnimeWorld', '[AnimeWorld][UTitle] using fallbackTitle', { type, id, fallbackTitle });
     return fallbackTitle;
   }
   // Se variabile env indica di non interrompere, ritorna un placeholder
@@ -777,140 +787,25 @@ const exactMap: Record<string, string> = {
 
 
 
-  // << AUTO-INSERT-EXACT >> (non rimuovere questo commento)
+      // << AUTO-INSERT-EXACT >> (non rimuovere questo commento)
 };
 // ==== AUTO-NORMALIZATION-EXACT-MAP-END ====
 
-// ==== AUTO-NORMALIZATION-GENERIC-MAP-START ====
-const genericMap: Record<string, string> = {
-
-
-  // << AUTO-INSERT-GENERIC >> (non rimuovere questo commento)
-  // Qui puoi aggiungere altre normalizzazioni custom
+const animeWorldTitleNormalization: TitleNormalizationOptions = {
+  exactMap,
+  replacements: [
+    ['Attack on Titan', "L'attacco dei Giganti"],
+    ['Season', ''],
+    ['Shippuuden', 'Shippuden'],
+    ['Solo Leveling 2', 'Solo Leveling 2:'],
+    ['Solo Leveling 2 :', 'Solo Leveling 2:'],
+    ['-', ''],
+  ],
+  stripColonAfter: 'Naruto:',
 };
-// ==== AUTO-NORMALIZATION-GENERIC-MAP-END ====
-
-function resolveExactMapKey(originalTitle: string, universalTitle: string): string | null {
-  if (Object.prototype.hasOwnProperty.call(exactMap, originalTitle)) {
-    return originalTitle;
-  }
-  if (Object.prototype.hasOwnProperty.call(exactMap, universalTitle)) {
-    return universalTitle;
-  }
-  return null;
-}
-
-function normalizeTitleForSearch(title: string, exactKey?: string | null): string {
-  const key = exactKey && Object.prototype.hasOwnProperty.call(exactMap, exactKey)
-    ? exactKey
-    : (Object.prototype.hasOwnProperty.call(exactMap, title) ? title : null);
-  if (key) {
-    const mapped = exactMap[key];
-    console.log(`[AnimeWorld][ExactMap] Hit: "${key}" -> "${mapped}"`);
-    return mapped;
-  }
-  const replacements: Record<string, string> = {
-    'Attack on Titan': "L'attacco dei Giganti",
-    'Season': '',
-    'Shippuuden': 'Shippuden',
-    'Solo Leveling 2': 'Solo Leveling 2:',
-    'Solo Leveling 2 :': 'Solo Leveling 2:',
-    '-': '',
-  };
-  let normalized = title;
-  for (const [k,v] of Object.entries(replacements)) {
-    if (normalized.includes(k)) normalized = normalized.replace(new RegExp(k,'gi'), v);
-  }
-  if (normalized.includes('Naruto:')) normalized = normalized.replace(':','');
-  return normalized.replace(/\s{2,}/g,' ').trim();
-}
-
-// Semplice scorer: distanza basata su differenza lunghezza + mismatch caratteri posizione-invariante
-function scoreOriginalMatch(slug: string, normKey: string): number {
-  const s = slug.toLowerCase();
-  // estrai parte base prima di punto/random id
-  const base = s.split('.')[0];
-  // normalizza slug base
-  const cleaned = base.replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
-  if (cleaned === normKey) return 0;
-  // calcola distanza approssimata
-  const a = cleaned;
-  const b = normKey;
-  const lenDiff = Math.abs(a.length - b.length);
-  let mismatches = 0;
-  const minLen = Math.min(a.length, b.length);
-  for (let i=0;i<minLen;i++) if (a[i] !== b[i]) mismatches++;
-  return lenDiff * 2 + mismatches; // peso maggiore a differenza lunghezza
-}
 
 export class AnimeWorldProvider {
-  private kitsuProvider = new KitsuProvider();
   constructor(private config: AnimeWorldConfig) {}
-
-  private playLangCache = new Map<string,'ITA'|'SUB ITA'>();
-  private playLangSubChecked = new Set<string>();
-  private async inferLanguageFromPlayPage(slug: string): Promise<'ITA' | 'SUB ITA'> {
-    const cacheKey = slug;
-    if (this.playLangCache.has(cacheKey)) {
-      const cached = this.playLangCache.get(cacheKey)!;
-      // If cached ITA, return immediately. If SUB ITA and not yet rechecked, fall through to re-fetch to allow upgrade.
-      if (cached === 'ITA') return cached;
-      if (cached === 'SUB ITA' && this.playLangSubChecked.has(cacheKey)) return cached;
-      if (cached === 'SUB ITA' && !this.playLangSubChecked.has(cacheKey)) {
-        // mark so that only one recheck happens
-        this.playLangSubChecked.add(cacheKey);
-        console.log('[AnimeWorld][LangProbe] Rechecking SUB ITA cached slug for possible DUB upgrade:', slug);
-      }
-    }
-    const awDom = getDomain('animeworld') || 'animeworld.ac';
-    const urls = [ `https://www.${awDom}/play/${slug}` ];
-    for (const url of urls) {
-      try {
-        const headerVariants: Record<string,string>[] = [
-          { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36', 'Accept-Language':'it-IT,it;q=0.9,en;q=0.6', 'Accept':'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' },
-          { 'User-Agent': 'Mozilla/5.0 AWLangProbe', 'Accept-Language':'it-IT,it;q=0.9,en;q=0.6' }
-        ];
-        let html: string | null = null;
-        let lastStatus: number | null = null;
-        for (const headers of headerVariants) {
-          const r = await fetch(url, { headers });
-          lastStatus = r.status;
-          if (!r.ok) {
-            console.log(`[AnimeWorld][LangProbe] ${slug} status=${r.status} ua=${headers['User-Agent'].slice(0,40)}`);
-            continue;
-          }
-            html = await r.text();
-            console.log(`[AnimeWorld][LangProbe] OK status=${r.status} for ${slug} using UA=${headers['User-Agent'].slice(0,40)}`);
-            break;
-        }
-        if (!html) {
-          console.log('[AnimeWorld][LangProbe] Failed all header variants for', slug, 'lastStatus=', lastStatus);
-          if (!html) continue; // try next URL (future expansion)
-        }
-        // Strong DUB detection only (avoid plain (ITA) noise):
-        // 1. window.animeDub = true
-        // 2. Any class with 'dub'
-        // 3. Words doppiato/doppiata/doppi
-        // 4. Standalone >DUB<
-        const lower = html.toLowerCase();
-        let isDub = false;
-        if (/window\.animeDub\s*=\s*true/i.test(html)) isDub = true;
-        else if (/class=["'][^"']*\bdub\b[^"']*["']/i.test(html)) isDub = true;
-        else if (/>\s*dub\s*</i.test(html)) isDub = true;
-        else if (/doppiat[oa]|doppi\b/.test(lower)) isDub = true;
-        if (isDub) {
-          console.log('[AnimeWorld][LangProbe] Detected DUB badge -> ITA for', slug);
-          this.playLangCache.set(cacheKey, 'ITA');
-          return 'ITA';
-        }
-        this.playLangCache.set(cacheKey, 'SUB ITA');
-        return 'SUB ITA';
-      } catch { /* try next url */ }
-    }
-    // Fallback assume SUB ITA
-    this.playLangCache.set(cacheKey, 'SUB ITA');
-    return 'SUB ITA';
-  }
 
   async searchAllVersions(title: string): Promise<AnimeWorldResult[]> {
     try {
@@ -981,7 +876,7 @@ export class AnimeWorldProvider {
           } else {
             // Fallback: usa intera pagina (ma logga)
             snippet = html;
-            console.log('[AnimeWorld][LangProbe][WARN] Anchor snippet non trovato per', slug, 'uso fallback pagina intera');
+            debug(4, 'AnimeWorld', '[AnimeWorld][LangProbe][WARN] Anchor snippet non trovato per', slug, 'uso fallback pagina intera');
           }
           const lowerSnippet = snippet.toLowerCase();
           const strongDubLocal = /window\.animeDub\s*=\s*true/i.test(snippet)
@@ -989,12 +884,12 @@ export class AnimeWorldProvider {
             || />\s*dub\s*</i.test(snippet)
             || /doppiat[oa]|doppi\b/i.test(lowerSnippet);
           if (strongDubLocal) {
-            console.log('[AnimeWorld][LangProbe] Strong DUB markers (scoped) -> ITA for', slug);
+            debug(4, 'AnimeWorld', '[AnimeWorld][LangProbe] Strong DUB markers (scoped) -> ITA for', slug);
             return 'ITA';
           }
           const selfIta = /\(\s*ITA\s*\)/i.test(snippet) || /data-jtitle=\"[^\"]*\(\s*ITA\s*\)[^\"]*\"/i.test(snippet);
           if (selfIta) {
-            console.log('[AnimeWorld][LangProbe] (ITA) marker inside own block -> ITA for', slug);
+            debug(4, 'AnimeWorld', '[AnimeWorld][LangProbe] (ITA) marker inside own block -> ITA for', slug);
             return 'ITA';
           }
           // Default SUB ITA
@@ -1017,12 +912,11 @@ export class AnimeWorldProvider {
       mapped.forEach(m => {
         if (!m.name || !m.name.trim()) {
           const slugLower = (m.slug || '').toLowerCase();
-          const basePart = slugLower.split('.')[0];
           const hasSub = SUB_PAT.test(slugLower);
           const hasIta = ITA_PAT.test(slugLower);
           if (!hasSub && !hasIta) {
             if (m.language_type === 'ITA') {
-              console.log('[AnimeWorld][LangMap][AdjustEmptyName] Forzo SUB ITA per slug base con name vuoto:', m.slug);
+              debug(4, 'AnimeWorld', '[AnimeWorld][LangMap][AdjustEmptyName] Forzo SUB ITA per slug base con name vuoto:', m.slug);
             }
             m.language_type = 'SUB ITA';
           }
@@ -1030,13 +924,13 @@ export class AnimeWorldProvider {
       });
 
       mapped.forEach(m => {
-        console.log('[AnimeWorld][LangMap][DecisionSimple]', {
+        debug(4, 'AnimeWorld', '[AnimeWorld][LangMap][DecisionSimple]', {
           slug: m.slug,
           name: m.name,
           final: m.language_type
         });
       });
-      console.log('[AnimeWorld] search versions sample:', mapped.slice(0,12).map(v => `${v.language_type}:${v.slug}`).join(', '));
+      debug(4, 'AnimeWorld', '[AnimeWorld] search versions sample:', mapped.slice(0,12).map(v => `${v.language_type}:${v.slug}`).join(', '));
       return mapped;
     } catch (e) {
       console.error('[AnimeWorld] search error', e);
@@ -1044,190 +938,34 @@ export class AnimeWorldProvider {
     }
   }
 
-  private async extractStreamsFromMappedPath(
-    animePath: string,
-    requestedEpisode: number,
-    seasonNumber: number | null,
-    isMovie: boolean,
-    titleFallback: string
-  ): Promise<StreamForStremio[]> {
-    const normalizedPath = normalizeAnimeWorldPath(animePath);
-    if (!normalizedPath || !normalizedPath.startsWith('/play/')) {
-      console.log('[AnimeWorld][Mapping] path normalization failed for:', animePath);
-      return [];
-    }
-    const slug = normalizedPath.replace('/play/', '').trim();
-    if (!slug) return [];
-
-    console.log('[AnimeWorld][Mapping] extracting streams from path:', animePath, 'slug:', slug, 'ep:', requestedEpisode);
-
-    // The /api/episode/info endpoint currently rejects all programmatic clients
-    // with 401 (probably because of the SecurityAW2 challenge + browser fingerprint).
-    // Instead we fetch the play page (challenge-aware), find the urlToken for the
-    // requested episode, then fetch the episode page and extract the mp4 URL
-    // directly from its HTML (same link the in-page download button uses).
-    const epForExtractor = isMovie ? null : Number(requestedEpisode);
-    const mp4 = await awExtractEpisodeStreamFromPlayPage(slug, epForExtractor);
-    if (!mp4) {
-      console.log('[AnimeWorld][Mapping] no stream URL extracted for', slug, 'ep=', requestedEpisode);
-      return [];
-    }
-
-    // Synthesize a target episode shape used below for the stream label.
-    const target: AnimeWorldEpisode = {
-      id: '',
-      number: isMovie ? 1 : Number(requestedEpisode) || 1,
-    } as AnimeWorldEpisode;
-
-    console.log('[AnimeWorld][Mapping] stream found for', slug, ':', mp4.substring(0, 80) + '...');
-
-    // Use slug base (strip hash suffix e.g. "one-piece.abc123" → "one piece") as label fallback
-    const slugLabel = slug.split('.')[0].replace(/[-_]+/g, ' ').trim();
-    const cleanName = String(titleFallback || slugLabel)
-      .replace(/\s*\(ITA\)/i, '')
-      .replace(/\s*\(CR\)/i, '')
-      .replace(/CR/gi, '')
-      .replace(/ITA/gi, '')
-      .replace(/\s+/g, ' ')
-      .trim();
-    // Detect language from multiple signals (most reliable first):
-    // 1) MP4 URL: _SUB_ITA.mp4 → SUB, _ITA.mp4 (without SUB prefix) → ITA
-    // 2) Slug pattern: slug ending with -ita or _ita before the hash (e.g. "title-ita.ABcDe") → ITA
-    // NOTE: inferLanguageFromPlayPage is NOT used here because AnimeWorld play pages
-    //       list ALL versions (SUB+ITA) on the same page, making HTML-based DUB detection unreliable.
-    let langLabel = 'SUB'; // default
-    if (/[_\-]SUB[_\-]ITA/i.test(mp4)) {
-      langLabel = 'SUB';
-    } else if (/[_\-]ITA(?:\.|$)/i.test(mp4)) {
-      langLabel = 'ITA';
-    } else {
-      // Fallback: check slug base (part before the hash dot) for -ita / _ita suffix
-      const slugBase = slug.split('.')[0] || '';
-      if (/[-_]ita$/i.test(slugBase)) langLabel = 'ITA';
-    }
-    const epNum = isMovie ? Number(target.number || 1) : requestedEpisode;
-    let titleStream = `${capitalize(cleanName || titleFallback)} ▪ ${langLabel}`;
-    const epTag = isMovie ? '' : episodeTag(seasonNumber, epNum ?? null);
-    if (epTag) titleStream += ` ▪ ${epTag}`;
-
-    const streamOut = buildAnimeWorldStreamOutput(mp4, slug, this.config);
-    return [{ title: titleStream, url: streamOut.url, behaviorHints: streamOut.behaviorHints }];
-  }
-
-  private async getStreamsFromMapping(
-    id: string,
-    seasonNumber: number | null,
-    episodeNumber: number | null,
-    isMovie: boolean,
-    providerContext: { kitsuId?: string; tmdbId?: string; imdbId?: string } | null,
-    titleFallback: string
-  ): Promise<StreamForStremio[]> {
-    const lookup = resolveLookupRequest(id, seasonNumber, episodeNumber, providerContext);
-    if (!lookup) {
-      console.log('[AnimeWorld][Mapping] resolveLookupRequest returned null for id:', id);
-      return [];
-    }
-
-    console.log('[AnimeWorld][Mapping] lookup:', JSON.stringify(lookup));
-    let mappingPayload = await fetchMappingPayload(lookup, awCaches, 'AnimeWorld');
-    let animePaths = extractProviderPaths(mappingPayload, 'animeworld', normalizeAnimeWorldPath as any);
-    console.log('[AnimeWorld][Mapping] paths from mapping API:', animePaths);
-
-    if (animePaths.length === 0 && String(lookup.provider || '').toLowerCase() === 'imdb') {
-      const tmdbFromContext = providerContext?.tmdbId && /^\d+$/.test(String(providerContext.tmdbId))
-        ? String(providerContext.tmdbId)
-        : null;
-      const tmdbFromPayload = extractTmdbIdFromMappingPayload(mappingPayload);
-      const fallbackTmdbId = tmdbFromContext || tmdbFromPayload;
-      if (fallbackTmdbId) {
-        const tmdbLookup = {
-          provider: 'tmdb' as const,
-          externalId: fallbackTmdbId,
-          season: lookup.season,
-          episode: lookup.episode,
-        };
-        const tmdbPayload = await fetchMappingPayload(tmdbLookup, awCaches, 'AnimeWorld');
-        const tmdbPaths = extractProviderPaths(tmdbPayload, 'animeworld', normalizeAnimeWorldPath as any);
-        if (tmdbPaths.length > 0) {
-          mappingPayload = tmdbPayload;
-          animePaths = tmdbPaths;
-        }
-      }
-    }
-
-    if (!animePaths.length) return [];
-    const requestedEpisode = resolveEpisodeFromMappingPayload(mappingPayload, lookup.episode);
-
-    const merged: StreamForStremio[] = [];
-    const seen = new Set<string>();
-    for (const path of animePaths) {
-      const got = await this.extractStreamsFromMappedPath(path, requestedEpisode, seasonNumber, isMovie, titleFallback);
-      for (const stream of got) {
-        const key = String(stream.url || '').trim();
-        if (!key || seen.has(key)) continue;
-        seen.add(key);
-        merged.push(stream);
-      }
-    }
-    return merged;
-  }
-
-  private async handleLookupWithTitleFallback(
-    lookupId: string,
-    title: string,
-    seasonNumber: number | null,
-    episodeNumber: number | null,
-    isMovie: boolean,
-    providerContext: { kitsuId?: string; tmdbId?: string; imdbId?: string } | null
-  ): Promise<{ streams: StreamForStremio[] }> {
-    const fromMapping = await this.getStreamsFromMapping(
-      lookupId,
-      seasonNumber,
-      episodeNumber,
-      isMovie,
-      providerContext,
-      title
-    );
-    if (fromMapping.length) {
-      console.log('[AnimeWorld] Mapping API hit: uso stream da mapping path.');
-      return { streams: fromMapping };
-    }
-    console.log('[AnimeWorld] Mapping API miss: fallback a ricerca per titolo.');
-    return this.handleTitleRequest(title, seasonNumber, episodeNumber, isMovie);
-  }
-
   async handleKitsuRequest(kitsuIdString: string): Promise<{ streams: StreamForStremio[] }> {
     if (!this.config.enabled) return { streams: [] };
     try {
-      const { kitsuId, seasonNumber, episodeNumber, isMovie } = this.kitsuProvider.parseKitsuId(kitsuIdString);
+      const request = resolveMappingRequest(kitsuIdString);
+      if (!request) return { streams: [] };
+      const kitsuId = request.id;
       // Single quick Kitsu call: canonical title (for stream label) + startDate (for fallback filter-year)
-      // Heavy resolution (mappings, include=mappings, Tenrai) deferred to fallback path only
-      let quickTitle = kitsuId;
+      let quickTitle = '';
       try {
         const metaResp = await fetch(`https://kitsu.io/api/edge/anime/${kitsuId}`);
         if (metaResp.ok) {
           const metaJson: any = await metaResp.json();
           const attr = metaJson?.data?.attributes || {};
           if (attr.startDate) (this as any)._lastKitsuStartDate = attr.startDate;
-          quickTitle = attr.titles?.en || attr.titles?.en_jp || attr.canonicalTitle || kitsuId;
+          quickTitle = attr.titles?.en || attr.titles?.en_jp || attr.canonicalTitle || '';
         }
       } catch (e) {
         console.warn('[AnimeWorld] quick Kitsu meta fetch failed', e);
       }
-      // Try mapping API first — no expensive title resolution yet
-      const fromMapping = await this.getStreamsFromMapping(
-        `kitsu:${kitsuId}`, null, episodeNumber, isMovie, { kitsuId }, quickTitle
-      );
-      if (fromMapping.length) {
-        console.log('[AnimeWorld] Mapping hit (Kitsu): skipped heavy title resolution.');
-        return { streams: fromMapping };
+      let title = quickTitle || (await getKitsuTitle(kitsuId));
+      if (!title) {
+        try {
+          title = await getEnglishTitleFromAnyId(kitsuId, 'kitsu', this.config.tmdbApiKey);
+        } catch {}
       }
-      // Mapping miss → now do full title resolution for the title search fallback
-      console.log('[AnimeWorld] Mapping miss (Kitsu): resolving full English title...');
-      const englishTitle = await getEnglishTitleFromAnyId(kitsuId, 'kitsu', this.config.tmdbApiKey);
-      // seasonNumber qui vale sempre 1 (su Kitsu ogni stagione e' un anime separato): non e'
-      // la stagione dell'opera, quindi non va usato per l'etichetta.
-      return this.handleTitleRequest(englishTitle, null, episodeNumber, isMovie);
+      if (!title) return { streams: [] };
+      // Kitsu has one season per entry, so no external season label is used.
+      return await this.handleTitleRequest(title, null, request.episode, request.isMovie);
     } catch (e) {
       console.error('[AnimeWorld] kitsu handler error', e);
       return { streams: [] };
@@ -1236,17 +974,29 @@ export class AnimeWorldProvider {
   async handleMalRequest(malIdString: string): Promise<{ streams: StreamForStremio[] }> {
     if (!this.config.enabled) return { streams: [] };
     try {
-      const parts = malIdString.split(':');
-      if (parts.length < 2) throw new Error('Formato MAL ID non valido');
-      const malId = parts[1];
-      let seasonNumber: number | null = null;
-      let episodeNumber: number | null = null;
-      let isMovie = false;
-      if (parts.length === 2) isMovie = true; else if (parts.length === 3) episodeNumber = parseInt(parts[2]); else if (parts.length === 4) { seasonNumber = parseInt(parts[2]); episodeNumber = parseInt(parts[3]); }
-      const englishTitle = await getEnglishTitleFromAnyId(malId, 'mal', this.config.tmdbApiKey);
-      return this.handleTitleRequest(englishTitle, seasonNumber, episodeNumber, isMovie);
+      const request = resolveMappingRequest(malIdString);
+      if (!request) return { streams: [] };
+      const englishTitle = await getEnglishTitleFromAnyId(request.id, 'mal', this.config.tmdbApiKey);
+      return this.handleTitleRequest(englishTitle, request.season, request.episode, request.isMovie);
     } catch (e) { console.error('[AnimeWorld] mal handler error', e); return { streams: [] }; }
   }
+  /** Split-cour safety net: season title on a mapping miss, never the base series title. */
+  private async handleUnmappedSeries(
+    request: MappingRequest | null,
+    episodeNumber: number | null
+  ): Promise<{ streams: StreamForStremio[] } | null> {
+    if (!request || request.isMovie) return null;
+    const season = request.season ?? 1;
+    if (season <= 1) return null;
+    const seasonTitle = await resolveSeasonFallbackTitle(request, this.config);
+    if (!seasonTitle) {
+      console.warn(`[AnimeWorld] Mapping miss for ${request.provider}:${request.id} S${season}E${episodeNumber}: no season title, returning no stream`);
+      return { streams: [] };
+    }
+    console.warn(`[AnimeWorld] Mapping miss for ${request.provider}:${request.id} S${season}E${episodeNumber}: using season title "${seasonTitle}"`);
+    return this.handleTitleRequest(seasonTitle, season, episodeNumber, false);
+  }
+
   async handleImdbRequest(imdbId: string, seasonNumber: number | null, episodeNumber: number | null, isMovie=false): Promise<{ streams: StreamForStremio[] }> {
     if (!this.config.enabled) return { streams: [] };
     try {
@@ -1254,25 +1004,22 @@ export class AnimeWorldProvider {
       if (gateEnabled) {
         const gate = await checkIsAnimeById('imdb', imdbId, this.config.tmdbApiKey, isMovie ? 'movie' : 'tv');
         if (!gate.isAnime) {
-          console.log(`[AnimeWorld] Skipping anime search: no MAL/Kitsu mapping (${gate.reason}) for ${imdbId}`);
+          debug(2, 'AnimeWorld', `[AnimeWorld] Skipping anime search: no MAL/Kitsu mapping (${gate.reason}) for ${imdbId}`);
           return { streams: [] };
         }
-  // Removed placeholder injection; icon added directly to titles
       }
-  const imdbIdClean = imdbId.split(':')[0];
-  // Try mapping API first — defer expensive title resolution to fallback path only
-  const fromMappingImdb = await this.getStreamsFromMapping(
-    imdbIdClean, seasonNumber, episodeNumber, isMovie, { imdbId: imdbIdClean }, ''
-  );
-  if (fromMappingImdb.length) {
-    console.log('[AnimeWorld] Mapping hit (IMDB): skipped title resolution.');
-    return { streams: fromMappingImdb };
-  }
-  // Mapping miss → resolve full English title for title search fallback
-  console.log('[AnimeWorld] Mapping miss (IMDB): fallback a ricerca per titolo per', imdbIdClean);
-  const englishTitle = await getEnglishTitleFromAnyId(imdbId, 'imdb', this.config.tmdbApiKey);
-  const res = await this.handleTitleRequest(englishTitle, seasonNumber, episodeNumber, isMovie);
-  return res;
+      const request = resolveMappingRequest(imdbId, seasonNumber, episodeNumber, isMovie);
+      if (request) {
+        const target = await resolveAnimeTarget(request, this.config);
+        const title = target ? target.title || (await getKitsuTitle(target.kitsuId)) : '';
+        if (target && title) {
+          return this.handleTitleRequest(title, target.displaySeason, target.kitsuEpisode, request.isMovie);
+        }
+      }
+      const unmapped = await this.handleUnmappedSeries(request, episodeNumber);
+      if (unmapped) return unmapped;
+      const englishTitle = await getEnglishTitleFromAnyId(imdbId, 'imdb', this.config.tmdbApiKey);
+      return this.handleTitleRequest(englishTitle, seasonNumber, episodeNumber, isMovie);
     } catch(e){ console.error('[AnimeWorld] imdb handler error', e); return { streams: [] }; }
   }
   async handleTmdbRequest(tmdbId: string, seasonNumber: number | null, episodeNumber: number | null, isMovie=false): Promise<{ streams: StreamForStremio[] }> {
@@ -1282,59 +1029,82 @@ export class AnimeWorldProvider {
       if (gateEnabled) {
         const gate = await checkIsAnimeById('tmdb', tmdbId, this.config.tmdbApiKey, isMovie ? 'movie' : 'tv');
         if (!gate.isAnime) {
-          console.log(`[AnimeWorld] Skipping anime search: no MAL/Kitsu mapping (${gate.reason}) for TMDB ${tmdbId}`);
+          debug(2, 'AnimeWorld', `[AnimeWorld] Skipping anime search: no MAL/Kitsu mapping (${gate.reason}) for TMDB ${tmdbId}`);
           return { streams: [] };
         }
-  // Removed placeholder injection; icon added directly to titles
       }
-  // Try mapping API first — defer expensive title resolution to fallback path only
-  const fromMappingTmdb = await this.getStreamsFromMapping(
-    tmdbId, seasonNumber, episodeNumber, isMovie, { tmdbId }, ''
-  );
-  if (fromMappingTmdb.length) {
-    console.log('[AnimeWorld] Mapping hit (TMDB): skipped title resolution.');
-    return { streams: fromMappingTmdb };
-  }
-  // Mapping miss → resolve full English title for title search fallback
-  console.log('[AnimeWorld] Mapping miss (TMDB): fallback a ricerca per titolo per TMDB', tmdbId);
-  const englishTitle = await getEnglishTitleFromAnyId(tmdbId, 'tmdb', this.config.tmdbApiKey);
-  const res = await this.handleTitleRequest(englishTitle, seasonNumber, episodeNumber, isMovie);
-  return res;
+      const request = resolveMappingRequest(`tmdb:${tmdbId}`, seasonNumber, episodeNumber, isMovie);
+      if (request) {
+        const target = await resolveAnimeTarget(request, this.config);
+        const title = target ? target.title || (await getKitsuTitle(target.kitsuId)) : '';
+        if (target && title) {
+          return this.handleTitleRequest(title, target.displaySeason, target.kitsuEpisode, request.isMovie);
+        }
+      }
+      const unmapped = await this.handleUnmappedSeries(request, episodeNumber);
+      if (unmapped) return unmapped;
+      const englishTitle = await getEnglishTitleFromAnyId(tmdbId, 'tmdb', this.config.tmdbApiKey);
+      return this.handleTitleRequest(englishTitle, seasonNumber, episodeNumber, isMovie);
     } catch(e){ console.error('[AnimeWorld] tmdb handler error', e); return { streams: [] }; }
   }
 
+  async handleTvdbRequest(tvdbId: string, seasonNumber: number | null, episodeNumber: number | null, isMovie=false): Promise<{ streams: StreamForStremio[] }> {
+    if (!this.config.enabled) return { streams: [] };
+    try {
+      const gateEnabled = (process.env.ANIME_GATE_ENABLED || 'true') !== 'false';
+      if (gateEnabled) {
+        const gate = await checkIsAnimeById('tvdb', tvdbId, this.config.tmdbApiKey, isMovie ? 'movie' : 'tv');
+        if (!gate.isAnime) {
+          debug(2, 'AnimeWorld', `[AnimeWorld] Skipping anime search: no Kitsu mapping (${gate.reason}) for TVDB ${tvdbId}`);
+          return { streams: [] };
+        }
+      }
+      const request = resolveMappingRequest(`tvdb:${tvdbId}`, seasonNumber, episodeNumber, isMovie);
+      if (request) {
+        const target = await resolveAnimeTarget(request, this.config);
+        const title = target ? target.title || (await getKitsuTitle(target.kitsuId)) : '';
+        if (target && title) {
+          return this.handleTitleRequest(title, target.displaySeason, target.kitsuEpisode, request.isMovie);
+        }
+      }
+      const unmapped = await this.handleUnmappedSeries(request, episodeNumber);
+      if (unmapped) return unmapped;
+      const fallbackTitle = await getTvdbTitle(tvdbId, this.config);
+      if (!fallbackTitle) return { streams: [] };
+      return this.handleTitleRequest(fallbackTitle, seasonNumber, episodeNumber, isMovie);
+    } catch(e){ console.error('[AnimeWorld] tvdb handler error', e); return { streams: [] }; }
+  }
+
   async handleTitleRequest(title: string, seasonNumber: number | null, episodeNumber: number | null, isMovie = false): Promise<{ streams: StreamForStremio[] }> {
+    debug(1, 'AnimeWorld', 'title request', { title, season: seasonNumber, episode: episodeNumber, isMovie });
     const universalTitle = applyUniversalAnimeTitleNormalization(title);
     if (universalTitle !== title) {
-      console.log(`[UniversalTitle][Applied] ${title} -> ${universalTitle}`);
+      debug(3, 'AnimeWorld', `[UniversalTitle][Applied] ${title} -> ${universalTitle}`);
     }
 
-    const exactMapKey = resolveExactMapKey(title, universalTitle);
-    const normalized = normalizeTitleForSearch(universalTitle, exactMapKey);
+    const exactMapKey = resolveExactMapKey(title, universalTitle, exactMap);
+    const normalized = normalizeTitleForSearch(universalTitle, animeWorldTitleNormalization, exactMapKey);
+    if (exactMapKey) {
+      debug(3, 'AnimeWorld', `[AnimeWorld][ExactMap] Hit: "${exactMapKey}" -> "${exactMap[exactMapKey]}"`);
+    }
     const skipExtraNormalization = !!exactMapKey;
     if (skipExtraNormalization) {
-      console.log(`[AnimeWorld][ExactMap] Forced search title: ${normalized}`);
+      debug(3, 'AnimeWorld', `[AnimeWorld][ExactMap] Forced search title: ${normalized}`);
     }
 
     const searchWithLogging = async (query: string) => {
       const results = await this.searchAllVersions(query);
-      console.log(`[AnimeWorld] Search query "${query}" -> ${results.length}`);
+      debug(2, 'AnimeWorld', `[AnimeWorld] Search query "${query}" -> ${results.length}`);
       return results;
     };
 
-    console.log('[AnimeWorld] Title original:', title);
-    console.log('[AnimeWorld] Title normalized:', normalized);
+    debug(3, 'AnimeWorld', '[AnimeWorld] Title original:', title);
+    debug(3, 'AnimeWorld', '[AnimeWorld] Title normalized:', normalized);
 
     let versions = await searchWithLogging(normalized);
 
     if (!skipExtraNormalization && !versions.length) {
-      const fallbackQueries: string[] = [];
-      if (normalized.includes("'")) fallbackQueries.push(normalized.replace(/'/g, ''));
-      if (normalized.includes('(')) fallbackQueries.push(normalized.split('(')[0].trim());
-      const words = normalized.split(' ');
-      if (words.length > 3) fallbackQueries.push(words.slice(0, 3).join(' '));
-      const plus = normalized.replace(/\s+/g, '+');
-      if (plus !== normalized) fallbackQueries.push(plus);
+      const fallbackQueries = buildTitleFallbackQueries(normalized);
 
       for (const query of fallbackQueries) {
         if (!query || query === normalized) continue;
@@ -1348,13 +1118,13 @@ export class AnimeWorldProvider {
       console.warn(`[AnimeWorld][ExactMap] Nessun risultato trovato per titolo mappato "${normalized}" (fallback disabilitati).`);
     }
 
-    console.log('[AnimeWorld] Versions found:', versions.length);
+    debug(2, 'AnimeWorld', '[AnimeWorld] Versions found:', versions.length);
     const debugLangCounts = versions.reduce((acc: Record<string, number>, item) => {
       const key = item.language_type || 'UNKNOWN';
       acc[key] = (acc[key] || 0) + 1;
       return acc;
     }, {} as Record<string, number>);
-    console.log('[AnimeWorld] Language type counts:', debugLangCounts);
+    debug(3, 'AnimeWorld', '[AnimeWorld] Language type counts:', debugLangCounts);
 
     if (!versions.length) {
       const fallbackDate = (this as any)._lastKitsuStartDate as string | undefined;
@@ -1364,7 +1134,7 @@ export class AnimeWorldProvider {
           if (fb.streams.length) {
             return fb;
           }
-          console.log('[AnimeWorld] Fallback filter-year search produced 0 streams.');
+          debug(2, 'AnimeWorld', '[AnimeWorld] Fallback filter-year search produced 0 streams.');
         } catch (err) {
           console.warn('[AnimeWorld] Fallback filter-year search errored:', err);
         }
@@ -1387,18 +1157,18 @@ export class AnimeWorldProvider {
             if (cleaned === normSlugKey) return true;
             return allowedSuffixes.some(suf => cleaned === normSlugKey + suf);
           });
-          console.log(`[AnimeWorld] Strict base filter applied (${normSlugKey}) from ${beforeCount} -> ${filtered.length}`);
+          debug(3, 'AnimeWorld', `[AnimeWorld] Strict base filter applied (${normSlugKey}) from ${beforeCount} -> ${filtered.length}`);
           if (!filtered.length) {
-            console.log('[AnimeWorld] Strict filter produced 0 results, NOT restoring broad matches (no full title match).');
+            debug(3, 'AnimeWorld', '[AnimeWorld] Strict filter produced 0 results, NOT restoring broad matches (no full title match).');
             const fallbackDate = (this as any)._lastKitsuStartDate as string | undefined;
             if (fallbackDate) {
               try {
-                console.log('[AnimeWorld] Invoking fallbackFilterYearSearch AFTER strict filter zero-match, date=', fallbackDate);
+                debug(3, 'AnimeWorld', '[AnimeWorld] Invoking fallbackFilterYearSearch AFTER strict filter zero-match, date=', fallbackDate);
                 const fb = await this.fallbackFilterYearSearch(normalized, fallbackDate, isMovie, episodeNumber, seasonNumber);
                 if (fb.streams.length) {
                   return fb;
                 }
-                console.log('[AnimeWorld] fallbackFilterYearSearch produced 0 streams after strict filter.');
+                debug(2, 'AnimeWorld', '[AnimeWorld] fallbackFilterYearSearch produced 0 streams after strict filter.');
               } catch (err) {
                 console.warn('[AnimeWorld] fallbackFilterYearSearch post-strict error:', err);
               }
@@ -1407,13 +1177,13 @@ export class AnimeWorldProvider {
           }
           versions = filtered;
         } else {
-          console.log('[AnimeWorld] Rewrite detected in normalized title, keeping rewrite variants alongside base');
+          debug(3, 'AnimeWorld', '[AnimeWorld] Rewrite detected in normalized title, keeping rewrite variants alongside base');
         }
       } catch (e) {
         console.warn('[AnimeWorld] Strict base slug filter error (ignored):', e);
       }
     } else {
-      console.log('[AnimeWorld][ExactMap] Skip strict base slug filter (exact map enforced).');
+      debug(3, 'AnimeWorld', '[AnimeWorld][ExactMap] Skip strict base slug filter (exact map enforced).');
     }
 
     const rank = (v: AnimeWorldResult & { language_type?: string }) => {
@@ -1423,7 +1193,7 @@ export class AnimeWorldProvider {
       return 3;
     };
     versions.sort((a, b) => rank(a) - rank(b));
-    console.log('[AnimeWorld] Top versions sample:', versions.slice(0, 8).map(v => `${v.language_type}:${v.slug}`).join(', '));
+    debug(4, 'AnimeWorld', '[AnimeWorld] Top versions sample:', versions.slice(0, 8).map(v => `${v.language_type}:${v.slug}`).join(', '));
 
     let reduced = versions.filter(v => v.language_type === 'ITA' || v.language_type === 'SUB ITA' || v.language_type === 'CR ITA');
     if (!reduced.length) reduced = versions.slice(0, 1);
@@ -1439,7 +1209,7 @@ export class AnimeWorldProvider {
     } else {
       selected = reduced.slice(0, 2);
     }
-    console.log('[AnimeWorld] Processing versions (candidates):', selected.map(v => `${v.language_type}:${v.slug || v.name}`).join(', '));
+    debug(3, 'AnimeWorld', '[AnimeWorld] Processing versions (candidates):', selected.map(v => `${v.language_type}:${v.slug || v.name}`).join(', '));
 
     const seen = new Set<string>();
     const tBatch = Date.now();
@@ -1455,7 +1225,7 @@ export class AnimeWorldProvider {
         } else if (episodeNumber != null) {
           target = episodes.find(e => e.number === episodeNumber);
           if (!target) {
-            console.log(`[AnimeWorld] Skipping ${v.language_type} version: episode ${episodeNumber} not found for slug=${v.slug}`);
+            debug(3, 'AnimeWorld', `[AnimeWorld] Skipping ${v.language_type} version: episode ${episodeNumber} not found for slug=${v.slug}`);
             return null;
           }
         } else {
@@ -1474,7 +1244,7 @@ export class AnimeWorldProvider {
       const { v, target } = info;
       try {
         const epNum = episodeNumber != null ? episodeNumber : target.number;
-        console.log(`[AnimeWorld] Fetching stream for slug=${v.slug} ep=${epNum}`);
+        debug(4, 'AnimeWorld', `[AnimeWorld] Fetching stream for slug=${v.slug} ep=${epNum}`);
         let streamData: any = null;
         let timedOut = false;
         try {
@@ -1508,7 +1278,7 @@ export class AnimeWorldProvider {
           const isMovieFile = lowerUrl.includes('movie');
           const isSpecialFile = lowerUrl.includes('special');
           if ((isMovieFile || isSpecialFile) && !looksLikeEpisode) {
-            console.log('[AnimeWorld] Skipping non-episode file (movie/special) for requested ep:', mp4);
+            debug(3, 'AnimeWorld', '[AnimeWorld] Skipping non-episode file (movie/special) for requested ep:', redactUrl(mp4));
             return null;
           }
         }
@@ -1537,7 +1307,7 @@ export class AnimeWorldProvider {
     }));
 
     const streams = streamObjs.filter(Boolean) as StreamForStremio[];
-    console.log(`[AnimeWorld] Total AW streams produced: ${streams.length} (parallel batch ${Date.now() - tBatch}ms)`);
+    debug(1, 'AnimeWorld', `[AnimeWorld] Total AW streams produced: ${streams.length} (parallel batch ${Date.now() - tBatch}ms)`);
     return { streams };
   }
 
@@ -1549,7 +1319,7 @@ export class AnimeWorldProvider {
    */
   private async fallbackFilterYearSearch(normalizedTitle: string, startDate: string, isMovie: boolean, episodeNumber: number | null, seasonNumber: number | null): Promise<{ streams: StreamForStremio[] }> {
     try {
-      console.log('[AnimeWorld][FallbackFilter] Triggered with title=', normalizedTitle, 'date=', startDate);
+      debug(3, 'AnimeWorld', '[AnimeWorld][FallbackFilter] Triggered with title=', normalizedTitle, 'date=', startDate);
       // Emula lo "split(':')[0]" aggressivo del vecchio script: tronca al primo ':' o '?'
       let query = normalizedTitle;
       if (normalizedTitle.includes(':')) {
@@ -1558,11 +1328,11 @@ export class AnimeWorldProvider {
         query = normalizedTitle.split('?')[0];
       }
       query = query.trim();
-      console.log('[AnimeWorld][FallbackFilter] Truncated query:', query);
+      debug(3, 'AnimeWorld', '[AnimeWorld][FallbackFilter] Truncated query:', query);
       // Nel vecchio script poi spazio -> '+' prima della costruzione URL; lo scraper fa gia' replace interno (spazi -> +) prima di generare URL, passiamo quindi query semplice
       const results = await invokePython(['search','--query', query,'--date', startDate]);
       if (!Array.isArray(results) || !results.length) {
-        console.log('[AnimeWorld][FallbackFilter] No results from filter year search');
+        debug(3, 'AnimeWorld', '[AnimeWorld][FallbackFilter] No results from filter year search');
         return { streams: [] };
       }
       // Il vecchio codice prendeva results[0] e results[1] etichettandoli per posizione
@@ -1577,7 +1347,7 @@ export class AnimeWorldProvider {
       const wanted = normalizeSearchTitleKey(normalizedTitle);
       let related = results.filter(r => r.searchTitle && normalizeSearchTitleKey(r.searchTitle) === wanted);
       if (related.length) {
-        console.log('[AnimeWorld][FallbackFilter] Match per titolo:', wanted, '->', related.length, '/', results.length);
+        debug(3, 'AnimeWorld', '[AnimeWorld][FallbackFilter] Match per titolo:', wanted, '->', related.length, '/', results.length);
       } else {
         // Nessun titolo utile (markup cambiato, o titolo diverso dalla query): ripiego
         // sull'ancora dello slug del primo risultato, che segue la rilevanza della ricerca.
@@ -1585,7 +1355,7 @@ export class AnimeWorldProvider {
         related = anchor
           ? results.filter(r => animeWorldSlugBase(r.slug || r.id || r.name).startsWith(anchor))
           : results;
-        console.log('[AnimeWorld][FallbackFilter] Nessun match per titolo, anchor base:', anchor, '->', related.length, '/', results.length);
+        debug(3, 'AnimeWorld', '[AnimeWorld][FallbackFilter] Nessun match per titolo, anchor base:', anchor, '->', related.length, '/', results.length);
       }
       const picked = [
         ...related.filter(r => isItaSlug(r.slug || r.id || r.name)).slice(0, 1),
@@ -1623,7 +1393,7 @@ export class AnimeWorldProvider {
           console.warn('[AnimeWorld][FallbackFilter] error processing slug', r.slug, e);
         }
       }
-      console.log('[AnimeWorld][FallbackFilter] Produced streams:', streams.length);
+      debug(3, 'AnimeWorld', '[AnimeWorld][FallbackFilter] Produced streams:', streams.length);
       return { streams };
     } catch (e) {
       console.error('[AnimeWorld][FallbackFilter] failure', e);
@@ -1671,26 +1441,7 @@ export function episodeTag(seasonNumber: number | null, episodeNumber: number | 
   return `${s}${e}`;
 }
 
-/**
- * Chiave di confronto fra il titolo cercato e quello mostrato nei risultati: via i marcatori
- * di versione "(ITA)" / "(CR)" e la punteggiatura, cosi' "That Time I Got Reincarnated as a
- * Slime 2 Part 2 (ITA)" e la query "…Slime 2 Part 2" collassano sulla stessa chiave.
- */
-export function normalizeSearchTitleKey(title: string): string {
-  return String(title || '')
-    .replace(/\((?:ITA|CR|SUB\s*ITA)\)/gi, ' ')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, ' ')
-    .trim();
-}
-
-/** Slug senza id random finale e senza suffisso di lingua: identifica l'opera, non la versione. */
-export function animeWorldSlugBase(slugOrName: string): string {
-  return String(slugOrName || '')
-    .split('.')[0]
-    .toLowerCase()
-    .replace(/(?:^|[-_])(?:sub[-_]?ita|cr[-_]?ita|ita[-_]?cr|ita)$/, '');
-}
+export { normalizeSearchTitleKey, animeWorldSlugBase };
 
 function capitalize(str: string) {
   if (!str) return str;

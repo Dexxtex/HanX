@@ -33,22 +33,6 @@ export function setCached<T = any>(map: Map<string, CacheEntry<T>>, key: string,
 }
 
 /**
- * Deduplicate an array of strings, preserving insertion order.
- * Trims whitespace and discards empty values.
- */
-export function uniqueStrings(values: (string | null | undefined)[]): string[] {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const value of values) {
-    const text = String(value || '').trim();
-    if (!text || seen.has(text)) continue;
-    seen.add(text);
-    out.push(text);
-  }
-  return out;
-}
-
-/**
  * Create a fresh set of caches for a provider instance.
  * Each provider should call this once at module scope.
  */

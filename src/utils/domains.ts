@@ -31,19 +31,7 @@ function loadDomains(): Record<string, string> {
   return domainCache;
 }
 
-export function forceReloadDomains(): void {
-  domainCache = null;
-  lastLoad = 0;
-  loadDomains();
-}
-
 export function getDomain(key: string): string | undefined {
   const map = loadDomains();
   return map[key];
-}
-
-export function getFullUrl(key: string, protocol: 'https'|'http' = 'https'): string | undefined {
-  const host = getDomain(key);
-  if (!host) return undefined;
-  return `${protocol}://${host}`;
 }

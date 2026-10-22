@@ -40,21 +40,12 @@ const ALIASES: Record<string, string[]> = {
   animeunity: ['animeunuty', 'anime_unity'],
   animeworld: ['anime_world'],
   animesaturn: ['anime_saturn'],
-  streamingcommunity: ['streaming_community'],
-  guardahd: ['guarda_hd'],
-  guardaserie: ['guarda_serie'],
-  guardoserie: ['guardo_serie'],
-  mapping_api: ['mappingapi', 'mapping_api_url', 'mapping_url'],
 };
 
 const DOMAIN_KEY_MAP: Record<string, string> = {
   animeunity: 'animeunity',
   animeworld: 'animeworld',
   animesaturn: 'animesaturn',
-  streamingcommunity: 'vixsrc',
-  guardahd: 'guardahd',
-  guardaserie: 'guardaserie',
-  guardoserie: 'guardoserie',
 };
 
 // ─── Internal state ─────────────────────────────────────────
@@ -203,18 +194,4 @@ export function getProviderUrl(providerKey: string, envKeys: string[] = []): str
   const fromEnv = findFromEnv(safeEnvKeys);
   if (fromEnv) return fromEnv;
   return '';
-}
-
-/**
- * Shortcut: get the Mapping API base URL (no trailing slash).
- */
-export function getMappingApiBase(): string {
-  return getProviderUrl('mapping_api', ['MAPPING_API_URL']).replace(/\/+$/, '');
-}
-
-/**
- * Get the path to the provider_urls.json file (for debugging/logging).
- */
-export function getProviderUrlsFilePath(): string {
-  return PROVIDER_URLS_FILE;
 }
