@@ -16,6 +16,7 @@ import {
 import {
   createCaches,
   fetchResource,
+  fetchResponseWithProxy,
   getProviderUrl,
   getMalAnimeMetadata,
   getPreferredMalTitle,
@@ -190,11 +191,12 @@ async function fetchAnimePageContext(animeUrl: string, cacheKeySuffix: string): 
       'accept-language': 'it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7',
     };
     if (cookieHeader) headers['cookie'] = cookieHeader;
-    return fetch(url, {
+    // fetch diretto = 403: AnimeWorld va interrogato dalla catena proxy, come gli altri fetch AW.
+    return fetchResponseWithProxy(url, {
       method: 'GET',
       headers,
       redirect: 'follow',
-      signal: AbortSignal.timeout(AW_FETCH_TIMEOUT),
+      timeoutMs: AW_FETCH_TIMEOUT,
     } as any);
   };
 
@@ -860,17 +862,20 @@ export class AnimeWorldProvider {
       const probeLang = async (slug: string): Promise<'ITA' | 'SUB ITA'> => {
         try {
           const awDom = getDomain('animeworld') || 'animeworld.ac';
-          const url = `https://www.${awDom}/play/${slug}`;
-          const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 AWProbe', 'Accept-Language': 'it-IT,it;q=0.9' } });
-          if (!r.ok) return 'SUB ITA';
-          const html = await r.text();
+          const html = await awFetchHtml(`https://www.${awDom}/play/${slug}`, {
+            ttlMs: 5 * 60 * 1000,
+            cacheKey: `aw-probe:${slug}`,
+          });
           // Solo il flag globale della pagina: window.animeDub e' true solo per la
           // versione ITA. Il resto della pagina elenca le varianti DUB sorelle
           // (badge "(ITA)", "dub") e contamina i match testuali.
           const isDub = /window\.animeDub\s*=\s*true/i.test(html);
           debug(4, 'AnimeWorld', `[AnimeWorld][LangProbe] ${slug} -> ${isDub ? 'ITA' : 'SUB ITA'} (animeDub)`);
           return isDub ? 'ITA' : 'SUB ITA';
-        } catch { return 'SUB ITA'; }
+        } catch (err: any) {
+          debug(3, 'AnimeWorld', '[AnimeWorld][LangProbe] pagina non recuperata, assumo SUB ITA per', slug, err?.message || err);
+          return 'SUB ITA';
+        }
       };
 
       // Esegui probe in parallelo (tutti gli slug base insieme)

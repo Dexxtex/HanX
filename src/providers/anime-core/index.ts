@@ -17,6 +17,7 @@ export {
 // Fetch with cache + inflight dedup
 export {
   fetchResource,
+  fetchResponseWithProxy,
   fetchWithTimeout,
   DEFAULT_USER_AGENT,
   DEFAULT_FETCH_TIMEOUT,
