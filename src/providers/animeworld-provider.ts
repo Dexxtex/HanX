@@ -818,7 +818,7 @@ export class AnimeWorldProvider {
       // 1. Se slug contiene pattern sub ita -> SUB ITA
       // 2. Altrimenti se slug contiene ita -> ITA
       // 3. Altrimenti (slug "base", nessun marcatore) -> probe HTML UNA VOLTA
-      //    Se page mostra DUB forte -> ITA, else SUB ITA
+      //    Se la pagina ha window.animeDub=true -> ITA, else SUB ITA
       // Evitare probe per slug già marcati.
 
   // Pattern lingua (ordine: SUB prima per evitare che 'subita' attivi 'ita')
@@ -864,37 +864,12 @@ export class AnimeWorldProvider {
           const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 AWProbe', 'Accept-Language': 'it-IT,it;q=0.9' } });
           if (!r.ok) return 'SUB ITA';
           const html = await r.text();
-          // Limita l'analisi SOLO al blocco relativo allo slug richiesto per evitare contaminazioni da altre versioni (es. variante DUB a fianco)
-          const slugSafe = slug.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-          // Trova anchor principale
-          const anchorRe = new RegExp(`<a[^>]+href=["']/play/${slugSafe}["'][^>]*>[\\s\\S]*?</a>`, 'i');
-          let snippet = '';
-          const anchorMatch = html.match(anchorRe);
-          if (anchorMatch) {
-            // Estendi la finestra includendo eventuale div.status e label vicini (greedy fino a ~400 chars dopo l'anchor)
-            const idx = html.indexOf(anchorMatch[0]);
-            snippet = html.substring(Math.max(0, idx - 300), Math.min(html.length, idx + anchorMatch[0].length + 400));
-          } else {
-            // Fallback: usa intera pagina (ma logga)
-            snippet = html;
-            debug(4, 'AnimeWorld', '[AnimeWorld][LangProbe][WARN] Anchor snippet non trovato per', slug, 'uso fallback pagina intera');
-          }
-          const lowerSnippet = snippet.toLowerCase();
-          const strongDubLocal = /window\.animeDub\s*=\s*true/i.test(snippet)
-            || /class=["'][^"']*\bdub\b[^"']*"/i.test(snippet)
-            || />\s*dub\s*</i.test(snippet)
-            || /doppiat[oa]|doppi\b/i.test(lowerSnippet);
-          if (strongDubLocal) {
-            debug(4, 'AnimeWorld', '[AnimeWorld][LangProbe] Strong DUB markers (scoped) -> ITA for', slug);
-            return 'ITA';
-          }
-          const selfIta = /\(\s*ITA\s*\)/i.test(snippet) || /data-jtitle=\"[^\"]*\(\s*ITA\s*\)[^\"]*\"/i.test(snippet);
-          if (selfIta) {
-            debug(4, 'AnimeWorld', '[AnimeWorld][LangProbe] (ITA) marker inside own block -> ITA for', slug);
-            return 'ITA';
-          }
-          // Default SUB ITA
-          return 'SUB ITA';
+          // Solo il flag globale della pagina: window.animeDub e' true solo per la
+          // versione ITA. Il resto della pagina elenca le varianti DUB sorelle
+          // (badge "(ITA)", "dub") e contamina i match testuali.
+          const isDub = /window\.animeDub\s*=\s*true/i.test(html);
+          debug(4, 'AnimeWorld', `[AnimeWorld][LangProbe] ${slug} -> ${isDub ? 'ITA' : 'SUB ITA'} (animeDub)`);
+          return isDub ? 'ITA' : 'SUB ITA';
         } catch { return 'SUB ITA'; }
       };
 
@@ -1149,8 +1124,7 @@ export class AnimeWorldProvider {
         const wantsRewrite = /rewrite/i.test(normalized);
         if (!wantsRewrite) {
           const allowedSuffixes = ['-ita', '-subita', '-sub-ita', '-cr-ita', '-ita-cr'];
-          const beforeCount = versions.length;
-          const filtered = versions.filter(v => {
+          const matchesBaseSlug = (v: AnimeWorldResult) => {
             const raw = (v.slug || v.name || '').toLowerCase();
             const basePart = raw.split('.')[0];
             const cleaned = basePart.replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
@@ -1158,7 +1132,9 @@ export class AnimeWorldProvider {
             if (cleaned === normSlugKey) return true;
             if (allowedSuffixes.some(suf => cleaned === normSlugKey + suf)) return true;
             return titleMatchScore(normalized, basePart.replace(/-/g, ' ')) >= 0.5;
-          });
+          };
+          const beforeCount = versions.length;
+          const filtered = versions.filter(matchesBaseSlug);
           debug(3, 'AnimeWorld', `[AnimeWorld] Strict base filter applied (${normSlugKey}) from ${beforeCount} -> ${filtered.length}`);
           if (!filtered.length) {
             debug(3, 'AnimeWorld', '[AnimeWorld] Strict filter produced 0 results, NOT restoring broad matches (no full title match).');
@@ -1178,6 +1154,21 @@ export class AnimeWorldProvider {
             return { streams: [] };
           }
           versions = filtered;
+          // Se e' rimasta solo la versione doppiata, cerca il titolo base per aggiungere
+          // la versione sub dello stesso anime (la ricerca con il sottotitolo di stagione
+          // a volte restituisce una sola delle due lingue).
+          if (!versions.some(v => v.language_type === 'SUB ITA')) {
+            // Solo per i titoli con sottotitolo di stagione: il primo ripiego e' il titolo della serie.
+            const baseQuery = /:|\s-\s/.test(normalized) ? buildTitleFallbackQueries(normalized)[0] : '';
+            if (baseQuery && baseQuery !== normalized) {
+              const extra = (await this.searchAllVersions(baseQuery))
+                .filter(v => v.language_type === 'SUB ITA' && matchesBaseSlug(v));
+              if (extra.length) {
+                debug(2, 'AnimeWorld', `[AnimeWorld] Versione SUB aggiunta dalla query base "${baseQuery}":`, extra.map(v => v.slug).join(', '));
+                versions = versions.concat(extra);
+              }
+            }
+          }
         } else {
           debug(3, 'AnimeWorld', '[AnimeWorld] Rewrite detected in normalized title, keeping rewrite variants alongside base');
         }
