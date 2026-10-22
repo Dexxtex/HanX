@@ -78,7 +78,9 @@ Nel campo **Additional env file (optional)** lascia vuoto, a meno che tu non abb
 
 Il `docker-compose.yml` rende `.env` opzionale e legge anche `.env.dockhand`, il file generato da Dockhand con le variabili non-secret dell'Environment tab. Le variabili secret vengono passate tramite le mappature `environment: ${VAR}` già presenti per chiavi API, EasyProxy e proxy di scraping. Non serve creare `.env` nel clone Git, ma puoi farlo se preferisci gestire tutto da file.
 
-`EASYPROXY_URL` serve per la riproduzione degli stream, non per lo scraping. Se AnimeUnity/AnimeSaturn/AnimeWorld rispondono `429` o `403`, configura un forward proxy HTTP/SOCKS in `PROXY` oppure nei proxy specifici `AU_PROXY`, `AS_PROXY`, `AW_PROXY`.
+`EASYPROXY_URL` serve per la riproduzione degli stream, non per lo scraping: gli endpoint `/proxy/manifest.m3u8` e `/proxy/stream` non sono un forward proxy HTTP. Se AnimeUnity/AnimeSaturn/AnimeWorld rispondono `429` o `403`, configura un forward proxy HTTP/SOCKS in `PROXY` oppure nei proxy specifici `AU_PROXY`, `AS_PROXY`, `AW_PROXY`.
+
+EasyProxy può comunque fornire il route di rete: se nel suo pannello abiliti WARP, NordVPN, WireGuard o Tor, esponi il relativo SOCKS5 e usalo come proxy di scraping, ad esempio `PROXY=socks5h://easyproxy:1080`. In Docker i due container devono essere sulla stessa rete, oppure il SOCKS5 deve essere pubblicato e raggiungibile dall'addon.
 
 La landing page permette anche di inserire TMDB API Key, TVDB API Key e TVDB PIN direttamente nel link personale: se un campo resta vuoto, HanX usa la variabile d'ambiente corrispondente quando presente. Le chiavi non vengono salvate sul server e restano nel manifest URL.
 
