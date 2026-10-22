@@ -13,6 +13,7 @@ import { landingTemplate } from './landingPage.js';
 import { toNumericId, parseRequestId } from './mapping/request.js';
 import { getMappingVersion } from './mapping/index.js';
 import { debug, DEBUG_LEVEL } from './utils/logger.js';
+import { detectPublicBaseUrl } from './utils/public-url.js';
 import { AnimeUnityConfig } from './types/animeunity.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -1041,7 +1042,14 @@ debug(1, 'Addon', 'debug level', DEBUG_LEVEL);
 app.get('/', (_req: Request, res: ExpressResponse) => {
     try {
         const manifest = loadCustomConfig();
-        const html = landingTemplate(manifest);
+        const publicBaseUrl = detectPublicBaseUrl({
+            host: _req.get('host'),
+            forwardedHost: _req.get('x-forwarded-host'),
+            forwardedPort: _req.get('x-forwarded-port'),
+            forwardedProto: _req.get('x-forwarded-proto'),
+            protocol: _req.protocol,
+        });
+        const html = landingTemplate(manifest, process.env, publicBaseUrl);
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
         // The page can contain env-prefilled keys/passwords: never cache it.
         res.setHeader('Cache-Control', 'no-store');

@@ -72,6 +72,10 @@ Variabili d'ambiente (`.env` o `docker-compose.yml`):
 
 Le righe `.env.example` configurano Tenrai e il mapping; puoi aggiungere le tue chiavi TMDB, TVDB o EasyProxy nello stesso `.env`. Docker Compose persiste il database nel volume `hanx-data`. Le credenziali restano locali e non vanno committate.
 
+### URL pubblico dietro reverse proxy
+
+La landing page costruisce il link del manifest usando l'origine pubblica rilevata dalla richiesta: `X-Forwarded-Host`, `X-Forwarded-Port`, `X-Forwarded-Proto` oppure `Host`. Se il proxy non passa queste informazioni, usa l'origine del browser. Non serve configurare manualmente host o porta.
+
 ### Dockhand / Git stack
 
 Nel campo **Additional env file (optional)** lascia vuoto, a meno che tu non abbia davvero un secondo file nel repository (es. `.env.production`). Il campo accetta un nome relativo alla directory dello stack e non crea il file mancante.

@@ -785,6 +785,7 @@ const CLIENT_SCRIPT = String.raw`
     };
     var pageData = window.__HANX_PAGE_DATA__ || { defaults: {} };
     var defaults = pageData.defaults || {};
+    var configuredBaseUrl = pageData.publicBaseUrl || '';
     var mode = 'direct';
     var manifestUrl = '';
     var providers = [
@@ -879,12 +880,13 @@ const CLIENT_SCRIPT = String.raw`
             .replace(/\/(?:configure|index\.html)\/?$/, '')
             .replace(/\/+$/, '');
         var encodedConfig = encodeURIComponent(JSON.stringify(buildConfig()));
+        var baseOrigin = (configuredBaseUrl || window.location.origin).replace(/\/+$/, '');
 
-        manifestUrl = window.location.origin + basePath + '/'
+        manifestUrl = baseOrigin + basePath + '/'
             + encodedConfig + '/manifest.json';
 
         getElement('manifestUrl').value = manifestUrl;
-        getElement('serverSummary').textContent = window.location.host + basePath;
+        getElement('serverSummary').textContent = baseOrigin.replace(/^https?:\/\//, '') + basePath;
         getElement('installLink').href = 'stremio://'
             + manifestUrl.replace(/^https?:\/\//, '');
     }
@@ -1135,7 +1137,8 @@ const ENV_CONFIG_DEFAULTS: Record<string, string> = {
 
 export function landingTemplate(
     manifest: any,
-    env: Record<string, string | undefined> = process.env
+    env: Record<string, string | undefined> = process.env,
+    publicBaseUrl = ''
 ): string {
     const defaults: Record<string, unknown> = {};
     const fields = Array.isArray(manifest.config) ? manifest.config : [];
@@ -1158,7 +1161,8 @@ export function landingTemplate(
         defaults[configKey] = normalized;
     }
 
-    const pageData = serializeForScript({ defaults });
+    const normalizedBaseUrl = String(publicBaseUrl || '').trim().replace(/\/+$/, '');
+    const pageData = serializeForScript({ defaults, publicBaseUrl: normalizedBaseUrl });
     const iconUrl = escapeHtml(HANX_ICON_URL);
 
     return `<!DOCTYPE html>
