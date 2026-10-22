@@ -6,7 +6,9 @@ import { debug, redactUrl } from '../utils/logger.js';
 import { checkIsAnimeById, applyUniversalAnimeTitleNormalization } from '../utils/animeGate.js';
 import { buildEasyProxyHlsUrl, buildEasyProxyStreamUrl } from '../utils/easyproxy.js';
 import {
+  buildTitleFallbackQueries,
   normalizeTitleForSearch,
+  titleMatchScore,
   type TitleNormalizationOptions,
 } from '../utils/anime-title-normalization.js';
 import {
@@ -713,31 +715,18 @@ function filterAnimeResults(
   englishTitle: string
 ) {
   const norm = (s: string) => normalizeApostrophes(normalizeUnicodeToAscii(s.toLowerCase().replace(/\s+/g, ' ').trim()));
-  const clean = (s: string) => s.replace(/\s*\(.*?\)/g, '').replace(/\s*ita|\s*cr|\s*sub/gi, '').trim();
   const baseRaw = norm(englishTitle);
-  const baseClean = clean(baseRaw);
-
-  const isAllowed = (title: string) => {
-    const tNorm = norm(title);
-    const tClean = clean(tNorm);
-    return (
-      tNorm.includes(baseRaw) ||
-      (baseClean.length > 0 && tNorm.includes(baseClean)) ||
-      (baseClean.length > 0 && tClean.includes(baseClean))
-    );
-  };
+  const scored = results
+    .map((result) => ({ result, score: titleMatchScore(englishTitle, result.version.title) }))
+    .filter((entry) => entry.score > 0);
+  const best = scored.reduce((max, entry) => Math.max(max, entry.score), 0);
+  const filtered = best >= 0.5 ? scored.filter((entry) => entry.score === best).map((entry) => entry.result) : [];
 
   debug(4, 'AnimeSaturn', 'DEBUG filtro:', {
     base: baseRaw,
-    baseClean,
-    titoli: results.map(r => ({
-      raw: r.version.title,
-      norm: norm(r.version.title),
-      afterClean: clean(norm(r.version.title))
-    }))
+    titoli: results.map(r => ({ raw: r.version.title, score: titleMatchScore(englishTitle, r.version.title) }))
   });
 
-  const filtered = results.filter(r => isAllowed(r.version.title));
   debug(3, 'AnimeSaturn', `[UniversalTitle] Risultati prima del filtro:`, results.map(r => r.version.title));
   debug(3, 'AnimeSaturn', `[UniversalTitle] Risultati dopo il filtro:`, filtered.map(r => r.version.title));
   return filtered;
@@ -1270,12 +1259,17 @@ export class AnimeSaturnProvider {
     debug(2, 'AnimeSaturn', `[AnimeSaturn] Titolo normalizzato per ricerca: ${normalizedTitle}`);
     debug(3, 'AnimeSaturn', `[AnimeSaturn] MAL ID disponibile per il filtro:`, malId ? malId : '(nessuno)');
     debug(3, 'AnimeSaturn', '[AnimeSaturn] Query inviata allo scraper (post-normalize):', normalizedTitle);
-    let animeVersions = await this.searchAllVersions(normalizedTitle);
-    animeVersions = filterAnimeResults(animeVersions, normalizedTitle);
-    if (malId && animeVersions.length === 0) {
-      debug(2, 'AnimeSaturn', '[AnimeSaturn] Nessun risultato dopo filtro con MAL ID, ritento ricerca loose');
-      animeVersions = await this.searchAllVersions(normalizedTitle);
-      animeVersions = filterAnimeResults(animeVersions, normalizedTitle);
+    let animeVersions = filterAnimeResults(await this.searchAllVersions(normalizedTitle), normalizedTitle);
+    if (!animeVersions.length) {
+      for (const query of buildTitleFallbackQueries(normalizedTitle)) {
+        if (query === normalizedTitle) continue;
+        const fallbackVersions = filterAnimeResults(await this.searchAllVersions(query), normalizedTitle);
+        if (fallbackVersions.length) {
+          debug(2, 'AnimeSaturn', `[AnimeSaturn] Trovato con query di ripiego: ${query}`);
+          animeVersions = fallbackVersions;
+          break;
+        }
+      }
     }
     if (!animeVersions.length) {
       console.warn('[AnimeSaturn] Nessun risultato trovato per il titolo:', normalizedTitle);

@@ -56,6 +56,11 @@ export function normalizeTitleForSearch(
 /** Query di ripiego usate quando la ricerca normale non restituisce risultati. */
 export function buildTitleFallbackQueries(normalized: string): string[] {
   const queries: string[] = [];
+  // I provider usano spesso il titolo della serie senza il sottotitolo della stagione.
+  const colonBase = normalized.split(':')[0].trim();
+  if (colonBase !== normalized && colonBase.split(/\s+/).length >= 2) queries.push(colonBase);
+  const dashBase = normalized.split(/\s+-\s+/)[0].trim();
+  if (dashBase !== normalized && dashBase.split(/\s+/).length >= 2 && !queries.includes(dashBase)) queries.push(dashBase);
   if (normalized.includes("'")) queries.push(normalized.replace(/'/g, ''));
   if (normalized.includes('(')) queries.push(normalized.split('(')[0].trim());
   const words = normalized.split(' ');
@@ -63,6 +68,68 @@ export function buildTitleFallbackQueries(normalized: string): string[] {
   const plus = normalized.replace(/\s+/g, '+');
   if (plus !== normalized) queries.push(plus);
   return queries;
+}
+
+const TITLE_STOP_WORDS = new Set([
+  'a', 'an', 'and', 'dei', 'del', 'della', 'delle', 'di', 'e', 'for', 'ga', 'in',
+  'no', 'of', 'on', 'the', 'to', 'wa', 'with', 'wo',
+]);
+const TITLE_LANGUAGE_WORDS = new Set(['cr', 'dub', 'eng', 'ita', 'jp', 'jap', 'sub', 'subita']);
+const TITLE_SEASON_SUFFIXES = new Set([
+  'arc', 'chapter', 'cour', 'hen', 'movie', 'ona', 'ova', 'part', 'saga', 'season', 'special',
+]);
+
+function titleTokens(title: string): string[] {
+  const tokens = String(title || '')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .split(/\s+/)
+    .filter((token) => token && !TITLE_STOP_WORDS.has(token) && !TITLE_LANGUAGE_WORDS.has(token));
+  // "Tenjiku-hen" e "Tenjiku Arc" sono lo stesso sottotitolo.
+  while (tokens.length > 1 && TITLE_SEASON_SUFFIXES.has(tokens[tokens.length - 1])) tokens.pop();
+  return tokens;
+}
+
+/**
+ * 1 = stesso titolo. 0.9 = stesso sottotitolo, con una parte extra non
+ * numerata. 0.5 = stessa serie e almeno un token del sottotitolo in comune
+ * ("The Three Deities" / "War of the Three Titans Arc"). 0 = non correlato.
+ */
+export function titleMatchScore(requested: string, candidate: string): number {
+  const query = titleTokens(requested);
+  const found = titleTokens(candidate);
+  if (!query.length || !found.length) return 0;
+
+  const queryKey = query.join(' ');
+  const foundKey = found.join(' ');
+  if (queryKey === foundKey) return 1;
+
+  // A bare series title must not match a season that only adds a subtitle.
+  const bothHaveSubtitle = /:|\s+-\s+/.test(requested) && /:|\s+-\s+/.test(candidate);
+  if (bothHaveSubtitle && (foundKey.includes(queryKey) || queryKey.includes(foundKey))) {
+    const longer = queryKey.length >= foundKey.length ? query : found;
+    const shorterLength = Math.min(query.length, found.length);
+    const hasNumber = longer.slice(shorterLength).some((token) => /^\d+$/.test(token));
+    if (!hasNumber) return 0.9;
+  }
+
+  let sharedPrefix = 0;
+  while (
+    sharedPrefix < query.length &&
+    sharedPrefix < found.length &&
+    query[sharedPrefix] === found[sharedPrefix]
+  ) sharedPrefix += 1;
+  if (!sharedPrefix) return 0;
+
+  const queryRest = [...new Set(query.slice(sharedPrefix))];
+  const foundRest = new Set(found.slice(sharedPrefix));
+  if (!queryRest.length || !foundRest.size) return 0;
+
+  const shared = queryRest.filter((token) => foundRest.has(token)).length;
+  return shared ? shared / Math.min(queryRest.length, foundRest.size) : 0;
 }
 
 /** Chiave usata per confrontare titoli mostrati nei risultati. */

@@ -10,6 +10,7 @@ import {
   normalizeSearchTitleKey,
   normalizeTitleForSearch,
   resolveExactMapKey,
+  titleMatchScore,
   type TitleNormalizationOptions,
 } from '../utils/anime-title-normalization.js';
 import {
@@ -1155,7 +1156,8 @@ export class AnimeWorldProvider {
             const cleaned = basePart.replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
             if (/rewrite\b/.test(cleaned)) return false;
             if (cleaned === normSlugKey) return true;
-            return allowedSuffixes.some(suf => cleaned === normSlugKey + suf);
+            if (allowedSuffixes.some(suf => cleaned === normSlugKey + suf)) return true;
+            return titleMatchScore(normalized, basePart.replace(/-/g, ' ')) >= 0.5;
           });
           debug(3, 'AnimeWorld', `[AnimeWorld] Strict base filter applied (${normSlugKey}) from ${beforeCount} -> ${filtered.length}`);
           if (!filtered.length) {

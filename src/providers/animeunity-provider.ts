@@ -14,7 +14,9 @@ import { SocksProxyAgent } from 'socks-proxy-agent';
 import { ProxyAgent as UndiciProxyAgent } from 'undici';
 import { checkIsAnimeById, applyUniversalAnimeTitleNormalization } from '../utils/animeGate.js';
 import {
+  buildTitleFallbackQueries,
   normalizeTitleForSearch as normalizeAnimeTitleForSearch,
+  titleMatchScore,
   type TitleNormalizationOptions,
 } from '../utils/anime-title-normalization.js';
 import {
@@ -469,47 +471,15 @@ async function getEnglishTitleFromAnyId(id: string, type: 'imdb' | 'tmdb' | 'kit
 }
 
 function filterAnimeResults(results: { version: AnimeUnitySearchResult; language_type: string }[], searchQuery: string) {
-  // LOGICA: usa il TITOLO CON CUI HAI CERCATO per filtrare (italiano O inglese)
-  // Accetta varianti con (ITA), (CR), ecc. MA esclude sequel con numeri (es: "Title 2")
-  const norm = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim();
-  const queryNorm = norm(searchQuery);
+  const scored = results.map((result) => {
+    const titles = [result.version.name_eng || '', result.version.name_it || '', result.version.name || ''].filter(Boolean);
+    const score = Math.max(0, ...titles.map((title) => titleMatchScore(searchQuery, title)));
+    return { result, score };
+  }).filter((entry) => entry.score > 0);
+  const best = scored.reduce((max, entry) => Math.max(max, entry.score), 0);
+  const filtered = best >= 0.5 ? scored.filter((entry) => entry.score === best).map((entry) => entry.result) : [];
 
-  // Genera le varianti ammesse: base, base + (ita), base + (cr), base + (ita) (cr)
-  // IMPORTANTE: NON rimuovere i numeri dalla query - fanno parte del titolo!
-  const queryBase = queryNorm.replace(/\s*\([^)]*\)/g, '').trim();
-  const allowedVariants = [
-    queryBase,
-    `${queryBase} (ITA)`,
-    `${queryBase} (CR)`,
-    `${queryBase} (ITA) (CR)`,
-    `${queryBase} (CR) (ITA)`
-  ];
-
-  const filtered = results.filter(r => {
-    // Raccogli tutti i titoli disponibili del risultato
-    const titles = [
-      r.version.name_eng || '',
-      r.version.name_it || '',
-      r.version.name || ''
-    ].filter(t => t.trim());
-
-    // Per ogni titolo disponibile, controlla se matcha con una delle varianti ammesse
-    for (const title of titles) {
-      const titleNorm = norm(title);
-      // Rimuovi solo le parentesi per il confronto (mantieni i numeri!)
-      const titleBase = titleNorm.replace(/\s*\([^)]*\)/g, '').trim();
-
-      // Match: il titolo base del risultato deve essere UGUALE al queryBase
-      if (titleBase === queryBase) {
-        return true;
-      }
-    }
-
-    return false;
-  });
-
-  debug(4, 'AnimeUnity', `[UniversalTitle][Filter][Legacy] Query ricerca (norm): "${queryNorm}" -> base: "${queryBase}"`);
-  debug(4, 'AnimeUnity', `[UniversalTitle][Filter][Legacy] Varianti ammesse:`, allowedVariants);
+  debug(4, 'AnimeUnity', `[UniversalTitle][Filter][Legacy] Query ricerca: "${searchQuery}"`);
   debug(4, 'AnimeUnity', `[UniversalTitle][Filter][Legacy] Risultati prima del filtro:`, results.map(r => `${r.version.name} [it:"${r.version.name_it || 'N/A'}" eng:"${r.version.name_eng || 'N/A'}"]`));
   debug(4, 'AnimeUnity', `[UniversalTitle][Filter][Legacy] Risultati dopo il filtro:`, filtered.map(r => r.version.name));
   return filtered;
@@ -1005,6 +975,17 @@ export class AnimeUnityProvider {
         debug(4, 'AnimeUnity', `[AnimeUnity][ExactMap][StrictFilter] DOPO filtro: ${animeVersions.length} risultati rimasti`);
       } catch (e) {
         console.warn('[AnimeUnity][ExactMap][StrictFilter] errore:', (e as any)?.message || e);
+      }
+    }
+    if (!animeVersions.length && !skipFilter) {
+      for (const query of buildTitleFallbackQueries(normalizedTitle)) {
+        if (!query || query === normalizedTitle) continue;
+        const fallbackVersions = filterAnimeResults(await this.searchAllVersions(query), normalizedTitle);
+        if (fallbackVersions.length) {
+          debug(2, 'AnimeUnity', `[AnimeUnity] Trovato con query di ripiego: ${query}`);
+          animeVersions = fallbackVersions;
+          break;
+        }
       }
     }
     if (!animeVersions.length) {
