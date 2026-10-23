@@ -40,16 +40,17 @@ KEY_HINTS = {
 SOURCE_ONLY_HOSTS = {'animesaturn.me', 'animeworlditalia.com'}
 
 # Fallback usati solo se il pastebin non offre un host raggiungibile.
-# Verificati manualmente: animeunity.so è morto, animeunity.at è il canonical.
+# Verificati manualmente: animeunity.so è morto, animeunity.co è attivo e senza
+# rate-limit sull'IP di casa; animeunity.at resta come ripiego.
 KNOWN_HOSTS = {
     'animesaturn': ['animesaturn.net', 'animemars.org', 'animesaturn.cx', 'animesaturn.cc', 'animesaturn.com'],
-    'animeunity': ['animeunity.at', 'animeunity.io'],
+    'animeunity': ['animeunity.co', 'animeunity.at', 'animeunity.io'],
     'animeworld': ['animeworld.ac', 'animeworld.so', 'animeworld.tv'],
 }
 
 DEFAULT_DOMAINS = {
     'animesaturn': 'animesaturn.net',
-    'animeunity': 'animeunity.at',
+    'animeunity': 'animeunity.co',
     'animeworld': 'animeworld.ac',
 }
 

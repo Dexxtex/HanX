@@ -2,12 +2,15 @@ import { getDomain } from '../utils/domains.js';
 import { debug, redactUrl } from '../utils/logger.js';
 import { buildEasyProxyHlsUrl, buildEasyProxyStreamUrl } from '../utils/easyproxy.js';
 import {
+  decodeHtmlAttribute,
   parseEpisodesFromAnimeHtml,
   parseEpisodeServers,
   parseSearchResultsHtml,
+  parseUnityCoEpisodes,
   parseVixcloudHls,
   selectHighestHlsVariant,
 } from './animeunity-parsers.js';
+import type { AnimeUnityPageEpisode } from './animeunity-parsers.js';
 import { AnimeUnityConfig, StreamForStremio } from '../types/animeunity.js';
 import * as cheerio from 'cheerio';
 import { SocksProxyAgent } from 'socks-proxy-agent';
@@ -176,6 +179,7 @@ interface AnimeUnitySearchResult {
   name_it?: string; // Titolo italiano (opzionale)
   name_eng?: string; // Titolo inglese (opzionale)
   episodes_count: number;
+  type?: string; // Solo .co: TV / Movie / Special
 }
 
 interface AnimeUnityStreamData {
@@ -197,6 +201,19 @@ function getUnityBaseUrl(): string {
   } catch {
     const host = raw.replace(/^https?:\/\//i, '').replace(/^www\./i, '');
     return `https://${host || 'animeunity.at'}`;
+  }
+}
+
+/**
+ * AnimeUnity.co è un backend diverso (server-rendered, senza /ajax): ricerca su
+ * /archivio?title=, episodi nell'attributo `episodes`, embed per episodio su
+ * /anime/<id>-<slug>/<episodeId>. Tutto il resto del provider resta uguale.
+ */
+function isUnityCoBase(): boolean {
+  try {
+    return /(^|\.)animeunity\.co$/i.test(new URL(getUnityBaseUrl()).hostname);
+  } catch {
+    return false;
   }
 }
 
@@ -239,6 +256,7 @@ function extractAnimeIdSlugFromPath(animePath: string): { animeId: number | null
 let searchCooldownUntil = 0;
 
 async function searchEndpoint(query: string, _dubbed = false): Promise<AnimeUnitySearchResult[]> {
+  if (isUnityCoBase()) return searchUnityCo(query);
   if (searchCooldownUntil > Date.now()) return [];
 
   let payload: any;
@@ -273,6 +291,82 @@ async function searchEndpoint(query: string, _dubbed = false): Promise<AnimeUnit
     name_it: hit.name,
     name_eng: '',
   }));
+}
+
+async function searchUnityCo(query: string): Promise<AnimeUnitySearchResult[]> {
+  try {
+    const html = String(await auFetchResource(
+      `${getUnityBaseUrl()}/archivio?title=${encodeURIComponent(query)}`,
+      caches,
+      {
+        ttlMs: TTL.http,
+        cacheKey: `au-co-search:${query}`,
+        timeoutMs: FETCH_TIMEOUT,
+        headers: { 'Referer': `${getUnityBaseUrl()}/` },
+      }
+    ) || '');
+
+    const raw = html.match(/\brecords="([^"]+)"/)?.[1];
+    if (!raw) return [];
+
+    const records = JSON.parse(decodeHtmlAttribute(raw)) as any[];
+    return records
+      .filter((record) => record && record.id && record.slug)
+      .map((record) => ({
+        id: Number(record.id),
+        slug: String(record.slug),
+        name: String(record.title || record.title_it || record.title_eng || '').trim(),
+        name_it: record.title_it ? String(record.title_it) : undefined,
+        name_eng: record.title_eng ? String(record.title_eng) : undefined,
+        episodes_count: Number(record.episodes_count) || 0,
+        type: record.type ? String(record.type) : undefined,
+      }))
+      .filter((record) => record.name);
+  } catch (error: any) {
+    console.warn('[AnimeUnity][co] ricerca fallita:', error?.message || error);
+    return [];
+  }
+}
+
+/** Le serie lunghe hanno solo 120 episodi nella pagina: il resto arriva da /info_api. */
+async function fetchUnityCoEpisodeWindow(animeId: number, episode: number): Promise<AnimeUnityPageEpisode[]> {
+  try {
+    const payload = await auFetchResource(
+      `${getUnityBaseUrl()}/info_api/${animeId}/${episode}?start_range=${Math.max(1, episode - 30)}&end_range=${episode + 30}`,
+      caches,
+      {
+        as: 'json',
+        ttlMs: TTL.animePage,
+        cacheKey: `au-co-episodes:${animeId}:${episode}`,
+        timeoutMs: FETCH_TIMEOUT,
+        headers: {
+          'X-Requested-With': 'XMLHttpRequest',
+          'Accept': 'application/json, text/javascript, */*; q=0.01',
+          'Referer': `${getUnityBaseUrl()}/`,
+        },
+      }
+    ) as any;
+
+    return (payload?.episodes || []).map((entry: any) => ({
+      id: Number(entry?.id) || 0,
+      number: parseEpisodeNumber(entry?.number, 0),
+    })).filter((entry: AnimeUnityPageEpisode) => entry.id > 0);
+  } catch (error: any) {
+    console.warn('[AnimeUnity][co] info_api episodi fallita:', error?.message || error);
+    return [];
+  }
+}
+
+/** Su .co ogni scheda è una sola lingua: il flag `dub` dell'anime dice quale. */
+function isUnityCoDubPage(html: string): boolean {
+  const raw = String(html || '').match(/\banime="([^"]+)"/)?.[1];
+  if (!raw) return false;
+  try {
+    // Il JSON contiene anche `related[]`, ognuno col proprio `dub`: serve il campo top-level.
+    return JSON.parse(decodeHtmlAttribute(raw))?.dub === 1;
+  } catch {
+    return false;
+  }
 }
 
 async function resolveServerEmbedUrl(linkId: string, referer: string): Promise<string | null> {
@@ -366,6 +460,7 @@ async function getStreamData(
   episodeId: number,
   language: 'sub' | 'dub'
 ): Promise<AnimeUnityStreamData> {
+  if (isUnityCoBase()) return getUnityCoStreamData(animeId, animeSlug, episodeId);
   const episodePage = `${getUnityBaseUrl()}/anime/${animeId}-${animeSlug}/ep-${episodeId}`;
   const empty: AnimeUnityStreamData = { episode_page: episodePage, embed_url: null, hls_url: null, mp4_url: null };
 
@@ -388,6 +483,33 @@ async function getStreamData(
     return { ...empty, embed_url: embedUrl, ...media };
   } catch (error: any) {
     console.warn('[AnimeUnity] getStreamData failed:', error?.message || error);
+    return empty;
+  }
+}
+
+async function getUnityCoStreamData(
+  animeId: number,
+  animeSlug: string,
+  episodeId: number
+): Promise<AnimeUnityStreamData> {
+  const episodePage = `${getUnityBaseUrl()}/anime/${animeId}-${animeSlug}/${episodeId}`;
+  const empty: AnimeUnityStreamData = { episode_page: episodePage, embed_url: null, hls_url: null, mp4_url: null };
+
+  try {
+    const html = String(await auFetchResource(episodePage, caches, {
+      ttlMs: TTL.streamPage,
+      cacheKey: `au-co-ep:${animeId}:${episodeId}`,
+      timeoutMs: FETCH_TIMEOUT,
+    }).catch(() => '') || '');
+
+    const raw = html.match(/\bembed_url="([^"]+)"/)?.[1];
+    if (!raw) return empty;
+
+    const embedUrl = decodeHtmlAttribute(raw);
+    const media = await resolveEmbedMedia(embedUrl, episodePage);
+    return { ...empty, embed_url: embedUrl, ...media };
+  } catch (error: any) {
+    console.warn('[AnimeUnity][co] getStreamData failed:', error?.message || error);
     return empty;
   }
 }
@@ -600,8 +722,18 @@ export class AnimeUnityProvider {
     const { animeId, animeSlug } = extractAnimeIdSlugFromPath(normalizedPath);
     if (!animeId || !animeSlug) return [];
 
+    // .co mette solo i primi 120 episodi nella pagina: per le serie lunghe
+    // chiediamo la finestra che contiene l'episodio richiesto a /info_api.
+    let pageEpisodes = isUnityCoBase()
+      ? parseUnityCoEpisodes(String(html))
+      : parseEpisodesFromAnimeHtml(String(html));
+    if (isUnityCoBase() && requestedEpisode
+      && !pageEpisodes.some((entry) => parseEpisodeNumber(entry.number, 0) === requestedEpisode)) {
+      pageEpisodes = [...pageEpisodes, ...(await fetchUnityCoEpisodeWindow(animeId, requestedEpisode))];
+    }
+
     const normalizedEpisodes = normalizeEpisodesList(
-      parseEpisodesFromAnimeHtml(String(html)).map((entry, index) => ({
+      pageEpisodes.map((entry, index) => ({
         num: parseEpisodeNumber(entry.number, index + 1),
         episodeId: entry.id,
         link: null,
@@ -636,8 +768,11 @@ export class AnimeUnityProvider {
       streams.push({ title, url, behaviorHints: { notWebReady: true } });
     };
 
-    // Il nuovo sito espone SUB e ITA nello stesso episodio: emettiamo entrambi.
-    for (const language of ['sub', 'dub'] as const) {
+    // .at espone SUB e ITA nello stesso episodio; .co ha schede separate per lingua.
+    const languages: ('sub' | 'dub')[] = isUnityCoBase()
+      ? [isUnityCoDubPage(String(html)) ? 'dub' : 'sub']
+      : ['sub', 'dub'];
+    for (const language of languages) {
       const streamResult = await getStreamData(animeId, animeSlug, selected.episodeId, language);
       if (!streamResult.hls_url && !streamResult.mp4_url && !streamResult.embed_url) continue;
 
@@ -995,6 +1130,8 @@ export class AnimeUnityProvider {
     const streams: StreamForStremio[] = [];
     const seenLinks = new Set();
     for (const { version } of animeVersions) {
+      // .co tipizza le schede: un film non è l'episodio di una serie.
+      if (!isMovie && version.type === 'Movie') continue;
       const cleanName = version.name
         .replace(/\s*\(ITA\)/i, '')
         .replace(/\s*\(CR\)/i, '')

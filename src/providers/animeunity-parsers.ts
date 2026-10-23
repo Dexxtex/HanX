@@ -81,6 +81,40 @@ export function parseEpisodesFromAnimeHtml(html: string): AnimeUnityPageEpisode[
   return episodes;
 }
 
+/** Decodifica i valori negli attributi HTML (il sito .co li scrive con &quot;). */
+export function decodeHtmlAttribute(value: string): string {
+  return String(value || '')
+    .replace(/&quot;/g, '"')
+    .replace(/&#0?39;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&');
+}
+
+/**
+ * AnimeUnity.co: la pagina anime porta la lista episodi nell'attributo JSON
+ * `episodes="[...]"`. Sono solo i primi 120: le serie lunghe usano /info_api.
+ */
+export function parseUnityCoEpisodes(html: string): AnimeUnityPageEpisode[] {
+  const raw = String(html || '').match(/\bepisodes="([^"]+)"/)?.[1];
+  if (!raw) return [];
+
+  const episodes: AnimeUnityPageEpisode[] = [];
+  const seen = new Set<number>();
+  try {
+    const parsed = JSON.parse(decodeHtmlAttribute(raw)) as Array<{ id?: number; number?: string }>;
+    for (const entry of parsed) {
+      const id = parsePositiveInt(entry?.id);
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      episodes.push({ id, number: parseEpisodeNumber(entry?.number, episodes.length + 1) });
+    }
+  } catch {
+    return [];
+  }
+  return episodes;
+}
+
 /** Server SUB/ITA dell'episodio: `<li data-link-id data-type data-ep-id data-sv-id>`. */
 export function parseEpisodeServers(html: string, episodeId: number): AnimeUnityServer[] {
   const $ = cheerio.load(String(html || ''));

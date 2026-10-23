@@ -19,7 +19,7 @@ class UpdateDomainsTests(unittest.TestCase):
             ['animeunity.so'],
             {'animeunity': 'animeunity.at'},
         )
-        self.assertEqual(hosts, ['animeunity.so', 'animeunity.at', 'animeunity.io'])
+        self.assertEqual(hosts, ['animeunity.so', 'animeunity.at', 'animeunity.co', 'animeunity.io'])
 
     def test_choose_host_skips_dead_domain(self):
         def fake_probe(host):
@@ -73,8 +73,8 @@ class UpdateDomainsTests(unittest.TestCase):
 
             domains = json.loads(domains_file.read_text('utf-8'))
             urls = json.loads(urls_file.read_text('utf-8'))
-            self.assertEqual(domains['animeunity'], 'animeunity.at')
-            self.assertEqual(urls['animeunity'], 'https://www.animeunity.at')
+            self.assertEqual(domains['animeunity'], 'animeunity.co')
+            self.assertEqual(urls['animeunity'], 'https://www.animeunity.co')
             self.assertFalse(attention_file.exists())
 
 
