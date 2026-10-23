@@ -188,15 +188,15 @@ interface AnimeUnityStreamData {
 function getUnityBaseUrl(): string {
   const configured = getProviderUrl('animeunity', ['ANIMEUNITY_BASE_URL', 'AU_BASE_URL']);
   const raw = String(configured || getDomain('animeunity') || 'animeunity.at').trim().replace(/\/+$/, '');
-  // Il sito canonical è https://animeunity.at, ma www risponde 200: forziamo www
-  // per avere una sola origine (cookie/redirect) in tutte le richieste.
+  // Il canonical è senza www: www risponde 301 verso l'apex, quindi tenerlo
+  // costerebbe un redirect (e un cookie perso) su ogni singola richiesta.
   try {
     const u = new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`);
-    if (!/^www\./i.test(u.hostname)) u.hostname = `www.${u.hostname}`;
+    if (/^www\./i.test(u.hostname)) u.hostname = u.hostname.slice(4);
     return u.origin;
   } catch {
     const host = raw.replace(/^https?:\/\//i, '').replace(/^www\./i, '');
-    return `https://www.${host || 'animeunity.at'}`;
+    return `https://${host || 'animeunity.at'}`;
   }
 }
 
