@@ -11,7 +11,7 @@ WORKDIR /app
 RUN apk add --no-cache ca-certificates
 
 # Installa la stessa versione di pnpm dichiarata in package.json
-RUN npm install -g pnpm@12.10.1
+RUN npm install -g pnpm@12.15.0
 
 # Copia manifest e lockfile per cache ottimale
 COPY package.json pnpm-workspace.yaml ./
