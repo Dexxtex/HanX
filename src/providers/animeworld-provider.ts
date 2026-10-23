@@ -340,6 +340,22 @@ function collectMediaLinksFromHtml(html: string): string[] {
   return links;
 }
 
+/**
+ * AnimeWorld, quando il filtro non trova nulla, restituisce il listone "ultimi
+ * arrivi" (Firefly Wedding, One Piece...). Distinguerlo serve: preso per vero
+ * produce stream di un anime completamente diverso.
+ */
+export function awResultsRelateToQuery(results: AnimeWorldResult[], query: string): boolean {
+  const tokens = normalizeSearchTitleKey(query).split(' ').filter(Boolean);
+  const wanted = tokens.filter(t => t.length >= 4);
+  const keys = wanted.length ? wanted : tokens;
+  if (!keys.length) return false;
+  return results.some(r => {
+    const hay = normalizeSearchTitleKey(`${r.searchTitle || ''} ${r.name || ''} ${r.slug || ''}`);
+    return keys.some(k => hay.includes(k));
+  });
+}
+
 async function awSearch(query: string, date?: string): Promise<AnimeWorldResult[]> {
   const q = encodeURIComponent(String(query || '').trim());
   if (!q) return [];
@@ -393,7 +409,11 @@ async function awSearch(query: string, date?: string): Promise<AnimeWorldResult[
       seen.add(slug);
       out.push(entry);
     });
-    if (out.length) break;
+    // Se l'URL con l'anno non produce nulla di inerente, il sito ha risposto col
+    // listone generico: scartalo e prova la query senza anno.
+    if (out.length && awResultsRelateToQuery(out, query)) break;
+    out.length = 0;
+    seen.clear();
   }
   return out;
 }
@@ -1274,10 +1294,12 @@ export class AnimeWorldProvider {
     try {
       debug(3, 'AnimeWorld', '[AnimeWorld][FallbackFilter] Triggered with title=', normalizedTitle, 'date=', startDate);
       // Emula lo "split(':')[0]" aggressivo del vecchio script: tronca al primo ':' o '?'
+      // Solo per le serie: nei film il sottotitolo fa parte del titolo, e troncarlo
+      // trasforma la richiesta di un film in un episodio della serie omonima.
       let query = normalizedTitle;
-      if (normalizedTitle.includes(':')) {
+      if (!isMovie && normalizedTitle.includes(':')) {
         query = normalizedTitle.split(':')[0];
-      } else if (normalizedTitle.includes('?')) {
+      } else if (!isMovie && normalizedTitle.includes('?')) {
         query = normalizedTitle.split('?')[0];
       }
       query = query.trim();
@@ -1303,11 +1325,15 @@ export class AnimeWorldProvider {
         debug(3, 'AnimeWorld', '[AnimeWorld][FallbackFilter] Match per titolo:', wanted, '->', related.length, '/', results.length);
       } else {
         // Nessun titolo utile (markup cambiato, o titolo diverso dalla query): ripiego
-        // sull'ancora dello slug del primo risultato, che segue la rilevanza della ricerca.
-        const anchor = animeWorldSlugBase(results[0].slug || results[0].id || results[0].name);
+        // sull'ancora del primo risultato inerente alla query, che segue la rilevanza
+        // della ricerca. Mai results[0] alla cieca: senza risultati inerenti -> 0 stream.
+        const anchorSource = results.find(r => awResultsRelateToQuery([r], query));
+        const anchor = anchorSource
+          ? animeWorldSlugBase(anchorSource.slug || anchorSource.id || anchorSource.name)
+          : '';
         related = anchor
           ? results.filter(r => animeWorldSlugBase(r.slug || r.id || r.name).startsWith(anchor))
-          : results;
+          : [];
         debug(3, 'AnimeWorld', '[AnimeWorld][FallbackFilter] Nessun match per titolo, anchor base:', anchor, '->', related.length, '/', results.length);
       }
       const picked = [
