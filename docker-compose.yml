@@ -29,7 +29,6 @@ services:
       - AU_PROXY=${AU_PROXY:-}
       - AS_PROXY=${AS_PROXY:-}
       - AW_PROXY=${AW_PROXY:-}
-      - ALLOWED_PROXY_HOSTS=${ALLOWED_PROXY_HOSTS:-}
     restart: unless-stopped
 
 volumes:
