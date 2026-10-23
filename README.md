@@ -38,11 +38,7 @@ docker compose up -d
 ```
 
 Se l'IPv4 pubblico viene rifiutato dai siti (403) mentre l'IPv6 funziona, su host Linux
-usa l'override che fa uscire il container con lo stack di rete dell'host:
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.host.yml up -d
-```
+aggiungi `network_mode: host` al servizio e togli la sezione `ports`.
 
 ### Manuale
 
