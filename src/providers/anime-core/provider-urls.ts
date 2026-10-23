@@ -1,11 +1,13 @@
 /**
  * anime-core/provider-urls.ts
- * Dynamic provider URL resolution from JSON file + environment variables.
+ * Dynamic provider URL resolution: env override, then local JSON file, then
+ * config/domains.json.
  * Ported 1:1 from easystreams-main provider_urls.js.
  *
  * Reload strategy:
  * - Local JSON file checked every 1.5 s (stat mtime)
- * - Remote JSON refreshed every 10 s from configurable URL
+ * - Remote JSON refreshed every 10 s, usato solo per le chiavi assenti nel file
+ *   locale: non sovrascrive mai l'override locale.
  */
 
 import { fileURLToPath } from 'node:url';
@@ -53,6 +55,7 @@ const DOMAIN_KEY_MAP: Record<string, string> = {
 let lastCheckAt = 0;
 let lastMtimeMs = -1;
 let lastData: Record<string, string> = {};
+let lastRemoteData: Record<string, string> = {};
 let lastRemoteCheckAt = 0;
 let remoteInFlight: Promise<void> | null = null;
 
@@ -133,7 +136,7 @@ async function refreshProviderUrlsFromRemoteIfNeeded(force = false): Promise<voi
       const payload = await response.json();
       const parsed = toNormalizedMap(payload);
       if (Object.keys(parsed).length > 0) {
-        lastData = parsed;
+        lastRemoteData = parsed;
       }
     } catch {
       // Ignore remote refresh errors — keep last known values.
@@ -148,8 +151,6 @@ async function refreshProviderUrlsFromRemoteIfNeeded(force = false): Promise<voi
 
 function findFromJson(providerKey: string): string {
   reloadProviderUrlsIfNeeded(false);
-  // Fire-and-forget remote refresh (non-blocking)
-  refreshProviderUrlsFromRemoteIfNeeded(false);
 
   const key = normalizeKey(providerKey);
   const candidates = [key, ...(ALIASES[key] || [])].map(normalizeKey);
@@ -157,6 +158,13 @@ function findFromJson(providerKey: string): string {
     const value = normalizeUrl(lastData[candidate]);
     if (value) return value;
   }
+  // Solo se il file locale non copre la chiave: il remoto è un fallback e non
+  // deve sovrascrivere un override locale.
+  for (const candidate of candidates) {
+    const value = normalizeUrl(lastRemoteData[candidate]);
+    if (value) return value;
+  }
+  refreshProviderUrlsFromRemoteIfNeeded(false);
   return '';
 }
 
@@ -183,15 +191,15 @@ function findFromDomains(providerKey: string): string {
 
 /**
  * Resolve a provider URL.
- * Checks local JSON file first, then environment variables.
+ * Precedenza: env esplicito -> file JSON locale -> config/domains.json.
  */
 export function getProviderUrl(providerKey: string, envKeys: string[] = []): string {
   const safeEnvKeys = Array.isArray(envKeys) ? envKeys : [];
-  const fromDomains = findFromDomains(providerKey);
-  if (fromDomains) return fromDomains;
-  const fromJson = findFromJson(providerKey);
-  if (fromJson) return fromJson;
   const fromEnv = findFromEnv(safeEnvKeys);
   if (fromEnv) return fromEnv;
+  const fromJson = findFromJson(providerKey);
+  if (fromJson) return fromJson;
+  const fromDomains = findFromDomains(providerKey);
+  if (fromDomains) return fromDomains;
   return '';
 }

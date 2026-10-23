@@ -22,49 +22,18 @@ import {
   normalizeHostLabel,
   inferSourceTag,
   BLOCKED_DOMAINS,
-  getMalAnimeMetadata,
-  getPreferredMalTitle,
+  getEnglishTitleFromAnyId,
 } from './anime-core/index.js';
 import {
   resolveMappingRequest,
   resolveAnimeTarget,
   resolveSeasonFallbackTitle,
   getKitsuTitle,
-  getKitsuMalIdForTmdb,
   getTvdbTitle,
   type MappingRequest,
 } from '../mapping/index.js';
 
 // --- Type definitions for external API responses ---
-interface KitsuMappingAttribute {
-  externalSite?: string;
-  externalId?: number;
-}
-
-interface KitsuMappingItem {
-  attributes?: KitsuMappingAttribute;
-}
-
-interface KitsuMappingsResponse {
-  data?: KitsuMappingItem[];
-}
-
-interface KitsuAttributes {
-  titles?: { en?: string };
-}
-
-interface KitsuData {
-  attributes?: KitsuAttributes;
-}
-
-interface KitsuMainResponse {
-  data?: KitsuData;
-}
-
-interface TmdbTitleResponse {
-  name?: string;
-  title?: string;
-}
 
 const AS_FETCH_TIMEOUT = Number.parseInt(process.env.ANIMESATURN_FETCH_TIMEOUT_MS || '10000', 10) || 10000;
 const asCaches = createCaches();
@@ -637,82 +606,6 @@ async function asSearch(query: string): Promise<AnimeSaturnResult[]> {
   return out;
 }
 
-// Funzione universale per ottenere il titolo inglese da qualsiasi ID
-async function getEnglishTitleFromAnyId(id: string, type: 'imdb'|'tmdb'|'kitsu'|'mal', tmdbApiKey?: string): Promise<string> {
-  let malId: string | null = null;
-  let tmdbId: string | null = null;
-  let fallbackTitle: string | null = null;
-  const tmdbKey = tmdbApiKey || process.env.TMDB_API_KEY || '';
-  if (type === 'imdb') {
-    if (!tmdbKey) throw new Error('TMDB_API_KEY non configurata');
-    const imdbIdOnly = id.split(':')[0];
-    const { getTmdbIdFromImdbId } = await import('../utils/tmdbResolver.js');
-    tmdbId = await getTmdbIdFromImdbId(imdbIdOnly, tmdbKey, 'tv');
-    if (!tmdbId) throw new Error('TMDB ID non trovato per IMDB: ' + id);
-    try {
-      malId = await getKitsuMalIdForTmdb(tmdbId);
-    } catch {}
-  } else if (type === 'tmdb') {
-    tmdbId = id;
-    try {
-      malId = await getKitsuMalIdForTmdb(tmdbId);
-    } catch {}
-  } else if (type === 'kitsu') {
-    const mappingsResp = (await (await fetch(`https://kitsu.io/api/edge/anime/${id}/mappings`)).json()) as KitsuMappingsResponse;
-    const malMapping = mappingsResp.data?.find((m: any) => m.attributes?.externalSite === 'myanimelist/anime');
-    malId = malMapping?.attributes?.externalId?.toString() || null;
-    if (!malId) {
-      try {
-        const kitsuMain = (await (await fetch(`https://kitsu.io/api/edge/anime/${id}`)).json()) as KitsuMainResponse;
-        const enTitle = kitsuMain?.data?.attributes?.titles?.en;
-        if (enTitle) {
-          debug(3, 'AnimeSaturn', `[UniversalTitle][KitsuFallback] Titolo inglese diretto da Kitsu (no MAL mapping): ${enTitle}`);
-          return enTitle;
-        } else {
-          console.warn(`[UniversalTitle][KitsuFallback] Nessun titles.en disponibile per Kitsu ${id}`);
-        }
-      } catch (e) {
-        console.warn(`[UniversalTitle][KitsuFallback] Errore recuperando titles.en per Kitsu ${id}:`, e);
-      }
-    }
-  } else if (type === 'mal') {
-    malId = id;
-  }
-  if (malId) {
-    try {
-      const metadata = await getMalAnimeMetadata(malId);
-      const englishTitle = getPreferredMalTitle(metadata) || '';
-      if (englishTitle) {
-        debug(3, 'AnimeSaturn', `[UniversalTitle] Titolo inglese trovato da Tenrai (${metadata?.cacheStatus || 'cache'}).`);
-        return englishTitle;
-      }
-    } catch (err) {
-      console.warn('[UniversalTitle] Errore Tenrai, provo fallback TMDB:', err);
-    }
-  }
-  if (tmdbId && tmdbKey) {
-    try {
-      let tmdbResp = (await (await fetch(`https://api.themoviedb.org/3/tv/${tmdbId}?api_key=${tmdbKey}`)).json()) as TmdbTitleResponse;
-      if (tmdbResp && tmdbResp.name) {
-        fallbackTitle = tmdbResp.name;
-      }
-      if (!fallbackTitle) {
-        tmdbResp = (await (await fetch(`https://api.themoviedb.org/3/movie/${tmdbId}?api_key=${tmdbKey}`)).json()) as TmdbTitleResponse;
-        if (tmdbResp && tmdbResp.title) {
-          fallbackTitle = tmdbResp.title;
-        }
-      }
-      if (fallbackTitle) {
-        console.warn(`[UniversalTitle] Fallback: uso titolo da TMDB: ${fallbackTitle}`);
-        return fallbackTitle;
-      }
-    } catch (err) {
-      console.warn('[UniversalTitle] Errore fallback TMDB:', err);
-    }
-  }
-  throw new Error('Impossibile ottenere titolo inglese da nessuna fonte per ' + id);
-}
-
 function normalizeApostrophes(str: string): string {
   return str.replace(/['’‘]/g, "'");
 }
@@ -991,53 +884,35 @@ export class AnimeSaturnProvider {
       if (embedUrl) {
         const resolved = await resolvePlaylistUrl(embedUrl);
         const mediaUrl = normalizePlayableMediaUrl(resolved, getSaturnBaseUrl());
-        if (mediaUrl && !seenMedia.has(mediaUrl)) {
-          seenMedia.add(mediaUrl);
-          const finalMediaUrl = await selectHighestSaturnHls(mediaUrl, watchUrl);
-          const host = normalizeHostLabel(finalMediaUrl);
-
-          const sNum = seasonNumber !== undefined && seasonNumber !== null ? seasonNumber : 1;
-          const langLabel = parsedPage.sourceTag === 'ITA' ? 'ITA' : 'SUB';
-          let streamTitle = `${capitalize(baseTitle)} ▪ ${langLabel} ▪ S${sNum}`;
-          if (mediaType !== 'movie' && requestedEpisode) {
-            streamTitle += `E${requestedEpisode}`;
-          }
-          if (host) {
-            streamTitle += ` (${host})`;
-          }
-
-          streams.push({
-            title: streamTitle,
-            url: finalMediaUrl,
-            behaviorHints: {
-              notWebReady: true,
-              headers: {
-                'User-Agent': AS_USER_AGENT,
-                Referer: watchUrl,
-              },
-            },
-          });
-        } else {
-          const sNum = seasonNumber !== undefined && seasonNumber !== null ? seasonNumber : 1;
-          const langLabel = parsedPage.sourceTag === 'ITA' ? 'ITA' : 'SUB';
-          let streamTitle = `${capitalize(baseTitle)} ▪ ${langLabel} ▪ S${sNum}`;
-          if (mediaType !== 'movie' && requestedEpisode) {
-            streamTitle += `E${requestedEpisode}`;
-          }
-          streamTitle += ` (SaturnCDN)`;
-
-          streams.push({
-            title: streamTitle,
-            url: embedUrl,
-            behaviorHints: {
-              notWebReady: true,
-              headers: {
-                'User-Agent': AS_USER_AGENT,
-                Referer: watchUrl,
-              },
-            },
-          });
+        if (!mediaUrl || seenMedia.has(mediaUrl)) {
+          // L'embed è una pagina HTML, non un media: meglio nessuno stream che uno rotto.
+          continue;
         }
+        seenMedia.add(mediaUrl);
+        const finalMediaUrl = await selectHighestSaturnHls(mediaUrl, watchUrl);
+        const host = normalizeHostLabel(finalMediaUrl);
+
+        const sNum = seasonNumber !== undefined && seasonNumber !== null ? seasonNumber : 1;
+        const langLabel = parsedPage.sourceTag === 'ITA' ? 'ITA' : 'SUB';
+        let streamTitle = `${capitalize(baseTitle)} ▪ ${langLabel} ▪ S${sNum}`;
+        if (mediaType !== 'movie' && requestedEpisode) {
+          streamTitle += `E${requestedEpisode}`;
+        }
+        if (host) {
+          streamTitle += ` (${host})`;
+        }
+
+        streams.push({
+          title: streamTitle,
+          url: finalMediaUrl,
+          behaviorHints: {
+            notWebReady: true,
+            headers: {
+              'User-Agent': AS_USER_AGENT,
+              Referer: watchUrl,
+            },
+          },
+        });
         continue;
       }
 
@@ -1093,15 +968,6 @@ export class AnimeSaturnProvider {
     try {
       const request = resolveMappingRequest(kitsuIdString);
       if (!request) return { streams: [] };
-      let malId: string | undefined = undefined;
-      try {
-        const mappingsResp = await fetch(`https://kitsu.io/api/edge/anime/${request.id}/mappings`);
-        if (mappingsResp.ok) {
-          const j: any = await mappingsResp.json();
-          const malMapping = j.data?.find((m: any) => m.attributes.externalSite === 'myanimelist/anime');
-          malId = malMapping?.attributes?.externalId?.toString() || undefined;
-        }
-      } catch {}
       let title = await getKitsuTitle(request.id);
       if (!title) {
         try {
@@ -1109,7 +975,7 @@ export class AnimeSaturnProvider {
         } catch {}
       }
       if (!title) return { streams: [] };
-      return this.handleTitleRequest(title, null, request.episode, request.isMovie, malId);
+      return this.handleTitleRequest(title, null, request.episode, request.isMovie);
     } catch (error) {
       console.error('Error handling Kitsu request:', error);
       return { streams: [] };
@@ -1125,7 +991,7 @@ export class AnimeSaturnProvider {
       if (!request) return { streams: [] };
       const englishTitle = await getEnglishTitleFromAnyId(request.id, 'mal', this.config.tmdbApiKey);
       debug(2, 'AnimeSaturn', `[AnimeSaturn] Ricerca con titolo inglese: ${englishTitle}`);
-      return this.handleTitleRequest(englishTitle, request.season, request.episode, request.isMovie, request.id);
+      return this.handleTitleRequest(englishTitle, request.season, request.episode, request.isMovie);
     } catch (error) {
       console.error('Error handling MAL request:', error);
       return { streams: [] };
@@ -1172,16 +1038,8 @@ export class AnimeSaturnProvider {
       }
       const unmapped = await this.handleUnmappedSeries(request, episodeNumber);
       if (unmapped) return unmapped;
-      const imdbIdClean = imdbId.split(':')[0];
       const englishTitle = await getEnglishTitleFromAnyId(imdbId, 'imdb', this.config.tmdbApiKey);
-      let malId: string | undefined = undefined;
-      try {
-        const tmdbKey = this.config.tmdbApiKey || process.env.TMDB_API_KEY || '';
-        const { getTmdbIdFromImdbId } = await import('../utils/tmdbResolver.js');
-        const tmdbId = await getTmdbIdFromImdbId(imdbIdClean, tmdbKey, 'tv');
-        if (tmdbId) malId = (await getKitsuMalIdForTmdb(tmdbId)) || undefined;
-      } catch {}
-      return this.handleTitleRequest(englishTitle, seasonNumber, episodeNumber, isMovie, malId);
+      return this.handleTitleRequest(englishTitle, seasonNumber, episodeNumber, isMovie);
     } catch (error) {
       console.error('Error handling IMDB request:', error);
       return { streams: [] };
@@ -1212,11 +1070,7 @@ export class AnimeSaturnProvider {
       const unmapped = await this.handleUnmappedSeries(request, episodeNumber);
       if (unmapped) return unmapped;
       const englishTitle = await getEnglishTitleFromAnyId(tmdbId, 'tmdb', this.config.tmdbApiKey);
-      let malId: string | undefined = undefined;
-      try {
-        malId = (await getKitsuMalIdForTmdb(tmdbId)) || undefined;
-      } catch {}
-      return this.handleTitleRequest(englishTitle, seasonNumber, episodeNumber, isMovie, malId);
+      return this.handleTitleRequest(englishTitle, seasonNumber, episodeNumber, isMovie);
     } catch (error) {
       console.error('Error handling TMDB request:', error);
       return { streams: [] };
@@ -1256,7 +1110,7 @@ export class AnimeSaturnProvider {
     }
   }
 
-  async handleTitleRequest(title: string, seasonNumber: number | null, episodeNumber: number | null, isMovie = false, malId?: string): Promise<{ streams: StreamForStremio[] }> {
+  async handleTitleRequest(title: string, seasonNumber: number | null, episodeNumber: number | null, isMovie = false): Promise<{ streams: StreamForStremio[] }> {
     debug(1, 'AnimeSaturn', 'title request', { title, season: seasonNumber, episode: episodeNumber, isMovie });
     const universalTitle = applyUniversalAnimeTitleNormalization(title);
     if (universalTitle !== title) {
@@ -1264,7 +1118,6 @@ export class AnimeSaturnProvider {
     }
     const normalizedTitle = normalizeTitleForSearch(universalTitle, animeSaturnTitleNormalization);
     debug(2, 'AnimeSaturn', `[AnimeSaturn] Titolo normalizzato per ricerca: ${normalizedTitle}`);
-    debug(3, 'AnimeSaturn', `[AnimeSaturn] MAL ID disponibile per il filtro:`, malId ? malId : '(nessuno)');
     debug(3, 'AnimeSaturn', '[AnimeSaturn] Query inviata allo scraper (post-normalize):', normalizedTitle);
     let animeVersions = filterAnimeResults(await this.searchAllVersions(normalizedTitle), normalizedTitle);
     if (!animeVersions.length) {

@@ -35,50 +35,18 @@ import {
   toAbsoluteUrl,
   collectMediaLinksFromEmbedHtml,
   sanitizeAnimeTitle,
-  getMalAnimeMetadata,
-  getPreferredMalTitle,
-  getMalTitleCandidates,
+  getEnglishTitleFromAnyId,
 } from './anime-core/index.js';
 import {
   resolveMappingRequest,
   resolveAnimeTarget,
   resolveSeasonFallbackTitle,
   getKitsuTitle,
-  getKitsuMalIdForTmdb,
   getTvdbTitle,
   type MappingRequest,
 } from '../mapping/index.js';
 
 // --- Type definitions for external API responses ---
-interface TmdbTitleResponse {
-  name?: string;
-  title?: string;
-}
-
-interface KitsuMappingAttribute {
-  externalSite?: string;
-  externalId?: number;
-}
-
-interface KitsuMappingItem {
-  attributes?: KitsuMappingAttribute;
-}
-
-interface KitsuMappingsResponse {
-  data?: KitsuMappingItem[];
-}
-
-interface KitsuAttributes {
-  titles?: { en?: string };
-}
-
-interface KitsuData {
-  attributes?: KitsuAttributes;
-}
-
-interface KitsuMainResponse {
-  data?: KitsuData;
-}
 
 const USER_AGENT =
   process.env.AU_USER_AGENT ||
@@ -532,84 +500,6 @@ async function getUnityCoStreamData(
   }
 }
 
-// Funzione universale per ottenere il titolo inglese da qualsiasi ID
-// Aggiunto fallback Kitsu diretto (titles.en) se manca MAL mapping, come in AnimeSaturn
-async function getEnglishTitleFromAnyId(id: string, type: 'imdb' | 'tmdb' | 'kitsu' | 'mal', tmdbApiKey?: string): Promise<string> {
-  let malId: string | null = null;
-  let tmdbId: string | null = null;
-  let fallbackTitle: string | null = null;
-  const tmdbKey = tmdbApiKey || process.env.TMDB_API_KEY || '';
-  if (type === 'imdb') {
-    if (!tmdbKey) throw new Error('TMDB_API_KEY non configurata');
-    const imdbIdOnly = id.split(':')[0];
-    const { getTmdbIdFromImdbId } = await import('../utils/tmdbResolver.js');
-    tmdbId = await getTmdbIdFromImdbId(imdbIdOnly, tmdbKey, 'tv');
-    if (!tmdbId) throw new Error('TMDB ID non trovato per IMDB: ' + id);
-    try {
-      malId = await getKitsuMalIdForTmdb(tmdbId);
-    } catch { }
-  } else if (type === 'tmdb') {
-    tmdbId = id;
-    try {
-      malId = await getKitsuMalIdForTmdb(tmdbId);
-    } catch { }
-  } else if (type === 'kitsu') {
-    const mappingsResp = (await (await fetch(`https://kitsu.io/api/edge/anime/${id}/mappings`)).json()) as KitsuMappingsResponse;
-    const malMapping = mappingsResp.data?.find((m: any) => m.attributes.externalSite === 'myanimelist/anime');
-    malId = malMapping?.attributes?.externalId?.toString() || null;
-    if (!malId) {
-      // Fallback: usa direttamente titles.en dal record principale se disponibile
-      try {
-        const kitsuMain = (await (await fetch(`https://kitsu.io/api/edge/anime/${id}`)).json()) as KitsuMainResponse;
-        const enTitle = kitsuMain?.data?.attributes?.titles?.en;
-        if (enTitle) {
-          debug(3, 'AnimeUnity', `[UniversalTitle][KitsuFallback] Titolo inglese diretto da Kitsu (no MAL mapping): ${enTitle}`);
-          return enTitle;
-        } else {
-          console.warn(`[UniversalTitle][KitsuFallback] Nessun titles.en disponibile per Kitsu ${id}`);
-        }
-      } catch (e) {
-        console.warn(`[UniversalTitle][KitsuFallback] Errore recuperando titles.en per Kitsu ${id}:`, e);
-      }
-    }
-  } else if (type === 'mal') {
-    malId = id;
-  }
-  if (malId) {
-    try {
-      const metadata = await getMalAnimeMetadata(malId);
-      const englishTitle = getPreferredMalTitle(metadata) || '';
-      if (englishTitle) {
-        debug(3, 'AnimeUnity', `[UniversalTitle] Titolo inglese trovato da Tenrai (${metadata?.cacheStatus || 'cache'}).`);
-        return englishTitle;
-      }
-    } catch (err) {
-      console.warn('[UniversalTitle] Errore Tenrai, provo fallback TMDB:', err);
-    }
-  }
-  if (tmdbId && tmdbKey) {
-    try {
-      let tmdbResp = (await (await fetch(`https://api.themoviedb.org/3/tv/${tmdbId}?api_key=${tmdbKey}`)).json()) as TmdbTitleResponse;
-      if (tmdbResp && tmdbResp.name) {
-        fallbackTitle = tmdbResp.name;
-      }
-      if (!fallbackTitle) {
-        tmdbResp = (await (await fetch(`https://api.themoviedb.org/3/movie/${tmdbId}?api_key=${tmdbKey}`)).json()) as TmdbTitleResponse;
-        if (tmdbResp && tmdbResp.title) {
-          fallbackTitle = tmdbResp.title;
-        }
-      }
-      if (fallbackTitle) {
-        console.warn(`[UniversalTitle] Fallback: uso titolo da TMDB: ${fallbackTitle}`);
-        return fallbackTitle;
-      }
-    } catch (err) {
-      console.warn('[UniversalTitle] Errore fallback TMDB:', err);
-    }
-  }
-  throw new Error('Impossibile ottenere titolo inglese da nessuna fonte per ' + id);
-}
-
 function filterAnimeResults(results: { version: AnimeUnitySearchResult; language_type: string }[], searchQuery: string) {
   const scored = results.map((result) => {
     const titles = [result.version.name_eng || '', result.version.name_it || '', result.version.name || ''].filter(Boolean);
@@ -1053,22 +943,10 @@ export class AnimeUnityProvider {
     }
     let animeVersions = await this.searchAllVersions(normalizedTitle);
     // Budget ricerca <=2 fetch: una sola ricerca di ripiego, scelta nell'ordine
-    // (titoli alternativi MAL, senza apostrofi, senza parentesi, prime 3 parole).
+    // (senza apostrofi, senza parentesi, prime 3 parole).
     let usedFallbackSearch = false;
     if (!animeVersions.length) {
-        // Prova a ottenere titoli alternativi da Tenrai se il titolo contiene un MAL ID.
-      let fallbackTitles: string[] = [];
-      try {
-        // Prova a estrarre MAL ID dal titolo (se è un numero)
-        const malIdMatch = title.match && title.match(/\d+/);
-        const malId = malIdMatch ? malIdMatch[0] : null;
-        if (malId) {
-          const metadata = await getMalAnimeMetadata(malId);
-          fallbackTitles = getMalTitleCandidates(metadata);
-        }
-      } catch { }
       const candidates = [
-        ...fallbackTitles,
         normalizedTitle.includes("'") ? normalizedTitle.replace(/'/g, "") : '',
         normalizedTitle.includes("(") ? normalizedTitle.split("(")[0].trim() : '',
         normalizedTitle.split(" ").length > 3 ? normalizedTitle.split(" ").slice(0, 3).join(" ") : '',

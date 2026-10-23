@@ -31,11 +31,16 @@ export {
   getProviderUrl,
 } from './provider-urls.js';
 
+// Risoluzione del titolo inglese condivisa dai tre provider
+export {
+  getEnglishTitleFromAnyId,
+  type TitleIdType,
+} from './english-title.js';
+
 // Persistent Tenrai metadata cache with ETag revalidation and request throttling
 export {
   getMalAnimeMetadata,
   getPreferredMalTitle,
-  getMalTitleCandidates,
   TenraiMetadataStore,
   TenraiMetadataError,
   type MalAnimeMetadata,

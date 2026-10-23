@@ -173,26 +173,6 @@ export function getPreferredMalTitle(metadata: MalAnimeMetadata | null | undefin
   return english || metadata.title_english || metadata.title || metadata.title_japanese || null;
 }
 
-export function getMalTitleCandidates(metadata: MalAnimeMetadata | null | undefined): string[] {
-  if (!metadata) return [];
-  const candidates = [
-    metadata.title_english,
-    ...metadata.titles.filter((entry) => entry.type.toLowerCase() === 'english').map((entry) => entry.title),
-    metadata.title,
-    metadata.title_japanese,
-    ...metadata.title_synonyms,
-    ...metadata.titles.map((entry) => entry.title),
-  ];
-  const seen = new Set<string>();
-  return candidates.flatMap((value) => {
-    const title = String(value || '').trim();
-    const key = title.toLowerCase();
-    if (!title || seen.has(key)) return [];
-    seen.add(key);
-    return [title];
-  });
-}
-
 function parseMaxAgeMs(cacheControl: string | null): number | null {
   if (!cacheControl) return null;
   if (/\bno-store\b|\bno-cache\b/i.test(cacheControl)) return 0;

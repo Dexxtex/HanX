@@ -1,4 +1,5 @@
 import * as cheerio from 'cheerio';
+import { normalizeBool } from '../config.js';
 import { getDomain } from '../utils/domains.js';
 import { debug, redactUrl } from '../utils/logger.js';
 import { AnimeWorldConfig, AnimeWorldResult, AnimeWorldEpisode, StreamForStremio } from '../types/animeunity.js';
@@ -17,69 +18,21 @@ import {
   createCaches,
   fetchResource,
   getProviderUrl,
-  getMalAnimeMetadata,
-  getPreferredMalTitle,
+  getEnglishTitleFromAnyId,
 } from './anime-core/index.js';
 import {
   resolveMappingRequest,
   resolveAnimeTarget,
   resolveSeasonFallbackTitle,
   getKitsuTitle,
-  getKitsuMalIdForTmdb,
   getTvdbTitle,
   type MappingRequest,
 } from '../mapping/index.js';
 
 // --- Type definitions for external API responses ---
-interface TmdbTitleResponse {
-  name?: string;
-  title?: string;
-}
-
-interface KitsuMappingAttribute {
-  externalSite?: string;
-  externalId?: number;
-}
-
-interface KitsuMappingItem {
-  attributes?: KitsuMappingAttribute;
-}
-
-interface KitsuMappingsResponse {
-  data?: KitsuMappingItem[];
-}
-
-interface KitsuAttributes {
-  titles?: { en?: string; en_jp?: string };
-  title_en?: string;
-  canonicalTitle?: string;
-  slug?: string;
-}
-
-interface KitsuData {
-  attributes?: KitsuAttributes;
-}
-
-interface KitsuAnimeResponse {
-  data?: KitsuData;
-}
-
-interface KitsuIncludedMapping {
-  type?: string;
-  attributes?: {
-    externalSite?: string;
-    externalId?: number;
-  };
-}
-
-interface KitsuAnimeWithMappingsResponse {
-  included?: KitsuIncludedMapping[];
-}
-
-// Cache semplice in-memory per titoli tradotti per evitare chiamate ripetute
-const englishTitleCache = new Map<string, string>();
 
 const AW_FETCH_TIMEOUT = Number.parseInt(process.env.ANIMEWORLD_FETCH_TIMEOUT_MS || '10000', 10) || 10000;
+const ALLOW_EMPTY_TITLE = normalizeBool(process.env.AW_ALLOW_EMPTY_TITLE) ?? false;
 const awCaches = createCaches();
 
 // ─── Cloudflare/SecurityAW2 challenge bypass ───────────────
@@ -124,9 +77,9 @@ function mergeCookies(...parts: Array<string | null | undefined>): string {
  */
 async function awFetchHtml(
   url: string,
-  opts: { ttlMs?: number; cacheKey?: string; extraCookie?: string | null; extraHeaders?: Record<string, string> } = {}
+  opts: { ttlMs?: number; cacheKey?: string; extraCookie?: string | null; extraHeaders?: Record<string, string>; timeoutMs?: number } = {}
 ): Promise<string> {
-  const { ttlMs = 0, cacheKey, extraCookie, extraHeaders } = opts;
+  const { ttlMs = 0, cacheKey, extraCookie, extraHeaders, timeoutMs = AW_FETCH_TIMEOUT } = opts;
 
   const buildHeaders = (): Record<string, string> => {
     const h: Record<string, string> = { ...(extraHeaders || {}) };
@@ -139,7 +92,7 @@ async function awFetchHtml(
   let html = await fetchResource(targetUrl, awCaches, {
     ttlMs,
     cacheKey: cacheKey ? `${cacheKey}:d=${awSecurityCookie ? 1 : 0}` : undefined,
-    timeoutMs: AW_FETCH_TIMEOUT,
+    timeoutMs,
     headers: buildHeaders(),
   });
 
@@ -151,7 +104,7 @@ async function awFetchHtml(
       html = await fetchResource(appendDParam(url), awCaches, {
         ttlMs,
         cacheKey: cacheKey ? `${cacheKey}:d=1:retry` : undefined,
-        timeoutMs: AW_FETCH_TIMEOUT,
+        timeoutMs,
         headers: buildHeaders(),
       });
     } else {
@@ -472,16 +425,17 @@ function findEpisodeUrlTokenInHtml(html: string, episodeNumber: number | null | 
  * AnimeWorld setup) by using the same direct-link approach the page itself
  * exposes for the download button.
  */
-async function awExtractEpisodeStreamFromPlayPage(slug: string, episodeNumber: number | null | undefined): Promise<string | null> {
+async function awExtractEpisodeStreamFromPlayPage(slug: string, episodeNumber: number | null | undefined, timeoutMs = AW_FETCH_TIMEOUT): Promise<string | null> {
   const animeUrl = `${getWorldBaseUrl()}/play/${slug}`;
   let playHtml = '';
   try {
     // Stessa pagina (e stessa cache aw-play:) gia' scaricata dal probe lingua e da
     // awGetEpisodes: il fetch era duplicato solo per avere cookie/csrf, che
     // l'API serverPlayer non richiede (verificato: risponde 200 senza).
-    playHtml = await awFetchHtml(animeUrl, { ttlMs: 5 * 60 * 1000, cacheKey: `aw-play:${slug}` });
+    playHtml = await awFetchHtml(animeUrl, { ttlMs: 5 * 60 * 1000, cacheKey: `aw-play:${slug}`, timeoutMs });
   } catch (err: any) {
     console.error('[AnimeWorld][Stream] play page fetch failed for', slug, err?.message);
+    if (/timeout|abort/i.test(`${err?.name || ''} ${err?.message || ''}`)) throw err;
     return null;
   }
   const urlToken = findEpisodeUrlTokenInHtml(playHtml, episodeNumber == null ? null : Number(episodeNumber));
@@ -504,7 +458,7 @@ async function awExtractEpisodeStreamFromPlayPage(slug: string, episodeNumber: n
     const playerHtml = await fetchResource(apiUrl, awCaches, {
       ttlMs: 2 * 60 * 1000,
       cacheKey: `aw-player:${slug}:${urlToken}`,
-      timeoutMs: AW_FETCH_TIMEOUT,
+      timeoutMs,
       headers: apiHeaders,
     });
 
@@ -519,9 +473,10 @@ async function awExtractEpisodeStreamFromPlayPage(slug: string, episodeNumber: n
   const epUrl = `${getWorldBaseUrl()}/play/${slug}/${urlToken}`;
   let epHtml = '';
   try {
-    epHtml = await awFetchHtml(epUrl, { ttlMs: 2 * 60 * 1000, cacheKey: `aw-ep:${slug}:${urlToken}` });
+    epHtml = await awFetchHtml(epUrl, { ttlMs: 2 * 60 * 1000, cacheKey: `aw-ep:${slug}:${urlToken}`, timeoutMs });
   } catch (err: any) {
     console.error('[AnimeWorld][Stream] episode page fetch failed for', slug, urlToken, err?.message);
+    if (/timeout|abort/i.test(`${err?.name || ''} ${err?.message || ''}`)) throw err;
     return null;
   }
   const mp4 = collectMediaLinksFromHtml(epHtml)[0] || null;
@@ -531,8 +486,8 @@ async function awExtractEpisodeStreamFromPlayPage(slug: string, episodeNumber: n
   return mp4;
 }
 
-async function awGetStream(slug: string, episode?: number): Promise<{ mp4_url: string | null }> {
-  const mp4 = await awExtractEpisodeStreamFromPlayPage(slug, episode == null ? null : Number(episode));
+async function awGetStream(slug: string, episode?: number, timeoutMs = AW_FETCH_TIMEOUT): Promise<{ mp4_url: string | null }> {
+  const mp4 = await awExtractEpisodeStreamFromPlayPage(slug, episode == null ? null : Number(episode), timeoutMs);
   return { mp4_url: mp4 };
 }
 
@@ -579,7 +534,7 @@ export function buildAnimeWorldStreamOutput(
 // no-op consumer to avoid "unused" tree-shaking surprises during refactors.
 void collectGrabberCandidates;
 
-async function invokePython(args: string[], _timeoutOverrideMs?: number): Promise<any> {
+async function invokePython(args: string[], timeoutMs = AW_FETCH_TIMEOUT): Promise<any> {
   const cmd = String(args?.[0] || '');
   if (cmd === 'search') {
     const qIdx = args.indexOf('--query');
@@ -598,101 +553,9 @@ async function invokePython(args: string[], _timeoutOverrideMs?: number): Promis
     const eIdx = args.indexOf('--episode');
     const slug = sIdx >= 0 ? String(args[sIdx + 1] || '') : '';
     const episode = eIdx >= 0 ? Number(args[eIdx + 1]) : undefined;
-    return awGetStream(slug, Number.isFinite(episode as number) ? episode : undefined);
+    return awGetStream(slug, Number.isFinite(episode as number) ? episode : undefined, timeoutMs);
   }
   throw new Error(`AnimeWorld adapter command non supportato: ${cmd}`);
-}
-
-// Reuse logic from other providers (duplicated for rapid integration)
-async function getEnglishTitleFromAnyId(id: string, type: 'imdb'|'tmdb'|'kitsu'|'mal', tmdbApiKey?: string): Promise<string> {
-  const cacheKey = `${type}:${id}`;
-  if (englishTitleCache.has(cacheKey)) return englishTitleCache.get(cacheKey)!;
-  let malId: string | null = null;
-  let tmdbId: string | null = null;
-  let fallbackTitle: string | null = null;
-  const tmdbKey = tmdbApiKey || process.env.TMDB_API_KEY || '';
-  if (type === 'imdb') {
-    if (!tmdbKey) throw new Error('TMDB_API_KEY non configurata');
-    const imdbIdOnly = id.split(':')[0];
-    const { getTmdbIdFromImdbId } = await import('../utils/tmdbResolver.js');
-    tmdbId = await getTmdbIdFromImdbId(imdbIdOnly, tmdbKey, 'tv');
-    if (!tmdbId) throw new Error('TMDB ID non trovato per IMDB: ' + id);
-    try {
-      malId = await getKitsuMalIdForTmdb(tmdbId);
-    } catch {}
-  } else if (type === 'tmdb') {
-    tmdbId = id;
-    try { malId = await getKitsuMalIdForTmdb(tmdbId); } catch {}
-  } else if (type === 'kitsu') {
-    // 1. Prova a ottenere MAL mapping per risolvere il titolo tramite Tenrai
-    try {
-      const mappingsResp = (await (await fetch(`https://kitsu.io/api/edge/anime/${id}/mappings`)).json()) as KitsuMappingsResponse;
-      const malMapping = mappingsResp.data?.find((m: any) => m.attributes.externalSite === 'myanimelist/anime');
-      malId = malMapping?.attributes?.externalId?.toString() || null;
-      debug(3, 'AnimeWorld', '[AnimeWorld][UTitle][Kitsu] primary mappings malId=', malId);
-    } catch {}
-    // 2. Precarica candidato canonico come fallback se Tenrai non ha il mapping
-    try {
-      const animeResp = (await (await fetch(`https://kitsu.io/api/edge/anime/${id}`)).json()) as KitsuAnimeResponse;
-      const attr = animeResp.data?.attributes || {};
-      const canonical = attr.titles?.en || attr.title_en || attr.titles?.en_jp || attr.canonicalTitle || attr.slug || null;
-      if (canonical) fallbackTitle = canonical;
-      debug(3, 'AnimeWorld', '[AnimeWorld][UTitle][Kitsu] canonical fallback candidate=', fallbackTitle);
-    } catch {}
-    // 3. Se ancora nessun malId prova endpoint include=mappings (alcuni casi differiscono)
-    if (!malId) {
-      try {
-        const incResp = (await (await fetch(`https://kitsu.io/api/edge/anime/${id}?include=mappings`)).json()) as KitsuAnimeWithMappingsResponse;
-        const included = incResp.included || [];
-        for (const inc of included) {
-          if (inc.type === 'mappings' && inc.attributes?.externalSite === 'myanimelist/anime') {
-            malId = inc.attributes.externalId?.toString() || null;
-            debug(4, 'AnimeWorld', '[AnimeWorld][UTitle][Kitsu] include=mappings malId=', malId);
-            break;
-          }
-        }
-      } catch {}
-    }
-  } else if (type === 'mal') {
-    malId = id;
-  }
-  if (malId) {
-    try {
-      const metadata = await getMalAnimeMetadata(malId);
-      const englishTitle = getPreferredMalTitle(metadata) || '';
-      if (englishTitle) {
-        englishTitleCache.set(cacheKey, englishTitle);
-        debug(3, 'AnimeWorld', '[AnimeWorld][UTitle] resolved via Tenrai', { type, id, englishTitle });
-        return englishTitle;
-      }
-      debug(3, 'AnimeWorld', '[AnimeWorld][UTitle] Tenrai has no English title; using title fallback', { type, id });
-    } catch {}
-  }
-  if (tmdbId && tmdbKey) {
-    try {
-      let tmdbResp = (await (await fetch(`https://api.themoviedb.org/3/tv/${tmdbId}?api_key=${tmdbKey}`)).json()) as TmdbTitleResponse;
-      if (tmdbResp && tmdbResp.name) fallbackTitle = tmdbResp.name;
-      if (!fallbackTitle) {
-        tmdbResp = (await (await fetch(`https://api.themoviedb.org/3/movie/${tmdbId}?api_key=${tmdbKey}`)).json()) as TmdbTitleResponse;
-        if (tmdbResp && tmdbResp.title) fallbackTitle = tmdbResp.title;
-      }
-      if (fallbackTitle) return fallbackTitle;
-    } catch {}
-  }
-  // Ultimo fallback: se abbiamo un fallbackTitle derivato da TMDB o Kitsu lo usiamo; altrimenti prova a usare id stesso (non ideale ma evita crash)
-  if (fallbackTitle) {
-    englishTitleCache.set(cacheKey, fallbackTitle);
-    debug(3, 'AnimeWorld', '[AnimeWorld][UTitle] using fallbackTitle', { type, id, fallbackTitle });
-    return fallbackTitle;
-  }
-  // Se variabile env indica di non interrompere, ritorna un placeholder
-  if (process.env.AW_ALLOW_EMPTY_TITLE === 'true') {
-    console.warn('[AnimeWorld] Fallback placeholder title for id', id);
-    const placeholder = 'Anime';
-    englishTitleCache.set(cacheKey, placeholder);
-    return placeholder;
-  }
-  throw new Error('Impossibile ottenere titolo inglese per ' + id);
 }
 
 // ==== AUTO-NORMALIZATION-EXACT-MAP-START ====
@@ -904,7 +767,7 @@ export class AnimeWorldProvider {
       let title = quickTitle || (await getKitsuTitle(kitsuId));
       if (!title) {
         try {
-          title = await getEnglishTitleFromAnyId(kitsuId, 'kitsu', this.config.tmdbApiKey);
+          title = await getEnglishTitleFromAnyId(kitsuId, 'kitsu', this.config.tmdbApiKey, ALLOW_EMPTY_TITLE);
         } catch {}
       }
       if (!title) return { streams: [] };
@@ -920,7 +783,7 @@ export class AnimeWorldProvider {
     try {
       const request = resolveMappingRequest(malIdString);
       if (!request) return { streams: [] };
-      const englishTitle = await getEnglishTitleFromAnyId(request.id, 'mal', this.config.tmdbApiKey);
+      const englishTitle = await getEnglishTitleFromAnyId(request.id, 'mal', this.config.tmdbApiKey, ALLOW_EMPTY_TITLE);
       return this.handleTitleRequest(englishTitle, request.season, request.episode, request.isMovie);
     } catch (e) { console.error('[AnimeWorld] mal handler error', e); return { streams: [] }; }
   }
@@ -962,7 +825,7 @@ export class AnimeWorldProvider {
       }
       const unmapped = await this.handleUnmappedSeries(request, episodeNumber);
       if (unmapped) return unmapped;
-      const englishTitle = await getEnglishTitleFromAnyId(imdbId, 'imdb', this.config.tmdbApiKey);
+      const englishTitle = await getEnglishTitleFromAnyId(imdbId, 'imdb', this.config.tmdbApiKey, ALLOW_EMPTY_TITLE);
       return this.handleTitleRequest(englishTitle, seasonNumber, episodeNumber, isMovie);
     } catch(e){ console.error('[AnimeWorld] imdb handler error', e); return { streams: [] }; }
   }
@@ -987,7 +850,7 @@ export class AnimeWorldProvider {
       }
       const unmapped = await this.handleUnmappedSeries(request, episodeNumber);
       if (unmapped) return unmapped;
-      const englishTitle = await getEnglishTitleFromAnyId(tmdbId, 'tmdb', this.config.tmdbApiKey);
+      const englishTitle = await getEnglishTitleFromAnyId(tmdbId, 'tmdb', this.config.tmdbApiKey, ALLOW_EMPTY_TITLE);
       return this.handleTitleRequest(englishTitle, seasonNumber, episodeNumber, isMovie);
     } catch(e){ console.error('[AnimeWorld] tmdb handler error', e); return { streams: [] }; }
   }
@@ -1223,16 +1086,17 @@ export class AnimeWorldProvider {
         try {
           streamData = await invokePython(['get_stream', '--anime-slug', v.slug, ...(epNum != null ? ['--episode', String(epNum)] : [])]);
         } catch (e: any) {
-          if (e && /timeout/i.test(String(e.message))) {
+          const errorText = `${e?.name || ''} ${e?.message || ''}`;
+          if (/timeout|abort/i.test(errorText)) {
             timedOut = true;
-            console.warn('[AnimeWorld] get_stream timeout, retry extended 30s:', v.slug);
+            console.warn('[AnimeWorld] get_stream timeout, retry extended 15s:', v.slug);
           } else {
             throw e;
           }
         }
         if (timedOut) {
           try {
-            streamData = await invokePython(['get_stream', '--anime-slug', v.slug, ...(epNum != null ? ['--episode', String(epNum)] : [])], 30000);
+            streamData = await invokePython(['get_stream', '--anime-slug', v.slug, ...(epNum != null ? ['--episode', String(epNum)] : [])], 15000);
           } catch (e2) {
             console.error('[AnimeWorld] get_stream retry failed', v.slug, e2);
             return null;

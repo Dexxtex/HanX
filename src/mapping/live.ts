@@ -39,6 +39,7 @@ interface CacheEntry {
 }
 
 const liveCache = new Map<string, CacheEntry>();
+const LIVE_CACHE_MAX_ENTRIES = 500;
 
 const RETRY_ATTEMPTS = 4;
 
@@ -63,6 +64,7 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
         : 'application/json';
       const response = await fetch(url, {
         ...init,
+        signal: AbortSignal.timeout(10_000),
         headers: { accept, ...(init?.body ? { 'content-type': 'application/json' } : {}), ...(init?.headers || {}) },
       });
       if (response.ok) {
@@ -80,6 +82,9 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
       if (attempt < RETRY_ATTEMPTS - 1) await sleep(waitMs);
     } catch (error) {
       if (error instanceof HttpError && error.status !== 429 && error.status < 500) throw error;
+      // Un timeout/abort ha gia' consumato il budget della richiesta: inutile ritentare.
+      const name = (error as any)?.name;
+      if (name === 'TimeoutError' || name === 'AbortError') throw error;
       lastError = error;
       if (attempt < RETRY_ATTEMPTS - 1) {
         debug(3, 'Mapping/HTTP', 'retry after error', { endpoint, attempt: attempt + 1, error: (error as any)?.message || String(error) });
@@ -99,6 +104,20 @@ async function cached<T>(key: string, fn: () => Promise<T>, ttlMs = LIVE_TTL_MS)
   debug(4, 'Mapping/Cache', 'miss', key);
   const value = await fn();
   liveCache.set(key, { expires: Date.now() + ttlMs, value });
+  // Stesso limite della cache provider: l'eviction evita crescita illimitata
+  // in un processo che resta acceso per settimane.
+  if (liveCache.size > LIVE_CACHE_MAX_ENTRIES) {
+    const now = Date.now();
+    for (const [entryKey, entry] of liveCache) {
+      if (entry.expires <= now) liveCache.delete(entryKey);
+    }
+    let excess = liveCache.size - LIVE_CACHE_MAX_ENTRIES;
+    for (const entryKey of liveCache.keys()) {
+      if (excess <= 0) break;
+      liveCache.delete(entryKey);
+      excess -= 1;
+    }
+  }
   return value;
 }
 

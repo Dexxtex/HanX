@@ -3,7 +3,7 @@
 **Addon Stremio/NUVIO dedicato agli anime** — aggrega stream da AnimeUnity, AnimeSaturn e AnimeWorld in un'unica interfaccia.
 
 ![Version](https://img.shields.io/badge/version-12.5.0-blue)
-![Node](https://img.shields.io/badge/node-%3E%3D20-green)
+![Node](https://img.shields.io/badge/node-%3E%3D24-green)
 ![Docker](https://img.shields.io/badge/docker-ready-blue)
 ![TypeScript](https://img.shields.io/badge/typescript-%3E5.0-blue)
 
@@ -152,7 +152,7 @@ pnpm run check:domains  # Verifica domini provider
 
 ## ⚠️ Note
 
-- Richiede **Node.js 20+**
+- Richiede **Node.js 24+** (`node:sqlite` è usato per la cache Tenrai)
 - Le API esterne ufficiali (TMDB, TVDB, Kitsu) e Tenrai per i metadati MAL devono essere raggiungibili dal server
 - EasyProxy è opzionale ma consigliato: https://github.com/realbestia1/EasyProxy
 
