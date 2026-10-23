@@ -436,18 +436,24 @@ async function awSearch(query: string, date?: string): Promise<AnimeWorldResult[
       const jtitle = String($(el).attr('data-jtitle') || '').replace(/\s+/g, ' ').trim();
       const titleAttr = String($(el).attr('title') || '').replace(/\s+/g, ' ').trim();
       const text = String($(el).text() || '').replace(/\s+/g, ' ').trim();
+      // Badge lingua della scheda: <div class="dub">DUB</div> nell'anchor poster
+      // e' presente SOLO sulla scheda della versione ITA (verificato contro
+      // window.animeDub delle pagine play: scheda senza badge -> animeDub=false).
+      const hasDub = $(el).find('.dub').length > 0;
       // Solo l'anchor col titolo espone data-jtitle; il testo del poster sono i badge
       // ("DUB"), non un titolo, quindi non va preso come searchTitle.
       const searchTitle = jtitle ? text : '';
       const existing = bySlug.get(slug);
       if (existing) {
         if (searchTitle && !existing.searchTitle) existing.searchTitle = searchTitle;
+        if (hasDub && !existing.dubBadge) existing.dubBadge = true;
         return;
       }
       // `name` resta identico a prima (primo anchor incontrato): vedi AnimeWorldResult.
       const name = String(jtitle || titleAttr || text || slug).replace(/\s+/g, ' ').trim();
       const entry: AnimeWorldResult = { id: slug, slug, name, episodes_count: 0, language_type: 'SUB ITA' };
       if (searchTitle) entry.searchTitle = searchTitle;
+      if (hasDub) entry.dubBadge = true;
       bySlug.set(slug, entry);
       seen.add(slug);
       out.push(entry);
@@ -810,7 +816,7 @@ const animeWorldTitleNormalization: TitleNormalizationOptions = {
 export class AnimeWorldProvider {
   constructor(private config: AnimeWorldConfig) {}
 
-  async searchAllVersions(title: string): Promise<AnimeWorldResult[]> {
+  async searchAllVersions(title: string, probeFilter?: (v: AnimeWorldResult) => boolean): Promise<AnimeWorldResult[]> {
     try {
       const raw: AnimeWorldResult[] = await invokePython(['search','--query', title]);
       if (!raw) return [];
@@ -819,9 +825,11 @@ export class AnimeWorldProvider {
       // Regole richieste:
       // 1. Se slug contiene pattern sub ita -> SUB ITA
       // 2. Altrimenti se slug contiene ita -> ITA
-      // 3. Altrimenti (slug "base", nessun marcatore) -> probe HTML UNA VOLTA
+      // 3. Altrimenti se la scheda di ricerca porta il badge DUB -> ITA
+      // 4. Altrimenti (slug "base", nessun segnale) -> probe HTML, ma SOLO se la
+      //    passante a probeFilter: chi chiama la usa per filtrare i risultati,
+      //    quindi non convene sondare slug che il filtro butta via comunque.
       //    Se la pagina ha window.animeDub=true -> ITA, else SUB ITA
-      // Evitare probe per slug già marcati.
 
   // Pattern lingua (ordine: SUB prima per evitare che 'subita' attivi 'ita')
   const SUB_PAT = /(?:^|[\-_.])sub(?:[-_]?ita)?(?:$|[\-_.])/i; // sub, subita, sub-ita
@@ -842,13 +850,17 @@ export class AnimeWorldProvider {
           language_type = 'SUB ITA';
         } else if (ITA_PAT.test(slugLower)) {
           language_type = 'ITA';
+        } else if (r.dubBadge) {
+          language_type = 'ITA';
         } else {
-          // Nessun marcatore nello slug -> probe HTML successiva
-          const basePartProbe = slugLower.split('.')[0];
-          const cleanedProbe = basePartProbe.replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
-          if (!baseSlugSet.has(cleanedProbe)) {
-            probeQueue.push(slugRaw);
-            baseSlugSet.add(cleanedProbe);
+          // Nessun segnale -> probe HTML, solo se il chiamante vuole ancora questo slug
+          if (!probeFilter || probeFilter({ slug: slugRaw, name: nameRaw } as AnimeWorldResult)) {
+            const basePartProbe = slugLower.split('.')[0];
+            const cleanedProbe = basePartProbe.replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
+            if (!baseSlugSet.has(cleanedProbe)) {
+              probeQueue.push(slugRaw);
+              baseSlugSet.add(cleanedProbe);
+            }
           }
           language_type = 'NEEDS_PROBE';
         }
@@ -864,7 +876,9 @@ export class AnimeWorldProvider {
           const awDom = getDomain('animeworld') || 'animeworld.ac';
           const html = await awFetchHtml(`https://www.${awDom}/play/${slug}`, {
             ttlMs: 5 * 60 * 1000,
-            cacheKey: `aw-probe:${slug}`,
+            // Stessa chiave di awGetEpisodes: la pagina play scaricata per il probe
+            // riempie la cache e risparmia il refetch degli episodi qui sotto.
+            cacheKey: `aw-play:${slug}`,
           });
           // Solo il flag globale della pagina: window.animeDub e' true solo per la
           // versione ITA. Il resto della pagina elenca le varianti DUB sorelle
@@ -1073,8 +1087,25 @@ export class AnimeWorldProvider {
       debug(3, 'AnimeWorld', `[AnimeWorld][ExactMap] Forced search title: ${normalized}`);
     }
 
+    // Filtro slug base definito PRIMA della ricerca: searchAllVersions lo usa per
+    // sondare SOLO gli slug base che poi sopravvivono a questo filtro (senza,
+    // ogni ricerca sonda ~10 pagine /play/<slug> per determinare la lingua).
+    const normSlugKey = normalized.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    const wantsRewrite = /rewrite/i.test(normalized);
+    const strictFilterActive = !skipExtraNormalization && !wantsRewrite;
+    const allowedSuffixes = ['-ita', '-subita', '-sub-ita', '-cr-ita', '-ita-cr'];
+    const matchesBaseSlug = (v: AnimeWorldResult) => {
+      const raw = (v.slug || v.name || '').toLowerCase();
+      const basePart = raw.split('.')[0];
+      const cleaned = basePart.replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+      if (/rewrite\b/.test(cleaned)) return false;
+      if (cleaned === normSlugKey) return true;
+      if (allowedSuffixes.some(suf => cleaned === normSlugKey + suf)) return true;
+      return titleMatchScore(normalized, basePart.replace(/-/g, ' ')) >= 0.5;
+    };
+
     const searchWithLogging = async (query: string) => {
-      const results = await this.searchAllVersions(query);
+      const results = await this.searchAllVersions(query, strictFilterActive ? matchesBaseSlug : undefined);
       debug(2, 'AnimeWorld', `[AnimeWorld] Search query "${query}" -> ${results.length}`);
       return results;
     };
@@ -1125,19 +1156,7 @@ export class AnimeWorldProvider {
 
     if (!skipExtraNormalization) {
       try {
-        const normSlugKey = normalized.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-        const wantsRewrite = /rewrite/i.test(normalized);
         if (!wantsRewrite) {
-          const allowedSuffixes = ['-ita', '-subita', '-sub-ita', '-cr-ita', '-ita-cr'];
-          const matchesBaseSlug = (v: AnimeWorldResult) => {
-            const raw = (v.slug || v.name || '').toLowerCase();
-            const basePart = raw.split('.')[0];
-            const cleaned = basePart.replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-            if (/rewrite\b/.test(cleaned)) return false;
-            if (cleaned === normSlugKey) return true;
-            if (allowedSuffixes.some(suf => cleaned === normSlugKey + suf)) return true;
-            return titleMatchScore(normalized, basePart.replace(/-/g, ' ')) >= 0.5;
-          };
           const beforeCount = versions.length;
           const filtered = versions.filter(matchesBaseSlug);
           debug(3, 'AnimeWorld', `[AnimeWorld] Strict base filter applied (${normSlugKey}) from ${beforeCount} -> ${filtered.length}`);
@@ -1166,7 +1185,7 @@ export class AnimeWorldProvider {
             // Solo per i titoli con sottotitolo di stagione: il primo ripiego e' il titolo della serie.
             const baseQuery = /:|\s-\s/.test(normalized) ? buildTitleFallbackQueries(normalized)[0] : '';
             if (baseQuery && baseQuery !== normalized) {
-              const extra = (await this.searchAllVersions(baseQuery))
+              const extra = (await this.searchAllVersions(baseQuery, matchesBaseSlug))
                 .filter(v => v.language_type === 'SUB ITA' && matchesBaseSlug(v));
               if (extra.length) {
                 debug(2, 'AnimeWorld', `[AnimeWorld] Versione SUB aggiunta dalla query base "${baseQuery}":`, extra.map(v => v.slug).join(', '));

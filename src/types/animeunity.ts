@@ -80,6 +80,9 @@ export interface AnimeWorldResult {
   // quest'ultimo resta com'e' perche' un name vuoto e' il segnale su cui si regge
   // AdjustEmptyName nella classificazione di lingua.
   searchTitle?: string;
+  // Badge DUB nell'anchor "poster" della scheda di ricerca: presente solo sulle
+  // versioni ITA, serve a dedurre la lingua senza scaricare la pagina /play/<slug>.
+  dubBadge?: boolean;
 }
 
 export interface AnimeWorldEpisode {

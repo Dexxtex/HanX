@@ -542,6 +542,7 @@ async function asSearch(query: string): Promise<AnimeSaturnResult[]> {
 
   // Nuova API JSON: GET /api/search?q=...
   // Sostituisce la vecchia /index.php?search=1&key=... (404 dopo il restyling del sito).
+  let apiSucceeded = false;
   try {
     const apiUrl = `${getSaturnBaseUrl()}/api/search?q=${q}`;
     const apiData = await fetchResource(apiUrl, asCaches, {
@@ -559,6 +560,8 @@ async function asSearch(query: string): Promise<AnimeSaturnResult[]> {
     const outFromApi: AnimeSaturnResult[] = [];
     const seen = new Set<string>();
     // Formato nuovo: { query, results: [{ title, url }] } — formato vecchio: [{ name, link }]
+    const isKnownFormat = Array.isArray(apiData) || Array.isArray((apiData as any)?.results);
+    if (isKnownFormat) apiSucceeded = true;
     const records: any[] = Array.isArray(apiData)
       ? apiData
       : Array.isArray((apiData as any)?.results)
@@ -580,6 +583,10 @@ async function asSearch(query: string): Promise<AnimeSaturnResult[]> {
   } catch (err: any) {
     console.warn('[AnimeSaturn][Search] API /api/search fallita, fallback HTML:', err?.message || err);
   }
+
+  // API raggiunta con formato valido ma 0 risultati: il sito non ha nulla per la
+  // query, i fallback HTML non aggiungono nulla e costano 2 richieste a testa.
+  if (apiSucceeded) return [];
 
   // Fallback HTML: sito nuovo -> /filter?key=... ; sito vecchio -> /?search=...
   const urls = [
