@@ -1268,13 +1268,13 @@ export class AnimeSaturnProvider {
     debug(3, 'AnimeSaturn', '[AnimeSaturn] Query inviata allo scraper (post-normalize):', normalizedTitle);
     let animeVersions = filterAnimeResults(await this.searchAllVersions(normalizedTitle), normalizedTitle);
     if (!animeVersions.length) {
-      for (const query of buildTitleFallbackQueries(normalizedTitle)) {
-        if (query === normalizedTitle) continue;
-        const fallbackVersions = filterAnimeResults(await this.searchAllVersions(query), normalizedTitle);
+      // Budget ricerca <=2 fetch: una sola query di ripiego.
+      const [fallbackQuery] = buildTitleFallbackQueries(normalizedTitle).filter(q => q && q !== normalizedTitle);
+      if (fallbackQuery) {
+        const fallbackVersions = filterAnimeResults(await this.searchAllVersions(fallbackQuery), normalizedTitle);
         if (fallbackVersions.length) {
-          debug(2, 'AnimeSaturn', `[AnimeSaturn] Trovato con query di ripiego: ${query}`);
+          debug(2, 'AnimeSaturn', `[AnimeSaturn] Trovato con query di ripiego: ${fallbackQuery}`);
           animeVersions = fallbackVersions;
-          break;
         }
       }
     }

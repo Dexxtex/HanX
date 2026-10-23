@@ -749,7 +749,7 @@ export class AnimeUnityProvider {
 
     const sNum = seasonNumber || 1;
     const resolvedEpisodeNum = parsePositiveInt(selected.num) || requestedEpisode;
-    const preferMp4 = /^(1|true|on)$/i.test(String(process.env.ANIMEUNITY_PREFER_MP4 || '0'));
+    const preferMp4 = /^(1|true|on)$/i.test(String(process.env.ANIMEUNITY_PREFER_MP4 || process.env.ANIME_MP4_FALLBACK || '0'));
 
     // --- 2 modalità (come StreamingCommunity) ---
     // animeunityDirect = Direct (solo locale, IP-bound)
@@ -783,11 +783,13 @@ export class AnimeUnityProvider {
 
       if (directWanted) {
         if (streamResult.hls_url) pushStream(streamResult.hls_url, baseTitle + ' (HLS)');
-        if (streamResult.mp4_url) {
+        // MP4 solo se manca l'HLS o se richiesto esplicitamente: di default una
+        // stream per lingua, in HLS (l'MP4 era un doppione dello stesso episodio).
+        if (streamResult.mp4_url && (!streamResult.hls_url || preferMp4)) {
           try {
             pushStream(
               buildEasyProxyStreamUrl(streamResult.mp4_url, this.config.proxyUrl, this.config.proxyPassword),
-              baseTitle + (preferMp4 ? ' (MP4 Preferred)' : ' (MP4 Fallback)')
+              baseTitle + (preferMp4 ? ' (MP4 Preferred)' : ' (MP4)')
             );
           } catch (e: any) {
             console.warn('[AnimeUnity] Errore fallback MP4:', e?.message || e);
@@ -1033,7 +1035,9 @@ export class AnimeUnityProvider {
       debug(3, 'AnimeUnity', `[AnimeUnity][ExactMap] Skip filtro: titolo di input corrisponde a chiave exactMap -> "${title}"`);
     }
     let animeVersions = await this.searchAllVersions(normalizedTitle);
-    // Fallback: se non trova nulla, prova anche con titoli alternativi
+    // Budget ricerca <=2 fetch: una sola ricerca di ripiego, scelta nell'ordine
+    // (titoli alternativi MAL, senza apostrofi, senza parentesi, prime 3 parole).
+    let usedFallbackSearch = false;
     if (!animeVersions.length) {
         // Prova a ottenere titoli alternativi da Tenrai se il titolo contiene un MAL ID.
       let fallbackTitles: string[] = [];
@@ -1046,30 +1050,15 @@ export class AnimeUnityProvider {
           fallbackTitles = getMalTitleCandidates(metadata);
         }
       } catch { }
-      // Prova fallback con titoli alternativi
-      for (const fallbackTitle of fallbackTitles) {
-        if (fallbackTitle && fallbackTitle !== normalizedTitle) {
-          animeVersions = await this.searchAllVersions(fallbackTitle);
-          if (animeVersions.length) break;
-        }
-      }
-      // Fallback: senza apostrofi
-      if (!animeVersions.length && normalizedTitle.includes("'")) {
-        const noApos = normalizedTitle.replace(/'/g, "");
-        animeVersions = await this.searchAllVersions(noApos);
-      }
-      // Fallback: senza parentesi
-      if (!animeVersions.length && normalizedTitle.includes("(")) {
-        const noParens = normalizedTitle.split("(")[0].trim();
-        animeVersions = await this.searchAllVersions(noParens);
-      }
-      // Fallback: prime 3 parole
-      if (!animeVersions.length) {
-        const words = normalizedTitle.split(" ");
-        if (words.length > 3) {
-          const first3 = words.slice(0, 3).join(" ");
-          animeVersions = await this.searchAllVersions(first3);
-        }
+      const candidates = [
+        ...fallbackTitles,
+        normalizedTitle.includes("'") ? normalizedTitle.replace(/'/g, "") : '',
+        normalizedTitle.includes("(") ? normalizedTitle.split("(")[0].trim() : '',
+        normalizedTitle.split(" ").length > 3 ? normalizedTitle.split(" ").slice(0, 3).join(" ") : '',
+      ].filter(q => q && q !== normalizedTitle);
+      if (candidates.length) {
+        usedFallbackSearch = true;
+        animeVersions = await this.searchAllVersions(candidates[0]);
       }
     }
     if (!skipFilter) {
@@ -1113,14 +1102,14 @@ export class AnimeUnityProvider {
         console.warn('[AnimeUnity][ExactMap][StrictFilter] errore:', (e as any)?.message || e);
       }
     }
-    if (!animeVersions.length && !skipFilter) {
-      for (const query of buildTitleFallbackQueries(normalizedTitle)) {
-        if (!query || query === normalizedTitle) continue;
-        const fallbackVersions = filterAnimeResults(await this.searchAllVersions(query), normalizedTitle);
+    if (!animeVersions.length && !skipFilter && !usedFallbackSearch) {
+      // Budget ricerca <=2 fetch: una sola query di ripiego.
+      const [fallbackQuery] = buildTitleFallbackQueries(normalizedTitle).filter(q => q && q !== normalizedTitle);
+      if (fallbackQuery) {
+        const fallbackVersions = filterAnimeResults(await this.searchAllVersions(fallbackQuery), normalizedTitle);
         if (fallbackVersions.length) {
-          debug(2, 'AnimeUnity', `[AnimeUnity] Trovato con query di ripiego: ${query}`);
+          debug(2, 'AnimeUnity', `[AnimeUnity] Trovato con query di ripiego: ${fallbackQuery}`);
           animeVersions = fallbackVersions;
-          break;
         }
       }
     }
