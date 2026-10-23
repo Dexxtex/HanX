@@ -23,6 +23,8 @@ services:
       - EASYPROXY_URL=${EASYPROXY_URL:-}
       - EASYPROXY_PASSWORD=${EASYPROXY_PASSWORD:-}
       # Forward proxy for scraping, separate from EasyProxy playback.
+      # Disabled by default: set SEARCH_VIA_PROXY=true to use PROXY/*_PROXY.
+      - SEARCH_VIA_PROXY=${SEARCH_VIA_PROXY:-}
       - PROXY=${PROXY:-}
       - AU_PROXY=${AU_PROXY:-}
       - AS_PROXY=${AS_PROXY:-}

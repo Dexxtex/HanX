@@ -40,8 +40,17 @@ function getProxyAgent(proxyUrl: string): any {
 
 type ProxyPlatform = 'animeunity' | 'animesaturn' | 'animeworld';
 
+/**
+ * Lo scraping va diretto per default: i proxy (PROXY / *_PROXY) valgono solo
+ * con SEARCH_VIA_PROXY=true. Restano utili dove l'IP diretto viene bloccato.
+ */
+export function isSearchProxyEnabled(): boolean {
+  return /^(1|true|on|yes)$/i.test(String(process.env.SEARCH_VIA_PROXY || '').trim());
+}
+
 /** Ordine richiesto: proxy della piattaforma, poi proxy globale, poi diretto. */
 function getProxyChain(url: string, platformOverride?: ProxyPlatform): { label: string; url: string }[] {
+  if (!isSearchProxyEnabled()) return [];
   const platformName = platformOverride
     || (url.includes('animesaturn') ? 'animesaturn'
       : url.includes('animeworld') ? 'animeworld'

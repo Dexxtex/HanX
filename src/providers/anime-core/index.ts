@@ -19,6 +19,7 @@ export {
   fetchResource,
   fetchResponseWithProxy,
   fetchWithTimeout,
+  isSearchProxyEnabled,
   DEFAULT_USER_AGENT,
   DEFAULT_FETCH_TIMEOUT,
   type ProviderCaches,
