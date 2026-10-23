@@ -16,7 +16,6 @@ import {
 import {
   createCaches,
   fetchResource,
-  fetchResponseWithProxy,
   getProviderUrl,
   getMalAnimeMetadata,
   getPreferredMalTitle,
@@ -163,70 +162,6 @@ async function awFetchHtml(
 }
 
 // ─── Page Context helpers (ported from easystreams) ─────────
-interface AwPageContext {
-  html: string;
-  sessionCookie: string | null;
-  csrfToken: string | null;
-}
-
-function extractSessionCookie(setCookieHeader: string | null | undefined): string | null {
-  const text = String(setCookieHeader || '');
-  const match = text.match(/sessionId=[^;,\s]+/i);
-  return match ? match[0] : null;
-}
-
-function extractCsrfTokenFromHtml(html: string): string | null {
-  const match = /<meta[^>]*name=["']csrf-token["'][^>]*content=["']([^"']+)["'][^>]*>/i.exec(String(html || ''));
-  return match && match[1] ? String(match[1]).trim() : null;
-}
-
-async function fetchAnimePageContext(animeUrl: string, cacheKeySuffix: string): Promise<AwPageContext> {
-  const key = `aw-pagectx:${cacheKeySuffix}`;
-  const cached = awCaches.http.get(key);
-  if (cached && cached.expiresAt > Date.now()) return cached.value as AwPageContext;
-
-  const doFetch = async (url: string, cookieHeader: string | null) => {
-    const headers: Record<string, string> = {
-      'user-agent': AW_USER_AGENT,
-      'accept-language': 'it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7',
-    };
-    if (cookieHeader) headers['cookie'] = cookieHeader;
-    // fetch diretto = 403: AnimeWorld va interrogato dalla catena proxy, come gli altri fetch AW.
-    return fetchResponseWithProxy(url, {
-      method: 'GET',
-      headers,
-      redirect: 'follow',
-      timeoutMs: AW_FETCH_TIMEOUT,
-    } as any);
-  };
-
-  let response = await doFetch(awSecurityCookie ? appendDParam(animeUrl) : animeUrl, awSecurityCookie);
-  let html = response.ok ? await response.text() : '';
-  let setCookie = response.headers.get('set-cookie') || '';
-
-  if (response.ok && looksLikeAwChallenge(html)) {
-    const extracted = extractSecurityCookieFromHtml(html);
-    if (extracted) {
-      awSecurityCookie = extracted;
-      debug(4, 'AnimeWorld', '[AnimeWorld][Challenge][PageCtx] captured SecurityAW2, replaying with d=1');
-      response = await doFetch(appendDParam(animeUrl), awSecurityCookie);
-      html = response.ok ? await response.text() : '';
-      setCookie = response.headers.get('set-cookie') || '';
-    }
-  }
-
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status} ${response.statusText} for ${animeUrl}`);
-  }
-
-  const sessionCookie = extractSessionCookie(setCookie);
-  const csrfToken = extractCsrfTokenFromHtml(html);
-
-  const ctx: AwPageContext = { html, sessionCookie, csrfToken };
-  awCaches.http.set(key, { value: ctx, expiresAt: Date.now() + 15 * 60 * 1000 });
-  return ctx;
-}
-
 function getWorldBaseUrl(): string {
   const configured = getProviderUrl('animeworld', ['ANIMEWORLD_BASE_URL', 'AW_BASE_URL']);
   let raw = configured || `https://${getDomain('animeworld') || 'animeworld.ac'}`;
@@ -520,10 +455,11 @@ function findEpisodeUrlTokenInHtml(html: string, episodeNumber: number | null | 
 async function awExtractEpisodeStreamFromPlayPage(slug: string, episodeNumber: number | null | undefined): Promise<string | null> {
   const animeUrl = `${getWorldBaseUrl()}/play/${slug}`;
   let playHtml = '';
-  let pageCtx: AwPageContext | null = null;
   try {
-    pageCtx = await fetchAnimePageContext(animeUrl, `play:${slug}`);
-    playHtml = String(pageCtx?.html || '');
+    // Stessa pagina (e stessa cache aw-play:) gia' scaricata dal probe lingua e da
+    // awGetEpisodes: il fetch era duplicato solo per avere cookie/csrf, che
+    // l'API serverPlayer non richiede (verificato: risponde 200 senza).
+    playHtml = await awFetchHtml(animeUrl, { ttlMs: 5 * 60 * 1000, cacheKey: `aw-play:${slug}` });
   } catch (err: any) {
     console.error('[AnimeWorld][Stream] play page fetch failed for', slug, err?.message);
     return null;
@@ -544,9 +480,6 @@ async function awExtractEpisodeStreamFromPlayPage(slug: string, episodeNumber: n
       'x-requested-with': 'XMLHttpRequest',
       referer: `${getWorldBaseUrl()}/play/${slug}/${urlToken}`,
     };
-    if (pageCtx?.csrfToken) apiHeaders['csrf-token'] = pageCtx.csrfToken;
-    const cookieHeader = mergeCookies(awSecurityCookie, pageCtx?.sessionCookie || null);
-    if (cookieHeader) apiHeaders.cookie = cookieHeader;
 
     const playerHtml = await fetchResource(apiUrl, awCaches, {
       ttlMs: 2 * 60 * 1000,
