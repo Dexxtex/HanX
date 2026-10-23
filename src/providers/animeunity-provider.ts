@@ -370,6 +370,23 @@ function isUnityCoDubPage(html: string): boolean {
   }
 }
 
+/**
+ * .co tiene la versione ITA della stessa serie su una scheda separata
+ * ("<slug>-ita"), che l'archivio a volte non restituisce (es. One Piece):
+ * il link sta nella pagina della versione SUB.
+ */
+function findUnityCoItaSibling(html: string, currentPath: string): string | null {
+  const current = String(currentPath || '').match(/^\/anime\/(\d+)-([a-z0-9-]+)$/i);
+  if (!current) return null;
+  const baseSlug = current[2].toLowerCase();
+  if (/-ita$/i.test(baseSlug)) return null;
+  const target = `${baseSlug}-ita`;
+  for (const link of String(html || '').matchAll(/\/anime\/(\d+)-([a-z0-9-]+)/gi)) {
+    if (link[2].toLowerCase() === target) return `/anime/${link[1]}-${link[2]}`;
+  }
+  return null;
+}
+
 async function resolveServerEmbedUrl(linkId: string, referer: string): Promise<string | null> {
   try {
     const payload = await auFetchResource(
@@ -1142,6 +1159,39 @@ export class AnimeUnityProvider {
         if (seenLinks.has(st.url)) continue;
         streams.push(st);
         seenLinks.add(st.url);
+      }
+    }
+
+    // .co: se l'archivio non ha restituito la scheda ITA della stessa serie
+    // (es. One Piece), il link è nella pagina SUB appena letta (cache, 0 fetch).
+    if (isUnityCoBase() && !isMovie && !streams.some(s => /ITA/.test(String(s.title || '')))) {
+      const subVersion = animeVersions.find(v => !/-ita$/i.test(v.version.slug || ''));
+      if (subVersion) {
+        const subPath = normalizeAnimePath(`/anime/${subVersion.version.id}-${subVersion.version.slug}`);
+        const subUrl = subPath ? buildUnityUrl(subPath) : null;
+        if (subPath && subUrl) {
+          const html = String(await auFetchResource(subUrl, caches, {
+            ttlMs: TTL.animePage,
+            cacheKey: `au-anime:${subPath}`,
+            timeoutMs: FETCH_TIMEOUT,
+          }).catch(() => '') || '');
+          const itaPath = findUnityCoItaSibling(html, subPath);
+          if (itaPath) {
+            const cleanName = subVersion.version.name
+              .replace(/\s*\(ITA\)/i, '')
+              .replace(/\s*\(CR\)/i, '')
+              .replace(/ITA/gi, '')
+              .replace(/CR/gi, '')
+              .trim();
+            const extra = await this.extractStreamsFromAnimePath(itaPath, episodeNumber, seasonNumber, isMovie, cleanName);
+            for (const st of extra) {
+              if (!st || !st.url || seenLinks.has(st.url)) continue;
+              streams.push(st);
+              seenLinks.add(st.url);
+            }
+            if (extra.length) debug(2, 'AnimeUnity', `[AnimeUnity] Scheda ITA recuperata dalla pagina SUB: ${itaPath}`);
+          }
+        }
       }
     }
     debug(1, 'AnimeUnity', 'streams', {
