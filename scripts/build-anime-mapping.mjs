@@ -342,6 +342,21 @@ async function kitsuIdForMal(malId) {
   return id ? String(id) : null;
 }
 
+/** TVDB series id from the Kitsu mappings of an anime (null when absent). */
+export function tvdbSeriesIdFromMappings(data) {
+  const found = (data || []).find((item) => item?.attributes?.externalSite === 'thetvdb/series');
+  return found?.attributes?.externalId ? String(found.attributes.externalId) : null;
+}
+
+/**
+ * TMDB non accorpa per titolo tutti i seguiti ("City Hunter 2" non esiste come
+ * serie): Kitsu però ha il mapping TVDB esplicito, quindi si mappa su quello.
+ */
+async function tvdbIdFromKitsu(kitsuId) {
+  const json = await fetchJson(`${KITSU}/anime/${kitsuId}/mappings?page[limit]=20`);
+  return tvdbSeriesIdFromMappings(json?.data);
+}
+
 function normalizeTitle(value) {
   return String(value || '')
     .normalize('NFKD')
@@ -484,7 +499,13 @@ async function convertCatalogEntry(entry, index) {
 
   const query = tmdbQuery(entry);
   const tmdb = await findTmdb(query);
-  if (!tmdb?.id) return { ...record, status: 'no-tmdb' };
+  if (!tmdb?.id) {
+    // TMDB non conosce il titolo (tipico dei seguiti): per le serie c'è il
+    // mapping TVDB esplicito di Kitsu, che non dipende dal titolo.
+    return query.kind === 'tv'
+      ? await convertFromKitsuTvdb(entry, index, record)
+      : { ...record, status: 'no-tmdb' };
+  }
 
   const external = await tmdbExternalIds(query.kind, tmdb.id);
   const imdbId = external?.imdb_id || '';
@@ -541,6 +562,36 @@ async function convertCatalogEntry(entry, index) {
       kitsuId = null;
     }
   }
+}
+
+/**
+ * Fallback for series TMDB cannot find by title: Kitsu maps the MAL entry to a
+ * TVDB series, and the index already keys on TVDB. Nessun alias tmdb/imdb qui:
+ * senza un id TMDB verosimile non se ne inventa uno.
+ */
+async function convertFromKitsuTvdb(entry, index, record) {
+  let kitsuId = await kitsuIdForMal(entry.mal_id);
+  if (!kitsuId) kitsuId = await kitsuIdByMetadata(entry);
+  if (!kitsuId) return { ...record, status: 'no-kitsu' };
+
+  const tvdbId = await tvdbIdFromKitsu(kitsuId);
+  if (!tvdbId) return { ...record, kitsuId, status: 'no-tmdb' };
+
+  let result = null;
+  try {
+    // Senza tmdbId il seed contiene solo la chiave tvdb.
+    result = await buildSeriesSeed({ kitsuId, tvdbId });
+  } catch (error) {
+    if (!/HTTP 404 for api4\.thetvdb\.com/.test(error.message)) throw error;
+  }
+  if (!result) return { ...record, kitsuId, tvdbId, status: 'no-align' };
+
+  // Niente scorciatoia "already": un seguito è un'altra stagione dello stesso
+  // id TVDB, quindi ogni entry deve aggiungere la sua.
+  for (const [key, value] of Object.entries(result.series)) {
+    mergeSeries(index.series, key, value.title, value.seasons);
+  }
+  return { ...record, kitsuId, tvdbId, status: 'ok', via: 'tvdb' };
 }
 
 async function getTvdbSeries(tvdbId) {
