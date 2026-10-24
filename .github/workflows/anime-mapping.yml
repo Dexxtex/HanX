@@ -26,6 +26,9 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # I secret sono "Environment secrets" dell'environment "Keys":
+    # senza questa riga il job non li vede e arrivano vuoti.
+    environment: Keys
     timeout-minutes: 350
     steps:
       - uses: actions/checkout@v4
