@@ -100,7 +100,9 @@ Il livello `src/mapping/` risolve gli ID esterni verso una entry Kitsu usando es
 - **Jikan** (la tua istanza self-hosted) come catalogo: quali anime esistono, titoli MAL, tipo e anno
 - **Kitsu** (pubblico) per il collegamento MAL → Kitsu (`myanimelist/anime`) e per le relazioni `sequel`/`prequel` (split cour/parti)
 - **TMDB** per trovare l'entry TMDB (titolo + anno) e da lì gli ID IMDb/TVDB
+- **Kitsu mappings** `thetvdb/series` per le serie che TMDB non trova per titolo: è il fallback che copre i seguiti accorpati (`City Hunter 2` → `City Hunter`)
 - **TVDB v4** in **aired order** (`/episodes/default`) per l'ordine episodi delle serie
+- **ricerca TVDB per nome** (inglese, romaji, giapponese) come ultimo tentativo: match esatto o serie madre contenuta, anno ±1, un solo candidato
 
 L'indice viene **costruito a piccoli passi** e cresce a ogni giro. Ogni run converte le prossime N entry del catalogo Jikan, le unisce all'indice esistente e salva il punto in cui è arrivato:
 
@@ -123,17 +125,20 @@ Il cursore e l'esito di ogni entry stanno in `data/jikan-progress.json` (volume 
 | `--reset` | ignora indice e cursore esistenti |
 | `--check` | valida il JSON senza rete |
 
-Esempio di stato:
+Esempio di stato reale (catalogo 13.800 entry, passata completa del 24/10/2026):
 
 ```
-tv     8738/8738 (100%)
-movie  5099/5099 (100%)
-registro: 13837 entry (ok 11200, already 1500, no-tmdb 900, no-kitsu 200, error 37)
+tv     8725/8738 (100%)
+movie  5050/5062 (100%)
+registro: 13799/13800 entry (100%)
+  ok 7248, already 1082, no-tmdb 1938, no-align 84, no-kitsu 3446, error 1
 ```
 
-Esiti registrati per entry: `ok` (allineata su TVDB, o su TMDB quando TVDB manca), `already` (split cour già coperto), `no-kitsu` (Kitsu non ha il mapping MAL né un titolo corrispondente), `no-tmdb` (titolo non trovato su TMDB), `no-align` (né TVDB né TMDB hanno episodi compatibili), `error`. Solo gli ultimi due restano scoperti dall'indice: fuori da lì, la risoluzione live copre comunque.
+Esiti registrati per entry: `ok` (allineata su TVDB, o su TMDB quando TVDB manca), `already` (split cour già coperto), `no-kitsu` (Kitsu non ha il mapping MAL né un titolo corrispondente), `no-tmdb` (titolo non trovato né su TMDB né, per le serie, su TVDB), `no-align` (TVDB esiste ma senza episodi datati compatibili), `error` (rete). Restano fuori dall'indice `no-kitsu`, `no-tmdb`, `no-align` ed `error`: i primi tre sono buchi di catalogo, non errori di match — senza `kitsuId` l'indice non può indicare la stagione, quindi la risoluzione live non li recupera.
 
 Per le entry senza mapping MAL ufficiale il converter prova anche un match per metadati su Kitsu, volutamente severo: titolo normalizzato identico, stesso sottotipo (TV/film), anno ±1 e **un solo** candidato. Se i candidati sono due, meglio il buco: un id sbagliato manderebbe lo stream sulla serie sbagliata.
+
+> **Cosa non si recupera (verificato il 24/10/2026).** Il residuo è 3.446 `no-kitsu` + 1.938 `no-tmdb` + 84 `no-align`. Kitsu non espone mapping `themoviedb` né `thetvdb/movie` (zero risultati), quindi per i film non esiste un ponte verso TVDB; TVDB non registra gli id AniDB/AniList; `search/remoteid` di TVDB risponde con titoli non correlati. Rilanciare `--retry` su questo residuo non guadagna nulla: quei titoli non esistono nei cataloghi.
 
 L'indice locale `src/mapping/data/anime-seasons.json` (o il percorso in `ANIME_MAPPING_FILE`) viene caricato una volta e usato senza rete; ogni range contiene il titolo della entry Kitsu e il conteggio episodi, così split cour e richieste fuori range non finiscono sull'episodio sbagliato. In caso di miss, il resolver può interrogare le API ufficiali (con cache in memoria e retry su 429/5xx). I provider non usano più un resolver di path esterni: risolvono `{ titolo, stagione, episodio Kitsu }` e cercano per titolo.
 
