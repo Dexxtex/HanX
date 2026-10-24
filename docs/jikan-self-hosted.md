@@ -20,6 +20,88 @@ Attenzione: i metadati anime a runtime **non** passano da `JIKAN_API_BASE`. Quel
 strada è hardcoded su Tenrai (`src/providers/anime-core/tenrai-metadata.ts`). Con
 questa guida cambia il converter del mapping, non la ricerca per titolo dei provider.
 
+## PHP 8.5: immagine custom
+
+L’immagine ufficiale `jikanme/jikan-rest:latest` è costruita su **PHP 8.1.27**
+(`php:8.1.27-bullseye`, pinnato nel `Dockerfile` upstream). Per girare su 8.5
+bisogna ricompilare il sorgente: sotto c’è il `Dockerfile` upstream con la base
+cambiata e `curl` aggiunto per l’healthcheck.
+
+```bash
+cd apps/jikan-rest
+git clone --depth 1 https://github.com/jikan-me/jikan-rest.git
+```
+
+Salvalo come `apps/jikan-rest/jikan-rest/Dockerfile.php85`, cioè **dentro** il
+checkout ma con un nome diverso: sovrascrivere il `Dockerfile` upstream farebbe
+conflitto a ogni `git pull`.
+
+```dockerfile
+# jikan-rest su PHP 8.5. Build context: il checkout di jikan-me/jikan-rest.
+FROM docker.io/spiralscout/roadrunner:2.12.3 AS roadrunner
+FROM docker.io/composer:2 AS composer
+FROM docker.io/mlocati/php-extension-installer:2.12 AS php-ext-installer
+
+FROM php:8.5-cli-bookworm
+
+COPY --from=composer /usr/bin/composer /usr/bin/composer
+COPY --from=php-ext-installer /usr/bin/install-php-extensions /usr/local/bin/
+
+ENV COMPOSER_HOME="/tmp/composer"
+
+RUN set -eux \
+    && install-php-extensions intl mbstring mongodb-stable redis opcache sockets pcntl \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends curl git openssl unzip wget \
+    && wget -q "https://github.com/aptible/supercronic/releases/download/v0.1.12/supercronic-linux-$(dpkg --print-architecture)" -O /usr/bin/supercronic \
+    && chmod +x /usr/bin/supercronic \
+    && mkdir -p /etc/supercronic \
+    && echo '*/1 * * * * php /app/artisan schedule:run' > /etc/supercronic/laravel \
+    && rm -rf /var/lib/apt/lists/* \
+    && printf '\nopcache.enable=1\nopcache.enable_cli=1\nopcache.jit_buffer_size=32M\nopcache.jit=1235\n' >> "${PHP_INI_DIR}/conf.d/docker-php-ext-opcache.ini" \
+    && adduser --disabled-password --shell /sbin/nologin --home /nonexistent --no-create-home --uid 10001 --gecos "" jikanapi \
+    && mkdir -p /app /var/run/rr \
+    && chown -R jikanapi:jikanapi /app /var/run/rr /etc/supercronic/laravel \
+    && chmod -R 777 /var/run/rr
+
+COPY --from=roadrunner /usr/bin/rr /usr/bin/rr
+
+USER jikanapi:jikanapi
+WORKDIR /app
+
+COPY --chown=jikanapi:jikanapi composer.json composer.lock /app/
+# Se il lock upstream rifiuta 8.5, l'unica via è --ignore-platform-req=php
+# (a tuo rischio: il vincolo può essere lì per un motivo).
+RUN composer install -n --no-dev --no-cache --no-ansi --no-autoloader --no-scripts --prefer-dist
+
+COPY --chown=jikanapi:jikanapi . /app/
+RUN set -eux \
+    && composer dump-autoload -n --optimize --no-ansi --no-dev \
+    && chmod -R a+w storage/ \
+    && chmod +x docker-entrypoint.php docker-entrypoint.sh
+
+EXPOSE 8080 2114
+HEALTHCHECK CMD curl --fail http://localhost:2114/health?plugin=http || exit 1
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
+```
+
+Verifica dopo il build:
+
+```bash
+docker compose exec jikan_rest php -v          # deve dire 8.5.x
+docker compose exec jikan_rest php -m | grep -E 'mongodb|redis|pcntl|sockets'
+```
+
+### Se il build si ferma
+
+| Errore | Causa | Rimedio |
+|---|---|---|
+| `your lock file does not contain a compatible set of packages` | il `composer.lock` upstream fissa una minor di PHP | aggiungi `--ignore-platform-req=php` al `composer install` |
+| `mongodb-stable` non compila | estensione non ancora pronta per 8.5 | `pecl install mongodb` esplicito, o torna all’immagine 8.1 |
+| deprecation a runtime | Lumen 9 è del 2022 | `LOG_LEVEL=error`; se una deprecation diventa fatal, l’unica via è 8.1 |
+
+Il resto della guida non cambia: percorso, segreti, indici e seed sono identici.
+
 ## Stack
 
 Salva come `apps/jikan-rest/compose.yaml`.
@@ -41,7 +123,12 @@ secrets:
 
 services:
   jikan_rest:
-    image: docker.io/jikanme/jikan-rest:latest
+    # PHP 8.5: build dal sorgente. Per l'immagine ufficiale (PHP 8.1):
+    #   image: docker.io/jikanme/jikan-rest:latest
+    build:
+      context: ./jikan-rest
+      dockerfile: Dockerfile.php85
+    image: jikan-rest:php85
     container_name: jikan_rest
     hostname: jikan-rest-api
     user: "10001:10001"
@@ -209,6 +296,7 @@ use Laravel\Scout\Builder as ScoutBuilder;
 
 class RepositoryQuery extends RepositoryQueryBase implements RepositoryQueryContract
 {
+    #[\Override]
     public function filter(Collection $params): Builder|ScoutBuilder
     {
         // queryable() memoizza il builder. I repository sono singleton che vivono più
@@ -218,11 +306,13 @@ class RepositoryQuery extends RepositoryQueryBase implements RepositoryQueryCont
         return $this->queryable(true)->filter($params);
     }
 
+    #[\Override]
     public function search(string $keywords, ?Closure $callback = null): ScoutBuilder
     {
         return $this->searchable($keywords, $callback, true);
     }
 
+    #[\Override]
     public function where(string $key, mixed $value): Builder
     {
         return $this->queryable(true)->where($key, $value);
@@ -237,10 +327,12 @@ nessuna dipendenza nuova. Il file è identico a quello upstream tranne `queryabl
 in `filter()` e `where()`: quando aggiorni jikan-rest, fai il diff con l’originale
 invece di ricopiare questa versione.
 
-La sintassi resta volutamente su **PHP 8.1**, la versione dell’immagine
-(`php:8.1.27-bullseye` nel `Dockerfile` upstream): union types e `mixed` sono 8.0,
-`declare(strict_types=1)` è 7.0. Niente `#[\Override]` (8.3, verrebbe ignorato) né
-costrutti 8.4/8.5 (errore fatale): si aggiornano solo dopo aver aggiornato l’immagine.
+Il file è scritto per **PHP 8.5** (l’immagine custom qui sopra):
+`declare(strict_types=1)` rende il file strict, `#[\Override]` (8.3+) fa fallire
+l’avvio se uno dei tre metodi smette di implementare il contratto — cioè se una
+futura versione di jikan-rest rinominasse o spostasse la firma. Se torni
+all’immagine ufficiale (PHP 8.1), **togli i tre attributi**: lì sarebbero
+silenziosamente ignorati.
 
 Crea **sia** questo file sia `mongo-init.js` prima del primo `docker compose up -d`:
 se mancano, Docker crea una directory al posto del file e il mount fallisce.
@@ -258,7 +350,8 @@ openssl rand -hex 24 | tr -d '\n' > secrets/typesense_api_key.txt
 chmod 644 secrets/*.txt   # l'app gira come 10001, non come root
 ```
 
-Poi `docker compose up -d`. Verifica:
+Poi `docker compose up -d --build`: il primo build compila PHP 8.5, le estensioni
+e le dipendenze Composer (5–10 minuti). Verifica:
 
 ```bash
 docker compose ps
@@ -431,6 +524,8 @@ monta un `.rr.yaml` su `/app/.rr.yaml` che aggiunge: `queue:work --max-time=3600
 | `?q=999` non trova *Lv999* | `SCOUT_DRIVER=null`, oppure schema senza `infix` |
 | Query per genere lentissime | indici Mongo assenti: devono essere 29 |
 | Porta 8080 già occupata | lo stack usa `expose`, non `ports`: nessun conflitto atteso |
+| `php -v` dice ancora 8.1 | il servizio usa `image:` invece di `build:` | ripristina il blocco `build` del compose |
+| build fermo su `composer install` | il lock upstream non accetta 8.5 | vedi “Se il build si ferma” |
 
 ---
 
