@@ -17,7 +17,6 @@ export {
 // Fetch with cache + inflight dedup
 export {
   fetchResource,
-  fetchResponseWithProxy,
   fetchWithTimeout,
   isSearchProxyEnabled,
   DEFAULT_USER_AGENT,
@@ -49,6 +48,7 @@ export {
 
 // Shared helpers
 export {
+  isAbortOrTimeoutError,
   parsePositiveInt,
   normalizeRequestedEpisode,
   normalizeRequestedSeason,
@@ -58,7 +58,6 @@ export {
   sanitizeAnimeTitle,
   inferSourceTag,
   normalizeHostLabel,
-  mapLimit,
   normalizeEpisodesList,
   pickEpisodeEntry,
   collectMediaLinksFromEmbedHtml,

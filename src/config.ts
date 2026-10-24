@@ -13,8 +13,6 @@ export interface AddonConfig {
     tvdbPin?: string;
     easyProxyUrl?: string;
     easyProxyPassword?: string;
-    easyProxyMaster?: boolean;
-    enableMpd?: boolean;
     animeunityEnabled?: boolean;
     animesaturnEnabled?: boolean;
     animeworldEnabled?: boolean;
@@ -64,11 +62,9 @@ export function normalizeConfig(raw: Record<string, unknown>): AddonConfig {
             if (typeof value === 'string') {
                 (result as any)[key] = value;
             }
-        } else if (key === 'enableMpd' ||
-                   key === 'animeunityEnabled' || key === 'animesaturnEnabled' ||
+        } else if (key === 'animeunityEnabled' || key === 'animesaturnEnabled' ||
                    key === 'animeworldEnabled' || key === 'animeunityDirect' ||
-                   key === 'animeunityProxy' ||
-                   key === 'personalTmdbKey' || key === 'easyProxyMaster') {
+                   key === 'animeunityProxy') {
             // Normalizza booleani da qualsiasi formato (stringa, numero, bool)
             if (typeof value === 'boolean') {
                 (result as any)[key] = value;

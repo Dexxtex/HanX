@@ -19,6 +19,7 @@ import {
   fetchResource,
   getProviderUrl,
   getEnglishTitleFromAnyId,
+  isAbortOrTimeoutError,
 } from './anime-core/index.js';
 import {
   resolveMappingRequest,
@@ -89,6 +90,7 @@ async function awFetchHtml(
   };
 
   const targetUrl = awSecurityCookie ? appendDParam(url) : url;
+  const hadCookie = !!awSecurityCookie;
   let html = await fetchResource(targetUrl, awCaches, {
     ttlMs,
     cacheKey: cacheKey ? `${cacheKey}:d=${awSecurityCookie ? 1 : 0}` : undefined,
@@ -101,9 +103,12 @@ async function awFetchHtml(
     if (extracted) {
       awSecurityCookie = extracted;
       debug(4, 'AnimeWorld', '[AnimeWorld][Challenge] captured SecurityAW2 cookie, replaying with d=1');
+      // Replay sotto la chiave che il path normale legge (:d=1). Con un cookie
+      // gia' presente il primo fetch ha pero' appena cachato lo stub sotto :d=1:
+      // in quel caso resta la chiave distinta per non rileggere lo stub.
       html = await fetchResource(appendDParam(url), awCaches, {
         ttlMs,
-        cacheKey: cacheKey ? `${cacheKey}:d=1:retry` : undefined,
+        cacheKey: cacheKey ? `${cacheKey}:d=1${hadCookie ? ':retry' : ''}` : undefined,
         timeoutMs,
         headers: buildHeaders(),
       });
@@ -240,36 +245,6 @@ function normalizePlayableMediaUrl(rawUrl: string | null | undefined, depth = 0)
     if (nestedUrl) return nestedUrl;
   }
   return null;
-}
-
-function collectGrabberCandidates(infoData: any): string[] {
-  const urls: string[] = [];
-  const directKeys = ['grabber', 'url', 'link', 'file', 'stream'];
-  for (const key of directKeys) {
-    const value = infoData?.[key];
-    if (typeof value === 'string' && value.trim()) urls.push(value.trim());
-  }
-  const listKeys = ['links', 'streams', 'servers', 'sources'];
-  for (const key of listKeys) {
-    const value = infoData?.[key];
-    if (!Array.isArray(value)) continue;
-    for (const item of value) {
-      if (typeof item === 'string' && item.trim()) {
-        urls.push(item.trim());
-        continue;
-      }
-      if (!item || typeof item !== 'object') continue;
-      const candidate = item.grabber || item.url || item.link || item.file || item.stream || null;
-      if (candidate && String(candidate).trim()) urls.push(String(candidate).trim());
-    }
-  }
-  const seen = new Set<string>();
-  return urls.filter((entry) => {
-    const key = String(entry || '').trim();
-    if (!key || seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
 }
 
 function collectMediaLinksFromHtml(html: string): string[] {
@@ -435,7 +410,7 @@ async function awExtractEpisodeStreamFromPlayPage(slug: string, episodeNumber: n
     playHtml = await awFetchHtml(animeUrl, { ttlMs: 5 * 60 * 1000, cacheKey: `aw-play:${slug}`, timeoutMs });
   } catch (err: any) {
     console.error('[AnimeWorld][Stream] play page fetch failed for', slug, err?.message);
-    if (/timeout|abort/i.test(`${err?.name || ''} ${err?.message || ''}`)) throw err;
+    if (isAbortOrTimeoutError(err)) throw err;
     return null;
   }
   const urlToken = findEpisodeUrlTokenInHtml(playHtml, episodeNumber == null ? null : Number(episodeNumber));
@@ -476,7 +451,7 @@ async function awExtractEpisodeStreamFromPlayPage(slug: string, episodeNumber: n
     epHtml = await awFetchHtml(epUrl, { ttlMs: 2 * 60 * 1000, cacheKey: `aw-ep:${slug}:${urlToken}`, timeoutMs });
   } catch (err: any) {
     console.error('[AnimeWorld][Stream] episode page fetch failed for', slug, urlToken, err?.message);
-    if (/timeout|abort/i.test(`${err?.name || ''} ${err?.message || ''}`)) throw err;
+    if (isAbortOrTimeoutError(err)) throw err;
     return null;
   }
   const mp4 = collectMediaLinksFromHtml(epHtml)[0] || null;
@@ -529,10 +504,6 @@ export function buildAnimeWorldStreamOutput(
     behaviorHints,
   };
 }
-
-// kept around in case some legacy code path still references collectGrabberCandidates;
-// no-op consumer to avoid "unused" tree-shaking surprises during refactors.
-void collectGrabberCandidates;
 
 async function invokePython(args: string[], timeoutMs = AW_FETCH_TIMEOUT): Promise<any> {
   const cmd = String(args?.[0] || '');
@@ -1086,8 +1057,7 @@ export class AnimeWorldProvider {
         try {
           streamData = await invokePython(['get_stream', '--anime-slug', v.slug, ...(epNum != null ? ['--episode', String(epNum)] : [])]);
         } catch (e: any) {
-          const errorText = `${e?.name || ''} ${e?.message || ''}`;
-          if (/timeout|abort/i.test(errorText)) {
+          if (isAbortOrTimeoutError(e)) {
             timedOut = true;
             console.warn('[AnimeWorld] get_stream timeout, retry extended 15s:', v.slug);
           } else {

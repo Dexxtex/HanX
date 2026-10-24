@@ -57,8 +57,7 @@ const baseManifest: Manifest = {
     idPrefixes: ["tt", "kitsu", "mal", "tmdb", "tvdb"],
     catalogs: [],
     resources: [
-        "stream",
-        "meta"
+        "stream"
     ],
     behaviorHints: { configurable: true },
     config: [
@@ -72,9 +71,6 @@ const baseManifest: Manifest = {
         { key: "animeunityProxy", title: "AnimeUnity Proxy (richiede EasyProxy, consigliato)", type: "checkbox" },
         { key: "animesaturnEnabled", title: "Enable AnimeSaturn", type: "checkbox" },
         { key: "animeworldEnabled", title: "Enable AnimeWorld", type: "checkbox" },
-        // UI helper toggles (not used directly server-side but drive dynamic form logic)
-        { key: "personalTmdbKey", title: "TMDB API KEY Personale", type: "checkbox" },
-        { key: "easyProxyMaster", title: "EasyProxy", type: "checkbox" },
     ],
     stremioAddonsConfig: {
         issuer: "https://stremio-addons.net",
@@ -220,14 +216,6 @@ function _providerCacheSet(type: string, id: string, configDigest: string, strea
 function createBuilder() {
     const manifest = loadCustomConfig();
     const builder = new addonBuilder(manifest);
-
-    // === HANDLER META ===
-    builder.defineMetaHandler(async ({ type, id }: { type: string; id: string; config?: any }) => {
-        debug(2, 'Addon', 'meta request', { type, id });
-
-        // Meta handler per film/serie (logica originale)
-        return { meta: null };
-    });
 
     // === HANDLER STREAM ===
     builder.defineStreamHandler(
@@ -385,7 +373,6 @@ function createBuilder() {
                     const episodeNumber: number | null = parsedRequest?.episode ?? null;
                     const isMovie = parsedRequest?.isMovie ?? false;
                     const providerPromises: Promise<Stream[]>[] = [];
-                    const providerTasks: Record<string, Promise<Stream[]>> = {};
 
                     debug(2, 'Addon', 'provider fan-out', {
                         id,
@@ -404,30 +391,6 @@ function createBuilder() {
                     };
                     const unifyStreams = (original: Stream[], providerLabelName: string): Stream[] => {
                         const providerKey = reverseProviderKey(providerLabelName);
-                        // Pre-scan for canonical base title (vixsrc) excluding synthetic placeholder names
-                        let canonicalVixBase: string | null = null;
-                        if (providerKey === 'vixsrc') {
-                            for (const st of original) {
-                                const first = (st.title || '').toString().split('\n')[0];
-                                if (first && !/Synthetic FHD|Proxy FHD/i.test(first)) {
-                                    canonicalVixBase = first
-                                        .replace(/^\s*🎬\s*/, '')
-                                        .replace(/\[?(ITA|SUB)\]?/ig, '')
-                                        .replace(/🔒|🔓FHD?|🔓/g, '')
-                                        .replace(/\s*•\s*/g, ' ')
-                                        .replace(/\s{2,}/g, ' ')
-                                        .trim();
-                                    if (canonicalVixBase) break;
-                                }
-                            }
-                            // Se non trovato (tutte placeholder), prova a prendere originalName dai synthetic
-                            if (!canonicalVixBase) {
-                                for (const st of original) {
-                                    const orig = (st as any).originalName;
-                                    if (orig && typeof orig === 'string') { canonicalVixBase = orig; break; }
-                                }
-                            }
-                        }
                         const hostMap: Record<string, string> = {
                             'mixdrop': 'Mixdrop', 'dropload': 'Dropload', 'streamtape': 'Streamtape', 'supervideo': 'SuperVideo', 'doodstream': 'Doodstream', 'deltabit': 'Deltabit', 'delta bit': 'Deltabit', 'loadm': 'LoadM', 'maxstream': 'Maxstream', 'streamhg': 'StreamHG', 'audinifer': 'StreamHG'
                         };
@@ -446,23 +409,6 @@ function createBuilder() {
                                 .replace(/\s*•\s*\[SUB ITA\]/ig, '')
                                 .replace(/\s{2,}/g, ' ') // collapse spaces
                                 .trim();
-                            // Replace synthetic placeholder names with canonical title
-                            if (providerKey === 'vixsrc' && /^(Synthetic FHD|Proxy FHD)$/i.test(baseLine)) {
-                                if (canonicalVixBase) {
-                                    baseLine = canonicalVixBase;
-                                } else if ((st as any).originalName) {
-                                    baseLine = (st as any).originalName;
-                                }
-                            }
-                            // Extra cleanup for VixSrc: rimuovi eventuali marker lingua / lock rimasti nel baseLine
-                            if (providerKey === 'vixsrc') {
-                                baseLine = baseLine
-                                    .replace(/\[?(ITA|SUB)\]?/ig, '')
-                                    .replace(/🔒|🔓FHD?|🔓/g, '')
-                                    .replace(/\s*•\s*/g, ' ')
-                                    .replace(/\s{2,}/g, ' ')
-                                    .trim();
-                            }
                             // Cleanup universale aggiuntivo: rimuovi eventuali [ITA]/[SUB] residui attaccati senza spazio e lock icon per qualsiasi provider
                             baseLine = baseLine
                                 .replace(/\[ITA\]/ig, '')
@@ -479,37 +425,35 @@ function createBuilder() {
                             //  - behaviorHints.proxyHeaders flag
                             const proxyOn = /\/proxy\//i.test(url)
                                 || /api_password=/i.test(url);
-                            // Player host detection (not for vixsrc)
+                            // Player host detection
                             let playerName: string | undefined;
                             let sizeHuman: string | undefined; // already formatted (e.g. 1.58Gb / 850MB)
                             let resHuman: string | undefined;  // e.g. 1080p
-                            if (providerKey !== 'vixsrc') {
-                                const lowerAll = rawTitle.toLowerCase();
-                                for (const k of Object.keys(hostMap)) {
-                                    if (lowerAll.includes(k)) { playerName = hostMap[k]; break; }
-                                }
-                                // Try to preserve existing player name line if not found
-                                if (!playerName) {
-                                    for (const l of lines) {
-                                        if (l.includes('▶️')) {
-                                            playerName = l.replace('▶️', '').trim();
-                                            break;
-                                        }
+                            const lowerAll = rawTitle.toLowerCase();
+                            for (const k of Object.keys(hostMap)) {
+                                if (lowerAll.includes(k)) { playerName = hostMap[k]; break; }
+                            }
+                            // Try to preserve existing player name line if not found
+                            if (!playerName) {
+                                for (const l of lines) {
+                                    if (l.includes('▶️')) {
+                                        playerName = l.replace('▶️', '').trim();
+                                        break;
                                     }
                                 }
-                                // Try to parse existing size/res lines produced by extractors (line starting with 💾)
-                                // Patterns we expect from extractors: "💾 <SIZE> • <RES>", "💾 <SIZE>", "💾 <SIZE> • <somethingp>", or combined tokens separated by spaces or bullets.
-                                for (const l of lines) {
-                                    if (/^\s*💾/i.test(l)) {
-                                        // Remove leading icon
-                                        let rest = l.replace(/^\s*💾\s*/, '').trim();
-                                        // Split by separators (bullet • or whitespace)
-                                        const parts = rest.split(/\s*[•|]\s*|\s+/).filter(Boolean);
-                                        // Heuristics: first part maybe size (contains MB/GB), any part matching \d{3,4}p is resolution
-                                        for (const p of parts) {
-                                            if (!sizeHuman && /([0-9]+(?:\.[0-9]+)?\s*(?:GB|MB))/i.test(p)) sizeHuman = p.replace(/gb$/i, 'GB').replace(/mb$/i, 'MB');
-                                            if (!resHuman && /^(\d{3,4})p$/i.test(p)) resHuman = p.toLowerCase();
-                                        }
+                            }
+                            // Try to parse existing size/res lines produced by extractors (line starting with 💾)
+                            // Patterns we expect from extractors: "💾 <SIZE> • <RES>", "💾 <SIZE>", "💾 <SIZE> • <somethingp>", or combined tokens separated by spaces or bullets.
+                            for (const l of lines) {
+                                if (/^\s*💾/i.test(l)) {
+                                    // Remove leading icon
+                                    let rest = l.replace(/^\s*💾\s*/, '').trim();
+                                    // Split by separators (bullet • or whitespace)
+                                    const parts = rest.split(/\s*[•|]\s*|\s+/).filter(Boolean);
+                                    // Heuristics: first part maybe size (contains MB/GB), any part matching \d{3,4}p is resolution
+                                    for (const p of parts) {
+                                        if (!sizeHuman && /([0-9]+(?:\.[0-9]+)?\s*(?:GB|MB))/i.test(p)) sizeHuman = p.replace(/gb$/i, 'GB').replace(/mb$/i, 'MB');
+                                        if (!resHuman && /^(\d{3,4})p$/i.test(p)) resHuman = p.toLowerCase();
                                     }
                                 }
                             }
@@ -518,9 +462,6 @@ function createBuilder() {
                                 const m = rawTitle.match(/\b(\d{3,4})p\b/);
                                 if (m) resHuman = m[1] + 'p';
                             }
-                            // HD flag ONLY if synthetic flag propagated
-                            const isSynthetic = !!(st as any).isSyntheticFhd;
-                            const isFhdOrDual = providerKey === 'vixsrc' && isSynthetic;
                             // Assemble lines manually per new spec:
                             // 1 Title (🎬 prefix added later by builder or we add manually)
                             // 2 Language line 🗣 [ITA|SUB]
@@ -530,19 +471,9 @@ function createBuilder() {
                             // (Provider label removed from multiline)
                             const outLines: string[] = [];
                             outLines.push(`🎬 ${baseLine}`);
-                            // Language line: per VixSrc, preserva la riga 🗣 originale (contiene flag 🇮🇹/🇬🇧 da finalize).
-                            // Per gli altri provider, usa la logica legacy [ITA]/[SUB].
-                            let langLine = `🗣 [${isSub ? 'SUB' : 'ITA'}]`;
-                            if (providerKey === 'vixsrc') {
-                                const existingLangLine = lines.find(l => /^🗣\s/.test(l));
-                                if (existingLangLine) langLine = existingLangLine;
-                            }
+                            // Language line: logica legacy [ITA]/[SUB].
+                            const langLine = `🗣 [${isSub ? 'SUB' : 'ITA'}]`;
                             outLines.push(langLine);
-                            // VixSrc: preserva la riga 🎦 originale da finalize() (es. 🎦 🅵🅷🅳 o 🎦 1080p)
-                            if (providerKey === 'vixsrc') {
-                                const existingQualityLine = lines.find(l => /^🎦\s/.test(l));
-                                if (existingQualityLine) outLines.push(existingQualityLine);
-                            }
                             if (playerName) outLines.push(`▶️ ${playerName}`);
                             // Build size/res combined line before proxy if present
                             let sizeResLine = '';
@@ -560,33 +491,23 @@ function createBuilder() {
                             const unifiedTitle = outLines.join('\n');
                             // ---------------- BINGE GROUP LOGIC (CUSTOM MAP) ----------------
                             // animeunity/animeworld/animesaturn: std-ita | std-sub
-                            // vixsrc: direct | directFHD | proxy | proxyFHD
                             // Altri provider (fallback): providerKey-std
                             let bingeGroup: string;
-                            if (providerKey === 'vixsrc') {
-                                // Manteniamo la logica esistente per le 4 varianti
-                                let variant = 'base';
-                                const isFhdVariant = isSynthetic || /FHD/i.test(rawTitle) || /1080p/i.test(rawTitle);
-                                if (isFhdVariant) variant = proxyOn ? 'proxyFHD' : 'directFHD';
-                                else variant = proxyOn ? 'proxy' : 'direct';
-                                bingeGroup = `${providerKey}-${variant}`;
-                            } else {
-                                switch (providerKey) {
-                                    case 'animeunity':
-                                    case 'animeworld':
-                                    case 'animesaturn':
-                                        bingeGroup = `${providerKey}-std-${isSub ? 'sub' : 'ita'}`;
-                                        break;
-                                    default:
-                                        bingeGroup = `${providerKey}-std`;
-                                }
+                            switch (providerKey) {
+                                case 'animeunity':
+                                case 'animeworld':
+                                case 'animesaturn':
+                                    bingeGroup = `${providerKey}-std-${isSub ? 'sub' : 'ita'}`;
+                                    break;
+                                default:
+                                    bingeGroup = `${providerKey}-std`;
                             }
                             const existingHints = (st as any).behaviorHints || {};
                             const mergedHints = { ...existingHints, bingeGroup };
-                            return { ...st, title: unifiedTitle, name: providerLabel(providerKey, isFhdOrDual), behaviorHints: mergedHints } as Stream;
+                            return { ...st, title: unifiedTitle, name: providerLabel(providerKey), behaviorHints: mergedHints } as Stream;
                         });
                     };
-                    const runProvider = async (name: string, enabled: boolean, handler: () => Promise<{ streams: Stream[] }>, streamName: string, isMixdropSensitive = false, timeoutMs: number | null = null): Promise<Stream[]> => {
+                    const runProvider = async (name: string, enabled: boolean, handler: () => Promise<{ streams: Stream[] }>, streamName: string, timeoutMs: number | null = null): Promise<Stream[]> => {
                         if (!enabled) {
                             debug(3, 'Provider', 'disabled', name);
                             return [];
@@ -613,13 +534,7 @@ function createBuilder() {
                             }
 
                             if (result && result.streams) {
-                                const prepared = result.streams.map(s => {
-                                    if (isMixdropSensitive) {
-                                        const isMixdrop = s.title ? /\b(mixdrop|streamtape)\b/i.test(s.title) : false;
-                                        return { ...s, name: isMixdrop ? streamName.replace(' 🔓', '') : streamName } as Stream;
-                                    }
-                                    return { ...s, name: streamName } as Stream;
-                                });
+                                const prepared = result.streams.map(s => ({ ...s, name: streamName } as Stream));
                                 const streams = unifyStreams(prepared, streamName);
                                 debug(2, 'Provider', 'done', { name, streams: streams.length, ms: Date.now() - startedAt });
                                 return streams;
@@ -630,18 +545,14 @@ function createBuilder() {
                         }
                         return [];
                     };
-                    const scheduleProviderRun = async (
+                    const scheduleProviderRun = (
                         name: string,
                         enabled: boolean,
                         handler: () => Promise<{ streams: Stream[] }>,
                         streamName: string,
-                        isMixdropSensitive = false,
                         timeoutMs: number | null = null
-                    ): Promise<void> => {
-                        const providerKey = reverseProviderKey(streamName);
-                        const task = runProvider(name, enabled, handler, streamName, isMixdropSensitive, timeoutMs);
-                        if (!providerTasks[providerKey]) providerTasks[providerKey] = task;
-                        providerPromises.push(task);
+                    ): void => {
+                        providerPromises.push(runProvider(name, enabled, handler, streamName, timeoutMs));
                     };
                     // AnimeUnity
                     scheduleProviderRun('AnimeUnity', animeUnityEnabled, async () => {
@@ -653,9 +564,8 @@ function createBuilder() {
                         else if (id.startsWith('tmdb:')) res = await animeUnityProvider.handleTmdbRequest(toNumericId(id), seasonNumber, episodeNumber, isMovie);
                         else if (id.startsWith('tvdb:')) res = await animeUnityProvider.handleTvdbRequest(toNumericId(id), seasonNumber, episodeNumber, isMovie);
                         else res = { streams: [] };
-                        // Uniforma pattern VixSrc: non manipolare multi-line title qui; providerLabel userà isSyntheticFhd
                         return res;
-                    }, providerLabel('animeunity'), false, 30000);  // AnimeUnity: timeout 30s
+                    }, providerLabel('animeunity'), 30000);  // AnimeUnity: timeout 30s
 
                     // AnimeSaturn
                     scheduleProviderRun('AnimeSaturn', animeSaturnEnabled, async () => {
@@ -667,7 +577,7 @@ function createBuilder() {
                         if (id.startsWith('tmdb:')) return animeSaturnProvider.handleTmdbRequest(toNumericId(id), seasonNumber, episodeNumber, isMovie);
                         if (id.startsWith('tvdb:')) return animeSaturnProvider.handleTvdbRequest(toNumericId(id), seasonNumber, episodeNumber, isMovie);
                         return { streams: [] };
-                    }, providerLabel('animesaturn'), false, 30000);  // AnimeSaturn: timeout 30s
+                    }, providerLabel('animesaturn'), 30000);  // AnimeSaturn: timeout 30s
 
                     // AnimeWorld
                     scheduleProviderRun('AnimeWorld', animeWorldEnabled, async () => {
@@ -679,7 +589,7 @@ function createBuilder() {
                         if (id.startsWith('tmdb:')) return animeWorldProvider.handleTmdbRequest(toNumericId(id), seasonNumber, episodeNumber, isMovie);
                         if (id.startsWith('tvdb:')) return animeWorldProvider.handleTvdbRequest(toNumericId(id), seasonNumber, episodeNumber, isMovie);
                         return { streams: [] };
-                    }, providerLabel('animeworld'), false, 30000);  // AnimeWorld: timeout 30s
+                    }, providerLabel('animeworld'), 30000);  // AnimeWorld: timeout 30s
 
                     const allProviderResults = await Promise.all(providerPromises);
                     for (const group of allProviderResults) {
@@ -782,13 +692,6 @@ app.use((req: Request, res: ExpressResponse, next: NextFunction) => {
                 debug(4, 'Addon', '[Base64→JSON] Configuration segment rewritten');
             }
         }
-    }
-
-    // Per le richieste di stream TV, assicurati che la configurazione proxy sia sempre presente
-    if (req.url.includes('/stream/tv/') || req.url.includes('/stream/tv%3A')) {
-        debug(2, 'Addon', '📺 TV Stream request detected');
-        // Non applicare più nessun fallback hardcoded
-        // Non loggare la configurazione: potrebbe contenere credenziali
     }
 
     // ...

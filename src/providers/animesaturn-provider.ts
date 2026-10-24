@@ -5,6 +5,7 @@ import { getDomain } from '../utils/domains.js';
 import { debug, redactUrl } from '../utils/logger.js';
 import { checkIsAnimeById, applyUniversalAnimeTitleNormalization } from '../utils/animeGate.js';
 import { buildEasyProxyHlsUrl, buildEasyProxyStreamUrl } from '../utils/easyproxy.js';
+import { episodeTag } from './animeworld-provider.js';
 import {
   buildTitleFallbackQueries,
   normalizeTitleForSearch,
@@ -500,7 +501,6 @@ function pickEpisodeEntry(
   const episode = normalizeRequestedEpisode(requestedEpisode);
   const byNum = list.find((entry) => entry.num === episode);
   if (byNum) return byNum;
-  if (episode === 1) return list[0];
   return null;
 }
 
@@ -884,36 +884,33 @@ export class AnimeSaturnProvider {
       if (embedUrl) {
         const resolved = await resolvePlaylistUrl(embedUrl);
         const mediaUrl = normalizePlayableMediaUrl(resolved, getSaturnBaseUrl());
-        if (!mediaUrl || seenMedia.has(mediaUrl)) {
-          // L'embed è una pagina HTML, non un media: meglio nessuno stream che uno rotto.
-          continue;
-        }
-        seenMedia.add(mediaUrl);
-        const finalMediaUrl = await selectHighestSaturnHls(mediaUrl, watchUrl);
-        const host = normalizeHostLabel(finalMediaUrl);
+        // L'embed è una pagina HTML, non un media: niente stream rotto. I link
+        // diretti della stessa watch page vengono comunque letti più sotto.
+        if (mediaUrl && !seenMedia.has(mediaUrl)) {
+          seenMedia.add(mediaUrl);
+          const finalMediaUrl = await selectHighestSaturnHls(mediaUrl, watchUrl);
+          const host = normalizeHostLabel(finalMediaUrl);
 
-        const sNum = seasonNumber !== undefined && seasonNumber !== null ? seasonNumber : 1;
-        const langLabel = parsedPage.sourceTag === 'ITA' ? 'ITA' : 'SUB';
-        let streamTitle = `${capitalize(baseTitle)} ▪ ${langLabel} ▪ S${sNum}`;
-        if (mediaType !== 'movie' && requestedEpisode) {
-          streamTitle += `E${requestedEpisode}`;
-        }
-        if (host) {
-          streamTitle += ` (${host})`;
-        }
+          const langLabel = parsedPage.sourceTag === 'ITA' ? 'ITA' : 'SUB';
+          let streamTitle = `${capitalize(baseTitle)} ▪ ${langLabel}`;
+          const epTag = episodeTag(seasonNumber, mediaType !== 'movie' ? requestedEpisode : null);
+          if (epTag) streamTitle += ` ▪ ${epTag}`;
+          if (host) {
+            streamTitle += ` (${host})`;
+          }
 
-        streams.push({
-          title: streamTitle,
-          url: finalMediaUrl,
-          behaviorHints: {
-            notWebReady: true,
-            headers: {
-              'User-Agent': AS_USER_AGENT,
-              Referer: watchUrl,
+          streams.push({
+            title: streamTitle,
+            url: finalMediaUrl,
+            behaviorHints: {
+              notWebReady: true,
+              headers: {
+                'User-Agent': AS_USER_AGENT,
+                Referer: watchUrl,
+              },
             },
-          },
-        });
-        continue;
+          });
+        }
       }
 
       const links = collectMediaLinksFromWatchHtml(html);
@@ -929,12 +926,10 @@ export class AnimeSaturnProvider {
         seenMedia.add(mediaUrl);
         const hostLabel = normalizeHostLabel(finalMediaUrl);
 
-        const sNum = seasonNumber !== undefined && seasonNumber !== null ? seasonNumber : 1;
         const langLabel = parsedPage.sourceTag === 'ITA' ? 'ITA' : 'SUB';
-        let streamTitle = `${capitalize(baseTitle)} ▪ ${langLabel} ▪ S${sNum}`;
-        if (mediaType !== 'movie' && requestedEpisode) {
-          streamTitle += `E${requestedEpisode}`;
-        }
+        let streamTitle = `${capitalize(baseTitle)} ▪ ${langLabel}`;
+        const epTag = episodeTag(seasonNumber, mediaType !== 'movie' ? requestedEpisode : null);
+        if (epTag) streamTitle += ` ▪ ${epTag}`;
         if (hostLabel) {
           streamTitle += ` (${hostLabel})`;
         }

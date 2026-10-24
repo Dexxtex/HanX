@@ -139,33 +139,6 @@ export async function fetchWithTimeout(
 
 
 /**
- * Come fetchResource, ma restituisce la Response grezza (status, set-cookie)
- * applicando la stessa catena proxy: piattaforma -> PROXY -> diretto.
- */
-export async function fetchResponseWithProxy(url: string, init: RequestInit = {}): Promise<Response> {
-  const { timeoutMs, ...rest } = init as RequestInit & { timeoutMs?: number };
-  const effectiveTimeout = Number(timeoutMs) || DEFAULT_FETCH_TIMEOUT;
-
-  const chain = getProxyChain(url);
-  for (const proxy of chain) {
-    debug(4, 'Fetch', 'proxy hop', { label: proxy.label, url: redactUrl(url) });
-    try {
-      return await fetchWithTimeout(url, { ...rest, agent: getProxyAgent(proxy.url) }, effectiveTimeout) as Response;
-    } catch (error) {
-      debug(3, 'Fetch', 'proxy hop failed', {
-        label: proxy.label,
-        url: redactUrl(url),
-        error: (error as any)?.message || String(error),
-      });
-      // Prova il prossimo hop.
-    }
-  }
-  if (chain.length) debug(4, 'Fetch', 'direct fallback', redactUrl(url));
-  return await fetchWithTimeout(url, { ...rest, agent: undefined }, effectiveTimeout) as Response;
-}
-
-
-/**
  * Cached, deduplicated fetch.
  * Ported 1:1 from easystreams fetchResource():
  * - Checks TTL cache first

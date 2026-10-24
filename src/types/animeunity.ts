@@ -9,26 +9,6 @@ export interface AnimeUnityConfig {
   animeunityProxy?: boolean;     // Proxy (cross-IP, tutto via EasyProxy)
 }
 
-export interface AnimeUnityResult {
-  id: number;
-  slug: string;
-  name: string;
-  episodes_count: number;
-  language_type: 'Original' | 'Italian Dub' | 'Italian Sub';
-}
-
-export interface AnimeUnityEpisode {
-  id: number;
-  number: number;
-  name: string;
-}
-
-export interface StreamData {
-  embed_url?: string;
-  mp4_url?: string;
-  episode_page?: string;
-}
-
 // ✅ AGGIUNTO: Export mancante
 export interface StreamForStremio {
   title: string;
@@ -54,12 +34,6 @@ export interface AnimeSaturnResult {
   url: string;
 }
 
-export interface AnimeSaturnEpisode {
-  title: string;
-  url: string;
-}
-
-// === AnimeWorld ===
 export interface AnimeWorldConfig {
   proxyUrl: string;
   proxyPassword: string;

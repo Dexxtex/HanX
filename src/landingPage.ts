@@ -975,8 +975,7 @@ const CLIENT_SCRIPT = String.raw`
             getElement(key).value = typeof defaults[key] === 'string' ? defaults[key] : '';
         });
 
-        if (toBoolean(defaults.easyProxyMaster, false)
-            || getElement('easyProxyUrl').value.trim()) {
+        if (getElement('easyProxyUrl').value.trim()) {
             mode = 'proxy';
             if (!hasDefault('animeunityDirect')) {
                 getElement('animeunityDirect').checked = false;

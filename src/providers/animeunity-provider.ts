@@ -1,6 +1,7 @@
 import { getDomain } from '../utils/domains.js';
 import { debug, redactUrl } from '../utils/logger.js';
 import { buildEasyProxyHlsUrl, buildEasyProxyStreamUrl } from '../utils/easyproxy.js';
+import { episodeTag } from './animeworld-provider.js';
 import {
   decodeHtmlAttribute,
   parseEpisodesFromAnimeHtml,
@@ -654,7 +655,6 @@ export class AnimeUnityProvider {
     const selected = pickEpisodeEntry(normalizedEpisodes, requestedEpisode, isMovie ? 'movie' : 'tv');
     if (!selected?.episodeId) return [];
 
-    const sNum = seasonNumber || 1;
     const resolvedEpisodeNum = parsePositiveInt(selected.num) || requestedEpisode;
     const preferMp4 = /^(1|true|on)$/i.test(String(process.env.ANIMEUNITY_PREFER_MP4 || process.env.ANIME_MP4_FALLBACK || '0'));
 
@@ -685,8 +685,7 @@ export class AnimeUnityProvider {
       if (!streamResult.hls_url && !streamResult.mp4_url && !streamResult.embed_url) continue;
 
       const langLabel = language === 'dub' ? 'ITA' : 'SUB';
-      let baseTitle = `${capitalize(displayTitle)} ▪ ${langLabel} ▪ S${sNum}`;
-      if (resolvedEpisodeNum) baseTitle += `E${resolvedEpisodeNum}`;
+      let baseTitle = `${capitalize(displayTitle)} ▪ ${langLabel} ▪ ${episodeTag(seasonNumber, resolvedEpisodeNum)}`;
 
       if (directWanted) {
         if (streamResult.hls_url) pushStream(streamResult.hls_url, baseTitle + ' (HLS)');

@@ -5,6 +5,18 @@
  * URL handling, title sanitization, and concurrency control.
  */
 
+// ─── Errors ────────────────────────────────────────────────
+
+/**
+ * True per gli errori di abort/timeout di fetch e undici (AbortError,
+ * TimeoutError, "operation timed out", ...). Usato dai provider per
+ * distinguere un timeout da un errore definitivo.
+ */
+export function isAbortOrTimeoutError(err: unknown): boolean {
+  const e = err as { name?: unknown; message?: unknown } | null | undefined;
+  return /timeout|abort/i.test(`${e?.name || ''} ${e?.message || ''}`);
+}
+
 // ─── Numeric helpers ────────────────────────────────────────
 
 /**
@@ -182,39 +194,6 @@ export function normalizeHostLabel(url: string): string | null {
   } catch {
     return null;
   }
-}
-
-// ─── Concurrency ────────────────────────────────────────────
-
-/**
- * Execute async tasks with limited concurrency.
- * Ported 1:1 from easystreams mapLimit().
- */
-export async function mapLimit<T, R>(
-  values: T[],
-  limit: number,
-  mapper: (value: T, index: number) => Promise<R>
-): Promise<R[]> {
-  if (!Array.isArray(values) || values.length === 0) return [];
-  const concurrency = Math.max(1, Math.min(limit, values.length));
-  const output: R[] = new Array(values.length);
-  let cursor = 0;
-
-  async function worker(): Promise<void> {
-    while (cursor < values.length) {
-      const current = cursor;
-      cursor += 1;
-      try {
-        output[current] = await mapper(values[current], current);
-      } catch (error: any) {
-        output[current] = [] as any;
-        console.error('[mapLimit] task failed:', error.message);
-      }
-    }
-  }
-
-  await Promise.all(Array.from({ length: concurrency }, () => worker()));
-  return output;
 }
 
 // ─── Episode list helpers ───────────────────────────────────

@@ -443,8 +443,11 @@ async function getTmdbEpisode(
   else if (request.provider === 'imdb') tmdbId = await getTmdbIdFromImdbId(request.id, tmdbKey, 'tv');
   if (!tmdbId) return null;
 
-  const json = await fetchJson<any>(
-    `${TMDB_API}/tv/${encodeURIComponent(tmdbId)}/season/${request.season}?api_key=${tmdbKey}`
+  const json = await cached(
+    `tmdb:season:${createHash('sha256').update(tmdbKey).digest('hex').slice(0, 16)}:${tmdbId}:${request.season}`,
+    () => fetchJson<any>(
+      `${TMDB_API}/tv/${encodeURIComponent(tmdbId)}/season/${request.season}?api_key=${tmdbKey}`
+    )
   );
   const episode = Array.isArray(json?.episodes)
     ? json.episodes.find((item: any) => Number(item?.episode_number) === request.episode)
