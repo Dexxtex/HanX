@@ -109,17 +109,26 @@ L'indice viene **costruito a piccoli passi** e cresce a ogni giro. Ogni run conv
 docker exec HanX node scripts/build-anime-mapping.mjs --limit=200
 ```
 
-Il cursore e l'esito di ogni entry stanno in `data/jikan-progress.json` (volume `hanx-data`): un run successivo riprende da lì, salta ciò che è già fatto e non richiede la cache di GitHub. Con `--limit=200` due volte al giorno il catalogo TV + film (~15.000 entry) è coperto in poche settimane; `--limit=0` converte tutto in un colpo.
+Il cursore e l'esito di ogni entry stanno in `data/jikan-progress.json` (volume `hanx-data`): un run successivo riprende da lì e salta ciò che è già fatto. L'obiettivo è **una passata completa** (~14.000 entry TV + film): si lancia `--limit=0` (o si ripetono i batch finché `--status` non arriva a 100%), poi si smette. Le uscite nuove di MAL hanno id più alti e finiscono in fondo al catalogo: un `--limit=0` saltuario le prende senza rifare nulla. Il resto lo coprono già Tenrai (metadati MAL) e la risoluzione live.
 
 | Comando | Effetto |
 |---|---|
 | `--limit=N` | converti N entry nuove in questo run (default 200) |
 | `--limit=0` | tutto il catalogo rimanente |
 | `--type=tv` / `--type=movie` | limita il batch a un solo tipo (senza flag: prima TV, poi film) |
+| `--status` | percentuale per tipo + riepilogo del registro, senza scrivere nulla |
 | `--publish` | al termine pubblica l'indice come asset della release (`GITHUB_TOKEN`) |
 | `--retry-error` | riprova le entry finite in errore (es. chiave sbagliata) |
 | `--reset` | ignora indice e cursore esistenti |
 | `--check` | valida il JSON senza rete |
+
+Esempio di stato:
+
+```
+tv     8738/8738 (100%)
+movie  5099/5099 (100%)
+registro: 13837 entry (ok 11200, already 1500, no-tmdb 900, no-kitsu 200, error 37)
+```
 
 Esiti registrati per entry: `ok`, `already` (split cour già coperto), `no-kitsu`, `no-tmdb`, `no-tvdb`, `no-align`, `error`. Gli scarti non bloccano nulla: restano risolti al volo a runtime.
 

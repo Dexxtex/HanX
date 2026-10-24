@@ -6,7 +6,7 @@
  *
  * Usage:
  *   node scripts/build-anime-mapping.mjs [--limit=N] [--type=tv|movie] [--publish]
- *                                        [--reset] [--retry-error] [--check]
+ *                                        [--status] [--reset] [--retry-error] [--check]
  *
  * Each run converts the next N catalog entries (default 200) and merges them
  * into the existing index, so the map grows a little at a time.
@@ -41,6 +41,7 @@ const JIKAN_PAGE_SIZE = 25;
 
 const args = process.argv.slice(2);
 const checkOnly = args.includes('--check');
+const statusOnly = args.includes('--status');
 const reset = args.includes('--reset');
 const retryError = args.includes('--retry-error');
 const publish = args.includes('--publish');
@@ -201,6 +202,23 @@ if (isDirectRun && checkOnly) {
   process.exit(0);
 }
 
+if (isDirectRun && statusOnly) {
+  const state = readJson(stateFile) || {};
+  state.cursor = state.cursor || {};
+  for (const type of ['tv', 'movie']) {
+    const total = await jikanTotal(type);
+    const cursor = state.cursor[type];
+    const consumed = cursor ? (cursor.page - 1) * JIKAN_PAGE_SIZE + cursor.pos : 0;
+    const pct = total > 0 ? Math.min(100, Math.round((consumed / total) * 100)) : 0;
+    console.log(`${type.padEnd(6)} ${consumed}/${total} (${pct}%)`);
+  }
+  const records = Object.values(state.done || {});
+  const byStatus = {};
+  for (const record of records) byStatus[record?.status || '?'] = (byStatus[record?.status || '?'] || 0) + 1;
+  console.log(`registro: ${records.length} entry (${Object.entries(byStatus).map(([s, c]) => `${s} ${c}`).join(', ') || 'vuoto'})`);
+  process.exit(0);
+}
+
 const tmdbKey = String(process.env.TMDB_API_KEY || '').trim();
 const tvdbKey = String(process.env.TVDB_API_KEY || '').trim();
 const tvdbPin = String(process.env.TVDB_PIN || '').trim();
@@ -286,6 +304,11 @@ function jikanPageUrl(type, page) {
 async function jikanPage(type, page) {
   const json = await fetchJson(jikanPageUrl(type, page), {}, false);
   return Array.isArray(json?.data) ? json.data : [];
+}
+
+async function jikanTotal(type) {
+  const json = await fetchJson(`${JIKAN_API}/anime?order_by=mal_id&sort=asc&type=${type}&page=1&limit=1`, {}, false);
+  return Number(json?.pagination?.items?.total) || 0;
 }
 
 /** Kitsu official myanimelist/anime mapping: one request per MAL id. */
@@ -649,7 +672,10 @@ async function main() {
     state.cursor[type] = cursor;
     for (;;) {
       const entries = await jikanPage(type, cursor.page);
-      if (entries.length === 0) break;
+      if (entries.length === 0) {
+        console.log(`  catalogo ${type} completato (ultima pagina ${cursor.page - 1})`);
+        break;
+      }
       for (; cursor.pos < entries.length; cursor.pos += 1) {
         if (processed >= limit) break outer;
         const entry = entries[cursor.pos];
