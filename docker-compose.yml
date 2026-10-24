@@ -15,6 +15,10 @@ services:
       - hanx-data:/app/data
     environment:
       - PORT=7000
+      # Mapping incrementale: Jikan locale + file indice/cursore nel volume.
+      - JIKAN_API_BASE=${JIKAN_API_BASE:-http://jikan_rest:8080/v4}
+      - ANIME_MAPPING_FILE=/app/data/anime-seasons.json
+      - ANIME_MAPPING_STATE=/app/data/jikan-progress.json
       # Explicit mappings also carry Dockhand secrets, which are injected
       # into the compose process environment but not written to a file.
       - TMDB_API_KEY=${TMDB_API_KEY:-}

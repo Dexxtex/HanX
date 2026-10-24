@@ -1,0 +1,16 @@
+# Overlay opzionale: dà al container HanX accesso al Jikan self-hosted che gira
+# in un'altra stack Docker (rete "jikan_default").
+#
+#   docker compose -f docker-compose.yml -f docker-compose.jikan.yml up -d
+#
+# Se Jikan è già sulla stessa rete di HanX, questo file non serve.
+services:
+  hanx:
+    networks:
+      - default
+      - jikan
+
+networks:
+  jikan:
+    external: true
+    name: ${JIKAN_NETWORK:-jikan_default}

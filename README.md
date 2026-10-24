@@ -93,40 +93,70 @@ La landing page permette anche di inserire TMDB API Key, TVDB API Key e TVDB PIN
 
 Le variabili d'ambiente che hanno un campo corrispondente nel manifest (`TMDB_API_KEY`, `TVDB_API_KEY`, `TVDB_PIN`, `EASYPROXY_URL`, `EASYPROXY_PASSWORD`) precompilano la landing page e finiscono nel link generato. Non vengono aggiunte ai default del manifest pubblico. In self-host ogni istanza usa il proprio `.env`, quindi le chiavi precompilate sono quelle dell'utente che controlla quell'istanza. Se esponi la landing su Internet, proteggila con autenticazione.
 
-### Mapping anime (solo fonti ufficiali)
+### Mapping anime (fonti ufficiali + Jikan locale)
 
 Il livello `src/mapping/` risolve gli ID esterni verso una entry Kitsu usando esclusivamente API ufficiali:
 
-- **Kitsu** (pubblico) per titoli, date di inizio e relazioni `sequel`/`prequel` (split cour/parti)
-- **TMDB** per gli external ID e i film
-- **TVDB v4** in **aired order** (`/episodes/default`) per serie e stagioni
+- **Jikan** (la tua istanza self-hosted) come catalogo: quali anime esistono, titoli MAL, tipo e anno
+- **Kitsu** (pubblico) per il collegamento MAL → Kitsu (`myanimelist/anime`) e per le relazioni `sequel`/`prequel` (split cour/parti)
+- **TMDB** per trovare l'entry TMDB (titolo + anno) e da lì gli ID IMDb/TVDB
+- **TVDB v4** in **aired order** (`/episodes/default`) per l'ordine episodi delle serie
 
-L'indice locale `src/mapping/data/anime-seasons.json` viene caricato una volta e usato senza rete; ogni range contiene il titolo della entry Kitsu e il conteggio episodi, così split cour e richieste fuori range non finiscono sull'episodio sbagliato. In caso di miss, il resolver può interrogare le API ufficiali (con cache in memoria e retry su 429/5xx). I provider non usano più un resolver di path esterni: risolvono `{ titolo, stagione, episodio Kitsu }` e cercano per titolo. L'indice generato copre le serie; i film vengono risolti al volo via TMDB/IMDb + ricerca Kitsu (Kitsu non espone mapping TMDB/IMDb per i film).
-
-> **L'indice spedito è vuoto.** Il mapping multi-stagione/split-cour richiede un indice generato (`pnpm mapping:build`) oppure entrambe le chiavi `TMDB_API_KEY` e `TVDB_API_KEY` per il fallback live. Senza di esse restano disponibili solo Kitsu e le ricerche per titolo; le richieste di stagioni successive non vengono forzate sul titolo base.
-
-```bash
-# richiede TMDB_API_KEY e TVDB_API_KEY
-pnpm mapping:build            # rigenera l'indice (cache in .cache/anime-mapping/)
-pnpm mapping:build -- --limit=50
-pnpm mapping:check            # valida il JSON senza rete (avvisa se l'indice è vuoto)
-pnpm mapping:verify           # check + test del mapping
-```
-
-#### Aggiornamento automatico
-
-Il workflow `.github/workflows/anime-mapping.yml` rigenera l'indice ogni lunedì (o a
-mano da *Actions → Anime mapping → Run workflow*) e lo pubblica come asset della
-release `mapping`. Per consumarlo basta una variabile:
+L'indice viene **costruito a piccoli passi** e cresce a ogni giro. Ogni run converte le prossime N entry del catalogo Jikan, le unisce all'indice esistente e salva il punto in cui è arrivato:
 
 ```bash
-ANIME_MAPPING_URL=https://github.com/Dexxtex/HanX/releases/download/mapping/anime-seasons.json
+# una volta: Jikan raggiungibile e chiavi TMDB/TVDB presenti
+docker exec HanX node scripts/build-anime-mapping.mjs --limit=200
 ```
 
-Al primo avvio l'addon scarica l'indice in `data/anime-seasons.json` e lo ricontrolla
-ogni 24h con ETag. Se il download fallisce o il payload non è valido resta l'indice
-precedente (o quello nell'immagine): nessun avvio bloccato, nessuno stream perso.
-Senza `ANIME_MAPPING_URL` il comportamento è identico a prima.
+Il cursore e l'esito di ogni entry stanno in `data/jikan-progress.json` (volume `hanx-data`): un run successivo riprende da lì, salta ciò che è già fatto e non richiede la cache di GitHub. Con `--limit=200` due volte al giorno il catalogo TV + film (~15.000 entry) è coperto in poche settimane; `--limit=0` converte tutto in un colpo.
+
+| Comando | Effetto |
+|---|---|
+| `--limit=N` | converti N entry nuove in questo run (default 200) |
+| `--limit=0` | tutto il catalogo rimanente |
+| `--retry-error` | riprova le entry finite in errore (es. chiave sbagliata) |
+| `--reset` | ignora indice e cursore esistenti |
+| `--check` | valida il JSON senza rete |
+
+Esiti registrati per entry: `ok`, `already` (split cour già coperto), `no-kitsu`, `no-tmdb`, `no-tvdb`, `no-align`, `error`. Gli scarti non bloccano nulla: restano risolti al volo a runtime.
+
+L'indice locale `src/mapping/data/anime-seasons.json` (o il percorso in `ANIME_MAPPING_FILE`) viene caricato una volta e usato senza rete; ogni range contiene il titolo della entry Kitsu e il conteggio episodi, così split cour e richieste fuori range non finiscono sull'episodio sbagliato. In caso di miss, il resolver può interrogare le API ufficiali (con cache in memoria e retry su 429/5xx). I provider non usano più un resolver di path esterni: risolvono `{ titolo, stagione, episodio Kitsu }` e cercano per titolo.
+
+> **L'indice spedito è vuoto.** Il mapping multi-stagione/split-cour richiede l'indice incrementale qui sopra oppure entrambe le chiavi `TMDB_API_KEY` e `TVDB_API_KEY` per il fallback live.
+
+#### Dove gira
+
+Il converter deve raggiungere la tua istanza Jikan, quindi gira **sul server**, non su GitHub Actions. Nel container:
+
+```yaml
+environment:
+  - JIKAN_API_BASE=http://jikan_rest:8080/v4
+  - ANIME_MAPPING_FILE=/app/data/anime-seasons.json
+  - ANIME_MAPPING_STATE=/app/data/jikan-progress.json
+```
+
+Se Jikan è in un'altra stack Docker, aggiungi la sua rete al servizio (una volta):
+
+```yaml
+services:
+  hanx:
+    networks: [default, jikan]
+networks:
+  jikan:
+    external: true
+    name: jikan_default
+```
+
+Poi i batch si lanciano dalla shell di Dockhand:
+
+```bash
+docker exec HanX node scripts/build-anime-mapping.mjs --limit=200
+```
+
+L'addon ricarica l'indice quando il file cambia (mtime): nessun riavvio necessario.
+Se preferisci l'asset di una release, `ANIME_MAPPING_URL` continua a funzionare come prima:
+il workflow GitHub è stato rimosso perché da un runner non può raggiungere un Jikan locale.
 
 EasyProxy resta un servizio esterno all'addon: avvialo, poi inserisci URL e password API nella configurazione web.
 

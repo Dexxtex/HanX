@@ -51,6 +51,8 @@ COPY --from=builder --chown=appuser:nodejs /app/package.json ./package.json
 COPY --from=builder --chown=appuser:nodejs /app/addon-config.json ./addon-config.json
 COPY --from=builder --chown=appuser:nodejs /app/config ./config
 COPY --from=builder --chown=appuser:nodejs /app/public ./public
+# Converter incrementale del mapping (gira a mano: docker exec HanX node ...).
+COPY --from=builder --chown=appuser:nodejs /app/scripts ./scripts
 
 # Switcha a utente non-root
 USER appuser

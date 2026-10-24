@@ -1,13 +1,20 @@
 #!/usr/bin/env node
 /**
- * Builds src/mapping/data/anime-seasons.json using official APIs only:
- * Kitsu mapping/resources, TVDB v4 (aired/default order) and TMDB.
+ * Builds the anime mapping index incrementally from a local Jikan instance:
+ * Jikan catalog (MAL) -> Kitsu id (official myanimelist/anime mapping) ->
+ * TMDB (title + year) -> IMDb/TVDB ids -> TVDB episode order.
  *
  * Usage:
- *   node scripts/build-anime-mapping.mjs [--limit=N] [--check]
+ *   node scripts/build-anime-mapping.mjs [--limit=N] [--reset] [--retry-error] [--check]
  *
- * Requires TMDB_API_KEY and TVDB_API_KEY in the environment for a full build.
- * Raw API responses are cached under .cache/anime-mapping/ (gitignored).
+ * Each run converts the next N catalog entries (default 200) and merges them
+ * into the existing index, so the map grows a little at a time.
+ *
+ * Env: JIKAN_API_BASE      Jikan v4 base (default http://jikan_rest:8080/v4)
+ *      TMDB_API_KEY        required
+ *      TVDB_API_KEY        required for series (TVDB_PIN optional)
+ *      ANIME_MAPPING_FILE  output index (default src/mapping/data/anime-seasons.json)
+ *      ANIME_MAPPING_STATE progress ledger (default data/jikan-progress.json)
  */
 
 import fs from 'node:fs';
@@ -20,17 +27,31 @@ const root = path.resolve(__dirname, '..');
 const isDirectRun = Boolean(process.argv[1]) && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 const dataFile = path.join(root, 'src', 'mapping', 'data', 'anime-seasons.json');
 const overridesFile = path.join(root, 'src', 'mapping', 'overrides.json');
-const cacheDir = path.join(root, '.cache', 'anime-mapping');
 
 const KITSU = 'https://kitsu.io/api/edge';
 const TMDB = 'https://api.themoviedb.org/3';
 const TVDB = 'https://api4.thetvdb.com/v4';
+const JIKAN_API = String(process.env.JIKAN_API_BASE || 'http://jikan_rest:8080/v4').replace(/\/+$/, '');
 const SCHEMA_VERSION = 1;
+const JIKAN_PAGE_SIZE = 25;
 
 const args = process.argv.slice(2);
 const checkOnly = args.includes('--check');
+const reset = args.includes('--reset');
+const retryError = args.includes('--retry-error');
 const limitArg = args.find((arg) => arg.startsWith('--limit='));
-const limit = limitArg ? Number.parseInt(limitArg.split('=')[1], 10) : Infinity;
+const parsedLimit = limitArg ? Number.parseInt(limitArg.split('=')[1], 10) : 200;
+// 0 (o un valore non numerico) significa "tutto il catalogo in un colpo".
+const limit = parsedLimit > 0 ? parsedLimit : Infinity;
+
+const outputFile = process.env.ANIME_MAPPING_FILE
+  ? path.resolve(process.env.ANIME_MAPPING_FILE)
+  : dataFile;
+const stateFile = process.env.ANIME_MAPPING_STATE
+  ? path.resolve(process.env.ANIME_MAPPING_STATE)
+  : path.join(root, 'data', 'jikan-progress.json');
+// Next to the ledger: /app/.cache is not writable in the container.
+const cacheDir = path.join(path.dirname(stateFile), '.cache', 'anime-mapping');
 
 function readJson(file) {
   try {
@@ -78,8 +99,13 @@ async function fetchJson(url, init, useCache = true) {
       if (response.ok) {
         const value = await response.json();
         if (useCache) {
-          fs.mkdirSync(cacheDir, { recursive: true });
-          fs.writeFileSync(file, JSON.stringify(value));
+          // A read-only cache dir must not break the build.
+          try {
+            fs.mkdirSync(cacheDir, { recursive: true });
+            fs.writeFileSync(file, JSON.stringify(value));
+          } catch {
+            // ignore
+          }
         }
         return value;
       }
@@ -94,19 +120,6 @@ async function fetchJson(url, init, useCache = true) {
     if (attempt < 3) await sleep(waitMs);
   }
   throw lastError instanceof Error ? lastError : new Error(String(lastError));
-}
-
-async function runPool(items, concurrency, worker) {
-  const results = [];
-  let cursor = 0;
-  const runners = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
-    while (cursor < items.length) {
-      const index = cursor++;
-      results[index] = await worker(items[index], index);
-    }
-  });
-  await Promise.all(runners);
-  return results;
 }
 
 function validateIndex(index) {
@@ -161,19 +174,19 @@ function applyOverrides(index, overrides) {
 }
 
 if (isDirectRun && checkOnly) {
-  const index = readJson(dataFile);
+  const index = readJson(outputFile);
   const errors = validateIndex(index);
   if (errors.length > 0) {
-    console.error('X ' + dataFile);
+    console.error('X ' + outputFile);
     for (const error of errors) console.error('  - ' + error);
     process.exit(1);
   }
   const seriesCount = Object.keys(index.series).length;
   const movieCount = Object.keys(index.movies).length;
   if (seriesCount === 0 && movieCount === 0) {
-    console.warn('! mapping index is EMPTY (' + dataFile + ').');
+    console.warn('! mapping index is EMPTY (' + outputFile + ').');
     console.warn('  Only live official resolution works; multi-season/split-cour needs a built index.');
-    console.warn('  Set TMDB_API_KEY and TVDB_API_KEY then run: pnpm mapping:build');
+    console.warn('  Run: docker exec HanX node scripts/build-anime-mapping.mjs --limit=200');
     process.exit(0);
   }
   console.log('OK mapping index valid (' + seriesCount + ' series, ' + movieCount + ' movies)');
@@ -228,11 +241,6 @@ function kitsuEntry(resource) {
   };
 }
 
-async function getKitsuAnime(id) {
-  const json = await fetchJson(`${KITSU}/anime/${id}`);
-  return kitsuEntry(json?.data);
-}
-
 export async function getKitsuRelations(id) {
   const json = await fetchJson(`${KITSU}/anime/${id}?include=mediaRelationships.destination`);
   const entry = kitsuEntry(json?.data);
@@ -263,29 +271,108 @@ async function collectEntries(seed) {
   return [...byId.values()].sort((a, b) => (a.startDate || '').localeCompare(b.startDate || ''));
 }
 
-async function* kitsuMappingsPage(externalSite, pageLimit = 20) {
-  let offset = 0;
-  while (offset < limit * pageLimit || limit === Infinity) {
-    const url =
-      `${KITSU}/mappings?filter[externalSite]=${encodeURIComponent(externalSite)}` +
-      `&page[limit]=${pageLimit}&page[offset]=${offset}&include=item`;
-    const json = await fetchJson(url);
-    const data = Array.isArray(json?.data) ? json.data : [];
-    if (data.length === 0) return;
-    const included = new Map();
-    for (const resource of json?.included || []) {
-      const entry = kitsuEntry(resource);
-      if (entry) included.set(entry.id, entry);
-    }
-    for (const mapping of data) {
-      const tvdbId = mapping?.attributes?.externalId;
-      const itemId = mapping?.relationships?.item?.data?.id;
-      if (!tvdbId || !itemId) continue;
-      yield { externalId: String(tvdbId), itemId: String(itemId), included: included.get(String(itemId)) || null };
-    }
-    if (data.length < pageLimit) return;
-    offset += pageLimit;
+function jikanPageUrl(type, page) {
+  return `${JIKAN_API}/anime?order_by=mal_id&sort=asc&type=${type}&page=${page}&limit=${JIKAN_PAGE_SIZE}`;
+}
+
+async function jikanPage(type, page) {
+  const json = await fetchJson(jikanPageUrl(type, page), {}, false);
+  return Array.isArray(json?.data) ? json.data : [];
+}
+
+/** Kitsu official myanimelist/anime mapping: one request per MAL id. */
+async function kitsuIdForMal(malId) {
+  const url =
+    `${KITSU}/mappings?filter[externalSite]=myanimelist%2Fanime` +
+    `&filter[externalId]=${encodeURIComponent(malId)}&include=item&page[limit]=1`;
+  const json = await fetchJson(url);
+  const id = json?.data?.[0]?.relationships?.item?.data?.id;
+  return id ? String(id) : null;
+}
+
+function yearOf(value) {
+  const year = Number.parseInt(String(value || '').slice(0, 4), 10);
+  return Number.isFinite(year) && year > 1900 ? year : null;
+}
+
+/** TMDB search terms for a Jikan catalog entry (MAL titles are Japanese-first). */
+export function tmdbQuery(entry) {
+  const kind = String(entry?.type || '').toLowerCase() === 'movie' ? 'movie' : 'tv';
+  return {
+    kind,
+    query: String(entry?.title_english || entry?.title || '').trim(),
+    year: yearOf(entry?.aired?.from),
+  };
+}
+
+/**
+ * First Japanese result within one year of the MAL start date. Taking the
+ * top hit without these two filters picks live-action remakes and OVAs.
+ */
+export function pickTmdbResult(results, year) {
+  if (!Array.isArray(results) || results.length === 0) return null;
+  const japanese = results.filter((item) => item?.original_language === 'ja');
+  const pool = japanese.length > 0 ? japanese : results;
+  if (!year) return pool[0] || null;
+  return (
+    pool.find((item) => {
+      const resultYear = yearOf(item.first_air_date || item.release_date);
+      return resultYear !== null && Math.abs(resultYear - year) <= 1;
+    }) || null
+  );
+}
+
+async function findTmdb({ kind, query, year }) {
+  if (!query) return null;
+  const path = kind === 'movie' ? 'search/movie' : 'search/tv';
+  const search = async (withYear) => {
+    const params = new URLSearchParams({ query, api_key: tmdbKey });
+    if (withYear && year) params.set(kind === 'movie' ? 'year' : 'first_air_date_year', String(year));
+    const json = await fetchJson(`${TMDB}/${path}?${params}`);
+    return pickTmdbResult(json?.results, withYear ? year : null);
+  };
+  // A wrong/unknown MAL start year would hide a real match, so retry bare once.
+  return (await search(true)) || (year ? await search(false) : null);
+}
+
+async function tmdbExternalIds(kind, id) {
+  return await fetchJson(`${TMDB}/${kind}/${id}/external_ids?api_key=${encodeURIComponent(tmdbKey)}`);
+}
+
+/** Converts one catalog entry into index keys; returns the ledger record. */
+async function convertCatalogEntry(entry, index) {
+  const at = new Date().toISOString().slice(0, 10);
+  const title = String(entry?.title_english || entry?.title || '');
+
+  const kitsuId = await kitsuIdForMal(entry.mal_id);
+  if (!kitsuId) return { at, status: 'no-kitsu' };
+
+  const query = tmdbQuery(entry);
+  const tmdb = await findTmdb(query);
+  if (!tmdb?.id) return { at, status: 'no-tmdb', kitsuId };
+
+  const external = await tmdbExternalIds(query.kind, tmdb.id);
+  const imdbId = external?.imdb_id || '';
+  const record = { at, kitsuId, tmdbId: String(tmdb.id), tmdbTitle: tmdb.name || tmdb.title || '' };
+
+  if (query.kind === 'movie') {
+    index.movies[`tmdb:${tmdb.id}`] = { kitsuId, title };
+    if (imdbId) index.movies[`imdb:${imdbId}`] = { kitsuId, title };
+    return { ...record, status: 'ok' };
   }
+
+  // TMDB gives the TVDB id for series; without it there is no episode order.
+  const tvdbId = external?.tvdb_id ? String(external.tvdb_id) : '';
+  if (!tvdbId) return { ...record, status: 'no-tvdb' };
+  // Split-cour entries share the TVDB series: the first one already mapped it.
+  if (index.series[`tvdb:${tvdbId}`]) return { ...record, status: 'already' };
+
+  const result = await buildSeriesSeed({ kitsuId, tvdbId, tmdbId: String(tmdb.id) });
+  if (!result) return { ...record, status: 'no-align' };
+  for (const [key, value] of Object.entries(result.series)) {
+    mergeSeries(index.series, key, value.title, value.seasons);
+  }
+  return { ...record, status: 'ok' };
 }
 
 async function getTvdbSeries(tvdbId) {
@@ -317,11 +404,6 @@ async function getTvdbEpisodes(tvdbId) {
     if (!json?.links?.next && added === 0) break;
   }
   return episodes;
-}
-
-async function findTmdbTv(tvdbId) {
-  const json = await fetchJson(`${TMDB}/find/${tvdbId}?api_key=${tmdbKey}&external_source=tvdb_id`);
-  return json?.tv_results?.[0] || null;
 }
 
 async function getTmdbTvDetails(tmdbId) {
@@ -462,14 +544,13 @@ function mergeSeries(target, key, title, seasons) {
 }
 
 async function buildSeriesSeed(seed) {
-  const tvdbId = seed.externalId;
+  const tvdbId = seed.tvdbId;
   const tvdbSeries = await getTvdbSeries(tvdbId);
   if (!tvdbSeries) return null;
 
-  const seedAnime = seed.included || (await getKitsuAnime(seed.itemId));
-  if (!seedAnime) return null;
-
-  const entries = await collectEntries(seedAnime);
+  // collectEntries fetches the seed entry itself, so no separate lookup.
+  const entries = await collectEntries({ id: seed.kitsuId });
+  if (entries.length === 0) return null;
   const tvdbEpisodes = await getTvdbEpisodes(tvdbId);
   if (tvdbEpisodes.length === 0) return null;
   const assignment = alignEntries(tvdbEpisodes, entries);
@@ -487,12 +568,11 @@ async function buildSeriesSeed(seed) {
   const result = {
     title: tvdbSeries.name || entries[0]?.title || '',
     series: {},
-    movies: {},
   };
   mergeSeries(result.series, `tvdb:${tvdbId}`, result.title, tvdbRanges);
 
-  // IMDb key via TMDB external ids.
-  const tmdbTv = await findTmdbTv(tvdbId);
+  // IMDb key via TMDB external ids (TMDB already gave us the id).
+  const tmdbTv = { id: seed.tmdbId };
   if (!tmdbTv?.id) return result;
 
   const tmdbDetails = await getTmdbTvDetails(tmdbTv.id);
@@ -524,72 +604,85 @@ async function buildSeriesSeed(seed) {
     mergeSeries(result.series, `tmdb:${tmdbTv.id}`, result.title, rangesFrom(tmdbEntries));
   }
 
-  // Movies found while traversing split-cour relationships.
-  for (const entry of entries.filter((item) => item.subtype === 'movie')) {
-    const mappings = await fetchJson(`${KITSU}/anime/${entry.id}/mappings`);
-    for (const mapping of mappings?.data || []) {
-      const site = mapping?.attributes?.externalSite;
-      const externalId = mapping?.attributes?.externalId;
-      if (!externalId) continue;
-      if (site === 'themoviedb/movie') result.movies[`tmdb:${externalId}`] = { kitsuId: entry.id, title: entry.title };
-      if (site === 'imdb/movie') result.movies[`imdb:${externalId}`] = { kitsuId: entry.id, title: entry.title };
-    }
-  }
-
   return result;
 }
 
 async function main() {
+  const existing = reset ? null : readJson(outputFile);
   const index = {
     version: SCHEMA_VERSION,
     generatedAt: new Date().toISOString(),
-    series: {},
-    movies: {},
+    series: { ...(existing?.series || {}) },
+    movies: { ...(existing?.movies || {}) },
   };
 
-  const seriesSeeds = [];
-  for await (const seed of kitsuMappingsPage('thetvdb/series')) {
-    if (seriesSeeds.length >= limit) break;
-    seriesSeeds.push(seed);
-  }
-  console.log(`Kitsu TVDB series seeds: ${seriesSeeds.length}${limit === Infinity ? '' : ` (limit ${limit})`}`);
-
-  const stats = { ok: 0, notFound: 0, skipped: 0 };
-  const seriesResults = await runPool(seriesSeeds, 4, async (seed) => {
-    try {
-      const result = await buildSeriesSeed(seed);
-      if (result) stats.ok += 1;
-      else stats.skipped += 1;
-      return result;
-    } catch (error) {
-      // 404 = mapping Kitsu stantio (serie rimossa da TVDB o entry Kitsu
-      // cancellata): il seed si salta, non è un errore del build.
-      if (/HTTP 404/.test(error.message)) stats.notFound += 1;
-      else stats.skipped += 1;
-      console.error(`  ! series seed ${seed.externalId}: ${error.message}`);
-      return null;
+  const state = reset ? {} : readJson(stateFile) || {};
+  state.done = state.done || {};
+  state.cursor = state.cursor || {};
+  if (retryError) {
+    for (const [malId, record] of Object.entries(state.done)) {
+      if (record?.status === 'error') delete state.done[malId];
     }
-  });
-  for (const result of seriesResults) {
-    if (!result) continue;
-    for (const [key, value] of Object.entries(result.series)) mergeSeries(index.series, key, value.title, value.seasons);
-    Object.assign(index.movies, result.movies);
+    // Rewind: the cursor has already moved past the failed entries.
+    state.cursor = {};
   }
 
-  // Kitsu has no TMDB/IMDb movie mappings. Movies are resolved live at request
-  // time via TMDB/IMDb + Kitsu search (see src/mapping/live.ts).
+  const persist = () => {
+    index.generatedAt = new Date().toISOString();
+    writeJsonAtomic(outputFile, index);
+    writeJsonAtomic(stateFile, state);
+  };
+
+  const stats = {};
+  let processed = 0;
+
+  outer: for (const type of ['tv', 'movie']) {
+    const cursor = state.cursor[type] || { page: 1, pos: 0 };
+    state.cursor[type] = cursor;
+    for (;;) {
+      const entries = await jikanPage(type, cursor.page);
+      if (entries.length === 0) break;
+      for (; cursor.pos < entries.length; cursor.pos += 1) {
+        if (processed >= limit) break outer;
+        const entry = entries[cursor.pos];
+        const malId = String(entry?.mal_id || '');
+        if (!malId || state.done[malId]) continue;
+        processed += 1;
+        try {
+          const record = await convertCatalogEntry(entry, index);
+          state.done[malId] = record;
+          stats[record.status] = (stats[record.status] || 0) + 1;
+          if (record.status !== 'ok' && record.status !== 'already') {
+            console.log(`  · ${type} ${malId} ${entry.title || ''} -> ${record.status}`);
+          }
+        } catch (error) {
+          state.done[malId] = { at: new Date().toISOString().slice(0, 10), status: 'error', error: error.message };
+          stats.error = (stats.error || 0) + 1;
+          console.error(`  ! ${type} ${malId}: ${error.message}`);
+        }
+        if (processed % 25 === 0) persist();
+      }
+      cursor.page += 1;
+      cursor.pos = 0;
+    }
+  }
+
   applyOverrides(index, readJson(overridesFile));
   const errors = validateIndex(index);
   if (errors.length > 0) {
-    console.error('✗ Generated index is invalid; existing data was not overwritten.');
+    console.error('✗ Indice non valido (batch scritto comunque nel file).');
     for (const error of errors.slice(0, 50)) console.error(`  - ${error}`);
     process.exit(1);
   }
 
-  writeJsonAtomic(dataFile, index);
-  console.log(`✓ wrote ${dataFile}`);
-  console.log(`  series: ${Object.keys(index.series).length}, movies: ${Object.keys(index.movies).length}`);
-  console.log(`  seed: ${stats.ok} ok, ${stats.notFound} 404 (mapping Kitsu stantio), ${stats.skipped} altri scarti`);
+  persist();
+  const summary = Object.entries(stats).map(([status, count]) => `${status} ${count}`).join(', ') || 'nessuna';
+  console.log(`✓ ${outputFile}`);
+  console.log(`  serie: ${Object.keys(index.series).length}, film: ${Object.keys(index.movies).length}`);
+  console.log(`  batch: ${processed} entry (${summary})`);
+  console.log(
+    `  cursore: tv ${state.cursor.tv?.page ?? 1}:${state.cursor.tv?.pos ?? 0}, movie ${state.cursor.movie?.page ?? 1}:${state.cursor.movie?.pos ?? 0}`,
+  );
 }
 
 if (isDirectRun) {
