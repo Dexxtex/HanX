@@ -180,9 +180,9 @@ I provider sono implementati in moduli separati. AnimeUnity è importato diretta
 
 | Provider | Percorso runtime |
 |---|---|
-| **AnimeUnity** (`src/providers/animeunity-provider.ts`) | Gestisce i quattro formati ID. Usa Mapping API quando applicabile e, in caso di miss, ricerca per titolo e parsing delle pagine anime/episodio. Per IMDb/TMDB applica AnimeGate. |
-| **AnimeSaturn** (`src/providers/animesaturn-provider.ts`) | Gestisce i quattro formati ID. Usa Mapping API e fallback per titolo quando applicabile; per AnimeSaturn la lookup Mapping API richiede la lingua `it`. Per IMDb/TMDB applica AnimeGate. |
-| **AnimeWorld** (`src/providers/animeworld-provider.ts`) | Gestisce i quattro formati ID. Usa Mapping API e fallback per titolo quando applicabile; analizza le pagine AnimeWorld e costruisce stream dai link media trovati. Per IMDb/TMDB applica AnimeGate. |
+| **AnimeUnity** (`src/providers/animeunity-provider.ts`) | Gestisce i quattro formati ID. Risolve il target con `resolveAnimeTarget()` (indice locale, poi API ufficiali) e, in caso di miss, ricerca per titolo e parsing delle pagine anime/episodio. Per IMDb/TMDB applica AnimeGate. |
+| **AnimeSaturn** (`src/providers/animesaturn-provider.ts`) | Gestisce i quattro formati ID. Risolve il target con `resolveAnimeTarget()` e, in caso di miss, ricerca per titolo. Per IMDb/TMDB applica AnimeGate. |
+| **AnimeWorld** (`src/providers/animeworld-provider.ts`) | Gestisce i quattro formati ID. Risolve il target con `resolveAnimeTarget()` e, in caso di miss, ricerca per titolo; analizza le pagine AnimeWorld e costruisce stream dai link media trovati. Per IMDb/TMDB applica AnimeGate. |
 
 ### Produzione degli stream e proxy
 
@@ -195,22 +195,22 @@ La selezione del backend proxy non è quindi un comportamento uniforme tra i tre
 ### Differenze nel lookup
 
 - **Kitsu:** i provider provano il mapping Kitsu e possono usare i metadati Kitsu per un titolo rapido; se il mapping non produce stream, passano alla risoluzione del titolo e alla ricerca sul sito.
-- **MAL:** i provider ricavano il titolo da Tenrai (`GET /v1/anime/{id}`) e poi cercano sui siti; il percorso MAL non usa la Mapping API. Tenrai sostituisce l’API pubblica Jikan, dismessa il 1º ottobre 2026 ([annuncio maintainer](https://github.com/jikan-me/jikan-rest/issues/613)). La richiesta metadata è condivisa fra i provider e persistita in SQLite con ETag.
-- **IMDb/TMDB:** AnimeGate precede la ricerca in ogni provider. Se il gate consente la richiesta, viene tentato il mapping specifico del provider; in caso di miss segue la risoluzione del titolo e la ricerca testuale.
+- **MAL:** i provider ricavano il titolo da Tenrai (`GET /v1/anime/{id}`) e poi cercano sui siti; il percorso MAL non passa dal resolver di mapping. Tenrai sostituisce l’API pubblica Jikan, dismessa il 1º ottobre 2026 ([annuncio maintainer](https://github.com/jikan-me/jikan-rest/issues/613)). La richiesta metadata è condivisa fra i provider e persistita in SQLite con ETag. Per la stack Jikan self-hosted usata dal converter del mapping vedi [`docs/jikan-self-hosted.md`](../../docs/jikan-self-hosted.md).
+- **IMDb/TMDB:** AnimeGate precede la ricerca in ogni provider. Se il gate consente la richiesta, `resolveAnimeTarget()` prova prima l’indice locale e poi le API ufficiali (TMDB/TVDB/Kitsu); solo in caso di miss segue la risoluzione del titolo e la ricerca testuale.
 - Il mapping IMDb può avere un secondo tentativo con l’ID TMDB quando la risposta non contiene percorsi specifici del provider e l’ID TMDB è disponibile.
 
-La Mapping API è condivisa in `src/providers/anime-core/mapping-api.ts`; i provider estraggono dal payload i propri percorsi. Il resolver di mapping genera richieste del tipo `/{provider}/{id}?ep=…`, aggiunge `s=…` se presente e può aggiungere `lang=it`.
+Il resolver vive in `src/mapping/index.ts`: `resolveLocalTarget()` legge l’indice senza rete, `resolveAnimeTarget()` aggiunge il fallback di `src/mapping/live.ts` su TMDB/TVDB/Kitsu, `resolveSeasonFallbackTitle()` recupera il titolo della stagione. La vecchia Mapping API HTTP (`mapping-api.ts`) non esiste più.
 
 ### AnimeGate
 
 `checkIsAnimeById()` è chiamato dai tre provider per ID IMDb e TMDB, non per Kitsu o MAL. Se `ANIME_GATE_ENABLED` è diverso da `false`, il gate:
 
 1. risolve IMDb→TMDB quando necessario;
-2. accetta un mapping MAL/Kitsu trovato tramite Haglund;
+2. considera anime un ID presente nell’indice di mapping locale (`hasMappedEntry`), oppure una serie TVDB con almeno un’entry Kitsu collegata (`tvdbSeriesHasKitsu`);
 3. altrimenti, se `ANIME_GATE_TMDB_FALLBACK` non è `false`, verifica su TMDB animazione e origine/lingua giapponese;
 4. se non è anime, il provider restituisce zero stream.
 
-Senza chiave TMDB il gate è permissivo. L’helper `buildAnimeIdWarningStream()` esiste, ma non è invocato dagli handler correnti; non viene restituito uno stream generico come fallback per un ID non-anime.
+Senza chiave TMDB il gate è permissivo: non viene restituito uno stream generico come fallback per un ID non-anime.
 
 ---
 
@@ -218,7 +218,7 @@ Senza chiave TMDB il gate è permissivo. L’helper `buildAnimeIdWarningStream()
 
 ### Formattazione e ordinamento
 
-`addon.ts` applica la formattazione nel proprio `unifyStreams()` (non tramite `buildUnifiedStreamName()`): titolo su più righe, etichetta provider, indicazione ITA/SUB, rilevamento del proxy e `behaviorHints.bingeGroup` per i provider.
+`addon.ts` applica la formattazione nel proprio `unifyStreams()`: titolo su più righe (🎞️ titolo, 🎧 ITA/SUB, 📦 size e 🖥️ risoluzione solo se il provider li emette, 🛡️ proxy ON/OFF), etichetta provider (🎴 Anime Unity, 🪐 Anime Saturn, 🌍 Anime World) e `behaviorHints.bingeGroup`. Il rilevamento dell’host player (Mixdrop e simili) è stato rimosso: nessun provider lo emette.
 
 L’ordinamento è eseguito in due passaggi: prima alfabetico per titolo, poi per priorità provider **AnimeUnity → AnimeSaturn → AnimeWorld**. Poiché l’ordinamento JavaScript è stabile, all’interno dello stesso provider viene mantenuto l’ordine alfabetico del primo passaggio.
 
@@ -258,9 +258,8 @@ Le riconvalide consumano comunque richieste API, ma non trasferiscono il corpo q
 
 - `cache.ts`: helper per mappe TTL con scadenza e creazione delle mappe HTTP, mapping e in-flight per provider;
 - `fetch-resource.ts`: fetch con timeout configurabile, cache HTTP opzionale e deduplicazione in-flight tramite tali mappe;
-- `mapping-api.ts`: parsing ID/episodio, lookup API, cache Mapping di 2 minuti ed estrazione dei percorsi provider;
 - `tenrai-metadata.ts`: store SQLite MAL persistente con ETag, rate limit, backoff e single-flight condiviso;
-- `provider-urls.ts`: risoluzione dinamica di URL provider e Mapping API;
+- `provider-urls.ts`: risoluzione dinamica degli URL provider;
 - `helpers.ts`: normalizzazione episodio/titolo/URL, selezione episodi, estrazione link e limitazione della concorrenza.
 
 `fetchResource()` è il livello HTTP comune per le chiamate che lo usano; i provider contengono anche fetch diretti e logica HTTP specifica, quindi non tutte le richieste esterne transitano da questo wrapper.
@@ -303,20 +302,31 @@ Questo endpoint è registrato nel server Express, ma il flusso dei provider atti
 src/
 ├── addon.ts                         Express, manifest, SDK, handler e orchestrazione
 ├── landingPage.ts                   HTML della landing page
+├── config.ts                        Lettura e normalizzazione della configurazione
+├── mapping/
+│   ├── index.ts                     Caricamento indice, resolve locale e fallback live
+│   ├── live.ts                      Risoluzione live TMDB/TVDB/Kitsu (cache in memoria)
+│   ├── request.ts                   Parsing degli ID e normalizzazione delle richieste
+│   ├── types.ts                     Tipi e schema dell'indice
+│   ├── overrides.json               Correzioni manuali applicate al caricamento
+│   └── data/anime-seasons.json      Indice spedito con l'immagine (vuoto)
 ├── providers/
-│   ├── animeunity-provider.ts       Provider AnimeUnity
+│   ├── animeunity-provider.ts       Provider AnimeUnity (+ animeunity-parsers.ts)
 │   ├── animesaturn-provider.ts      Provider AnimeSaturn
 │   ├── animeworld-provider.ts       Provider AnimeWorld
-│   ├── kitsu.ts                    Parsing ID e helper Kitsu usato dai provider
-│   └── anime-core/                 Cache, fetch, mapping, Tenrai/SQLite e helper condivisi
+│   └── anime-core/                  Cache, fetch, titoli inglesi, Tenrai/SQLite e helper condivisi
 ├── utils/
-│   ├── animeGate.ts                Gate IMDb/TMDB e normalizzazione titolo condivisa
-│   ├── domains.ts                  Lettura/cache di config/domains.json
-│   ├── mediaflow.ts                Formattazione URL MediaFlow usata da AnimeUnity
-│   ├── tmdbResolver.ts             Risoluzione IMDb→TMDB usata dai percorsi attivi
-│   └── unifiedNames.ts             Etichette provider; la composizione principale è inline in addon.ts
-└── config/
-    └── imdbToTmdb.json             Dati statici usati dal resolver TMDB
+│   ├── animeGate.ts                 Gate IMDb/TMDB e normalizzazione titolo condivisa
+│   ├── anime-title-normalization.ts Normalizzazione titoli per la ricerca
+│   ├── domains.ts                   Lettura/cache di config/domains.json
+│   ├── easyproxy.ts                 Costruzione degli URL del proxy EasyProxy
+│   ├── http.ts                      Fetch condiviso con timeout
+│   ├── logger.ts                    Log condizionali e redazione degli URL
+│   ├── public-url.ts                Base URL pubblico dell'addon
+│   ├── tmdbResolver.ts              Risoluzione IMDb→TMDB usata dai percorsi attivi
+│   └── unifiedNames.ts              Etichette provider con icona
+└── types/
+    └── animeunity.ts                Tipi AnimeUnity
 
 config/
 ├── domains.json
@@ -331,14 +341,14 @@ addon-config.json                   Override manifest nella root del repository
 
 ### Build locale
 
-`pnpm run build` esegue `tsc` e `scripts/build-copy.js`. Lo script copia `config/` e i JSON di `src/config/` in `dist/config/`; non copia `addon-config.json` né `public/`. In un normale checkout questi ultimi restano nella root e sono raggiunti tramite i percorsi relativi definiti dal codice.
+`pnpm run build` esegue `tsc` e `scripts/build-copy.js`. Lo script copia `config/` in `dist/config/`, l’indice del mapping (`src/mapping/data/`) e `src/mapping/overrides.json`; non copia `addon-config.json` né `public/`. In un normale checkout questi ultimi restano nella root e sono raggiunti tramite i percorsi relativi definiti dal codice.
 
 ### Docker
 
 Il `Dockerfile` corrente:
 
 - usa `node:26-alpine` sia per build sia per runner;
-- compila l’addon e nello stage finale copia in `/app` `dist/`, `node_modules/`, `addon-config.json`, `config/` e `public/`;
+- compila l’addon e nello stage finale copia in `/app` `dist/`, `node_modules/`, `addon-config.json`, `config/`, `public/` e `scripts/` (serve al converter del mapping);
 - crea `/app/data` accessibile solo all’utente non-root; Compose lo monta sul volume persistente `hanx-data`;
 - carica le variabili runtime da `.env` via `env_file`; `.env` resta escluso dal contesto immagine e dal versionamento; `.env.example` è il template;
 - espone la porta 7000 e avvia `node dist/addon.js` come utente non-root.
@@ -389,15 +399,9 @@ La lista non include variabili usate solo da script di manutenzione o componenti
 
 ## 12. Codice presente ma non integrato nel flusso stream
 
-I seguenti moduli esistono nel repository, ma non risultano componenti invocati dal normale fan-out dei provider:
+Le revisioni precedenti elencavano `src/extractor.ts`, `src/utils/animeTitleResolver.ts`, `src/providers/flaresolverr.ts`, `buildAnimeIdWarningStream()` e `buildUnifiedStreamName()`: nessuno di questi moduli o simboli esiste più nel sorgente corrente.
 
-- `src/extractor.ts`: contiene codice di estrazione VixSrc/HLS, ma non è importato dai provider attivi né chiamato da `addon.ts`.
-- `src/utils/animeTitleResolver.ts`: esporta un resolver, ma i provider usano funzioni di risoluzione locali e non importano questo modulo.
-- `src/providers/flaresolverr.ts`: espone `fetchPage`; `addon.ts` lo importa, ma non ne usa il simbolo nel codice dell’handler. Non è il fetcher del percorso provider corrente.
-- `buildAnimeIdWarningStream()` in `src/utils/animeGate.ts`: helper non richiamato dagli handler.
-- `buildUnifiedStreamName()` in `src/utils/unifiedNames.ts`: helper non usato dalla composizione inline degli stream in `addon.ts`.
-
-Questi elementi non sono rappresentati come stadi operativi nel diagramma del flusso stream. La loro eventuale integrazione futura richiede una verifica separata.
+La sezione va rianalizzata quando si aggiunge codice che non entra nel fan-out dei provider.
 
 ---
 

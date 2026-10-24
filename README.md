@@ -230,6 +230,8 @@ HanX/
 │   ├── landingPage.ts      # UI web
 │   ├── mapping/            # Mapping ufficiale Kitsu/TMDB/TVDB
 │   └── providers/          # Provider anime
+├── scripts/                # Converter del mapping e utility
+├── docs/                   # Guide (es. Jikan self-hosted)
 ├── config/                 # Configurazioni
 ├── Dockerfile
 └── docker-compose.yml
