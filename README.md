@@ -118,7 +118,8 @@ Il cursore e l'esito di ogni entry stanno in `data/jikan-progress.json` (volume 
 | `--type=tv` / `--type=movie` | limita il batch a un solo tipo (senza flag: prima TV, poi film) |
 | `--status` | percentuale per tipo + riepilogo del registro, senza scrivere nulla |
 | `--publish` | al termine pubblica l'indice come asset della release (`GITHUB_TOKEN`) |
-| `--retry-error` | riprova le entry finite in errore (es. chiave sbagliata) |
+| `--retry=no-tmdb,no-align` | riapre le entry finite con quegli esiti e le riprocessa |
+| `--retry-error` | scorciatoia per `--retry=error` |
 | `--reset` | ignora indice e cursore esistenti |
 | `--check` | valida il JSON senza rete |
 

@@ -6,7 +6,7 @@
  *
  * Usage:
  *   node scripts/build-anime-mapping.mjs [--limit=N] [--type=tv|movie] [--publish]
- *                                        [--status] [--reset] [--retry-error] [--check]
+ *                                        [--status] [--reset] [--retry=status,...] [--check]
  *
  * Each run converts the next N catalog entries (default 200) and merges them
  * into the existing index, so the map grows a little at a time.
@@ -44,6 +44,13 @@ const checkOnly = args.includes('--check');
 const statusOnly = args.includes('--status');
 const reset = args.includes('--reset');
 const retryError = args.includes('--retry-error');
+const retryArg = (args.find((arg) => arg.startsWith('--retry=')) || '').split('=')[1];
+// --retry=no-tmdb,no-align riapre le entry finite con quegli esiti.
+const retryStatuses = retryArg
+  ? retryArg.split(',').map((value) => value.trim()).filter(Boolean)
+  : retryError
+    ? ['error']
+    : [];
 const publish = args.includes('--publish');
 const limitArg = args.find((arg) => arg.startsWith('--limit='));
 const parsedLimit = limitArg ? Number.parseInt(limitArg.split('=')[1], 10) : 200;
@@ -370,8 +377,16 @@ function yearOf(value) {
 /** TMDB search terms for a Jikan catalog entry (MAL titles are Japanese-first). */
 export function tmdbQuery(entry) {
   const kind = String(entry?.type || '').toLowerCase() === 'movie' ? 'movie' : 'tv';
-  // Romaji come secondo tentativo: sui titoli senza title_english è l'unica chiave.
-  const queries = [...new Set([entry?.title_english, entry?.title].map((value) => String(value || '').trim()).filter(Boolean))];
+  const queries = [];
+  for (const value of [entry?.title_english, entry?.title]) {
+    const title = String(value || '').trim();
+    if (!title || queries.includes(title)) continue;
+    queries.push(title);
+    // "Rozen Maiden: Träumend" è la stagione 2 di "Rozen Maiden": TMDB non usa
+    // i sottotitoli MAL. Il titolo base va provato solo con anno compatibile.
+    const base = title.split(/\s*[:–—-]\s+/)[0].trim();
+    if (base.length >= 3 && base !== title && !queries.includes(base)) queries.push(base);
+  }
   return {
     kind,
     queries,
@@ -405,10 +420,15 @@ async function findTmdb({ kind, queries, year }) {
     const json = await fetchJson(`${TMDB}/${path}?${params}`);
     return pickTmdbResult(json?.results, withYear ? year : null);
   };
-  for (const query of queries) {
-    // A wrong/unknown MAL start year would hide a real match, so retry bare once.
-    const hit = (await search(query, true)) || (year ? await search(query, false) : null);
+  for (const [index, query] of queries.entries()) {
+    const hit = await search(query, true);
     if (hit) return hit;
+    // Solo il titolo originale può essere ritentato senza anno: un titolo base
+    // senza vincolo d'anno pescherebbe il remake sbagliato.
+    if (year && index === 0) {
+      const bare = await search(query, false);
+      if (bare) return bare;
+    }
   }
   return null;
 }
@@ -737,12 +757,16 @@ async function main() {
   const state = reset ? {} : readJson(stateFile) || {};
   state.done = state.done || {};
   state.cursor = state.cursor || {};
-  if (retryError) {
+  if (retryStatuses.length > 0) {
+    let retried = 0;
     for (const [malId, record] of Object.entries(state.done)) {
-      if (record?.status === 'error') delete state.done[malId];
+      if (!retryStatuses.includes(record?.status)) continue;
+      delete state.done[malId];
+      retried += 1;
     }
-    // Rewind: the cursor has already moved past the failed entries.
+    // Riavvolgi: le entry riaperte sono sparse nel catalogo.
     state.cursor = {};
+    console.log(`  riaperte ${retried} entry con esito ${retryStatuses.join('/')}`);
   }
 
   const persist = () => {
