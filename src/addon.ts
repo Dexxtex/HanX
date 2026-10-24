@@ -464,31 +464,32 @@ function createBuilder() {
                                 if (m) resHuman = m[1] + 'p';
                             }
                             // Assemble lines manually per new spec:
-                            // 1 Title (🎬 prefix added later by builder or we add manually)
-                            // 2 Language line 🗣 [ITA|SUB]
-                            // 3 Player line ▶️ <Player> (if any)
-                            // 4 Size/Res line (💾 <SIZE> 🎦 <RES> | only if at least one present)
-                            // 5 Proxy line 🌐 Proxy (ON|OFF)
+                            // 1 Title
+                            // 2 Language line [ITA|SUB]
+                            // 3 Player line <Player> (if any)
+                            // 4 Size/Res line (<SIZE> <RES> | only if at least one present)
+                            // 5 Proxy line Proxy (ON|OFF)
                             // (Provider label removed from multiline)
+                            // Nessuna icona: le icone le aggiunge chi personalizza l'addon.
                             const outLines: string[] = [];
-                            outLines.push(`🎬 ${baseLine}`);
+                            outLines.push(baseLine);
                             // Language line: logica legacy [ITA]/[SUB].
-                            const langLine = `🗣 [${isSub ? 'SUB' : 'ITA'}]`;
+                            const langLine = `[${isSub ? 'SUB' : 'ITA'}]`;
                             outLines.push(langLine);
-                            if (playerName) outLines.push(`▶️ ${playerName}`);
+                            if (playerName) outLines.push(playerName);
                             // Build size/res combined line before proxy if present
                             let sizeResLine = '';
                             if (sizeHuman || resHuman) {
                                 if (sizeHuman && resHuman) {
-                                    sizeResLine = `💾 ${sizeHuman.replace(/B$/, 'B')} 🎦 ${resHuman}`;
+                                    sizeResLine = `${sizeHuman} ${resHuman}`;
                                 } else if (sizeHuman) {
-                                    sizeResLine = `💾 ${sizeHuman.replace(/B$/, 'B')}`;
+                                    sizeResLine = sizeHuman;
                                 } else if (resHuman) {
-                                    sizeResLine = `🎦 ${resHuman}`; // resolution only
+                                    sizeResLine = resHuman; // resolution only
                                 }
                             }
                             if (sizeResLine) outLines.push(sizeResLine);
-                            outLines.push(`🌐 Proxy (${proxyOn ? 'ON' : 'OFF'})`);
+                            outLines.push(`Proxy (${proxyOn ? 'ON' : 'OFF'})`);
                             const unifiedTitle = outLines.join('\n');
                             // ---------------- BINGE GROUP LOGIC (CUSTOM MAP) ----------------
                             // animeunity/animeworld/animesaturn: std-ita | std-sub

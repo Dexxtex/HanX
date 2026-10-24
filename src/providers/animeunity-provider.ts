@@ -724,7 +724,7 @@ export class AnimeUnityProvider {
         // Se la selezione della variante fallisce, EasyProxy sceglie comunque la più alta.
         proxyPlaylistUrl.searchParams.set('max_res', 'true');
         debug(4, 'AnimeUnity', '[AnimeUnity][EasyProxy] Built HLS proxy URL for:', redactUrl(target));
-        pushStream(proxyPlaylistUrl.toString(), baseTitle + ' 🔒');
+        pushStream(proxyPlaylistUrl.toString(), baseTitle);
       }
     }
 

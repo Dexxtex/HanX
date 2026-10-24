@@ -2,9 +2,9 @@
 
 export function providerLabel(provider: string, isFhd?: boolean): string {
   switch (provider) {
-    case 'animeunity': return `🤌 Anime Unity ⛩️${isFhd ? ' 🅵🅷🅳' : ''}`;
-    case 'animesaturn': return '🤌 Anime Saturn 🪐';
-    case 'animeworld': return '🤌 Anime World 🌍';
+    case 'animeunity': return `Anime Unity${isFhd ? ' FHD' : ''}`;
+    case 'animesaturn': return 'Anime Saturn';
+    case 'animeworld': return 'Anime World';
     default: return provider;
   }
 }
