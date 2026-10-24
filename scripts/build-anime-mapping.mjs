@@ -476,17 +476,20 @@ async function tmdbExternalIds(kind, id) {
 async function convertCatalogEntry(entry, index) {
   const at = new Date().toISOString().slice(0, 10);
   const title = String(entry?.title_english || entry?.title || '');
+  // Titolo e tipo nel registro: senza, i miss non sono più ricostruibili.
+  const record = { at, title, type: String(entry?.type || '') };
 
   const query = tmdbQuery(entry);
   const tmdb = await findTmdb(query);
-  if (!tmdb?.id) return { at, status: 'no-tmdb' };
+  if (!tmdb?.id) return { ...record, status: 'no-tmdb' };
 
   const external = await tmdbExternalIds(query.kind, tmdb.id);
   const imdbId = external?.imdb_id || '';
   const tvdbId = external?.tvdb_id ? String(external.tvdb_id) : '';
   // TMDB has the TVDB id for series; when it is missing we align on TMDB
   // episodes, so the entry does not fall out of the dataset.
-  const record = { at, tmdbId: String(tmdb.id), tmdbTitle: tmdb.name || tmdb.title || '' };
+  record.tmdbId = String(tmdb.id);
+  record.tmdbTitle = tmdb.name || tmdb.title || '';
 
   // Split-cour entries share the same series: the first one already mapped it.
   // Checked before Kitsu, so those entries cost no lookup at all.
