@@ -159,28 +159,29 @@ Costruirli qui significa che esistono prima del primo inserimento: `mal_id` rest
 unico e le query non degradano a collection scan.
 
 ```js
-const userToCreate = fs.readFileSync('/run/secrets/jikan_db_username', 'utf8').trim();
-const userPassword = fs.readFileSync('/run/secrets/jikan_db_password', 'utf8').trim();
-db = db.getSiblingDB("admin");
-db.createUser({ user: userToCreate, pwd: userPassword, roles: [{ role: "readWrite", db: "jikan" }] });
-db = db.getSiblingDB("jikan");
-db.createUser({ user: userToCreate, pwd: userPassword, roles: [{ role: "readWrite", db: "jikan" }] });
+const username = fs.readFileSync('/run/secrets/jikan_db_username', 'utf8').trim();
+const password = fs.readFileSync('/run/secrets/jikan_db_password', 'utf8').trim();
+const roles = [{ role: 'readWrite', db: 'jikan' }];
+
+db.getSiblingDB('admin').createUser({ user: username, pwd: password, roles });
+const jikan = db.getSiblingDB('jikan');
+jikan.createUser({ user: username, pwd: password, roles });
 
 const fields = [
-  "aired", "airing", "episodes", "members", "favorites", "popularity", "rank",
-  "rating", "score", "scored_by", "status", "type", "source",
-  "title", "title_english", "title_japanese", "title_synonyms",
-  "demographics.mal_id", "explicit_genres.mal_id", "genres.mal_id",
-  "licensors.mal_id", "producers.mal_id", "studios.mal_id", "themes.mal_id",
-  "aired.from", "aired.to",
+  'aired', 'airing', 'episodes', 'members', 'favorites', 'popularity', 'rank',
+  'rating', 'score', 'scored_by', 'status', 'type', 'source',
+  'title', 'title_english', 'title_japanese', 'title_synonyms',
+  'demographics.mal_id', 'explicit_genres.mal_id', 'genres.mal_id',
+  'licensors.mal_id', 'producers.mal_id', 'studios.mal_id', 'themes.mal_id',
+  'aired.from', 'aired.to',
 ];
-fields.forEach(f => db.anime.createIndex({ [f]: 1 }, { name: f }));
-db.anime.createIndex({ mal_id: 1 }, { name: "mal_id", unique: true });
-db.anime.createIndex(
-  { title: "text", title_japanese: "text" },
-  { name: "search", weights: { title: 50, title_japanese: 5 } }
+fields.forEach((field) => jikan.anime.createIndex({ [field]: 1 }, { name: field }));
+jikan.anime.createIndex({ mal_id: 1 }, { name: 'mal_id', unique: true });
+jikan.anime.createIndex(
+  { title: 'text', title_japanese: 'text' },
+  { name: 'search', weights: { title: 50, title_japanese: 5 } }
 );
-print("anime indexes created: " + db.anime.getIndexes().length);
+print(`anime indexes created: ${jikan.anime.getIndexes().length}`);
 ```
 
 Gira solo a data directory vuoto, quindi copre le stack nuove. Quelle esistenti
@@ -358,26 +359,26 @@ Deve dire **29** (26 campi + `mal_id` + `search` + `_id_`). Se dice 1, salva com
 `apps/jikan-rest/jikan-indexes.js` e lancialo: è idempotente.
 
 ```js
-const d = db.getSiblingDB("jikan");
+const jikan = db.getSiblingDB('jikan');
 const fields = [
-  "aired", "airing", "episodes", "members", "favorites", "popularity", "rank",
-  "rating", "score", "scored_by", "status", "type", "source",
-  "title", "title_english", "title_japanese", "title_synonyms",
-  "demographics.mal_id", "explicit_genres.mal_id", "genres.mal_id",
-  "licensors.mal_id", "producers.mal_id", "studios.mal_id", "themes.mal_id",
-  "aired.from", "aired.to",
+  'aired', 'airing', 'episodes', 'members', 'favorites', 'popularity', 'rank',
+  'rating', 'score', 'scored_by', 'status', 'type', 'source',
+  'title', 'title_english', 'title_japanese', 'title_synonyms',
+  'demographics.mal_id', 'explicit_genres.mal_id', 'genres.mal_id',
+  'licensors.mal_id', 'producers.mal_id', 'studios.mal_id', 'themes.mal_id',
+  'aired.from', 'aired.to',
 ];
-fields.forEach(f => d.anime.createIndex({ [f]: 1 }, { name: f }));
+fields.forEach((field) => jikan.anime.createIndex({ [field]: 1 }, { name: field }));
 try {
-  d.anime.createIndex({ mal_id: 1 }, { name: "mal_id", unique: true });
-} catch (e) {
-  print("mal_id index failed, vedi la deduplica sotto: " + e.codeName);
+  jikan.anime.createIndex({ mal_id: 1 }, { name: 'mal_id', unique: true });
+} catch (error) {
+  print(`mal_id index failed, vedi la deduplica sotto: ${error.codeName}`);
 }
-d.anime.createIndex(
-  { title: "text", title_japanese: "text" },
-  { name: "search", weights: { title: 50, title_japanese: 5 } }
+jikan.anime.createIndex(
+  { title: 'text', title_japanese: 'text' },
+  { name: 'search', weights: { title: 50, title_japanese: 5 } }
 );
-print("anime indexes: " + d.anime.getIndexes().length);
+print(`anime indexes: ${jikan.anime.getIndexes().length}`);
 ```
 
 ```bash
@@ -392,16 +393,16 @@ anime due volte (può farlo finché non esiste l'indice unico). Salva come
 `jikan-dedupe.js`, tienilo e rilancia l'indice:
 
 ```js
-const d = db.getSiblingDB("jikan");
-d.anime.aggregate([
-  { $group: { _id: "$mal_id", ids: { $push: "$_id" }, n: { $sum: 1 } } },
+const jikan = db.getSiblingDB('jikan');
+jikan.anime.aggregate([
+  { $group: { _id: '$mal_id', ids: { $push: '$_id' }, n: { $sum: 1 } } },
   { $match: { n: { $gt: 1 } } }
-], { allowDiskUse: true }).forEach(g => {
-  g.ids.slice(1).forEach(id => d.anime.deleteOne({ _id: id }));
-  print("mal_id " + g._id + ": removed " + (g.n - 1));
+], { allowDiskUse: true }).forEach((group) => {
+  group.ids.slice(1).forEach((id) => jikan.anime.deleteOne({ _id: id }));
+  print(`mal_id ${group._id}: removed ${group.n - 1}`);
 });
-d.anime.createIndex({ mal_id: 1 }, { name: "mal_id", unique: true });
-print("anime indexes: " + d.anime.getIndexes().length);
+jikan.anime.createIndex({ mal_id: 1 }, { name: 'mal_id', unique: true });
+print(`anime indexes: ${jikan.anime.getIndexes().length}`);
 ```
 
 ## Worker RoadRunner
