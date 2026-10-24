@@ -3,10 +3,15 @@
 Stack Jikan completo (API + MongoDB + Redis + Typesense) per uso personale, con le
 correzioni che servono a farlo funzionare davvero.
 
-**Perché:** l'API pubblica Jikan è stata dismessa il 1° ottobre 2026. Al suo posto
-Tenrai (`https://api.tenrai.org/v1`), compatibile con Jikan ma limitata a 120 richieste
-al minuto per IP. Con un'istanza locale il limite sparisce e il catalogo resta
-disponibile anche senza rete esterna.
+**Perché:** l'API pubblica Jikan è stata dismessa il 1° ottobre 2026
+([issue #613](https://github.com/jikan-me/jikan-rest/issues/613), annuncio del
+maintainer). Al suo posto Tenrai (`https://api.tenrai.org/v1`), compatibile con Jikan
+ma limitata a 120 richieste al minuto per IP. Con un'istanza locale il limite sparisce
+e il catalogo resta disponibile anche senza rete esterna.
+
+Nota: è spento **il servizio pubblico**, non il progetto. `jikan-me/jikan-rest` è
+attivo (non archiviato, commit di ottobre 2026) e il maintainer sta rendendo il
+self-hosting più semplice: è esattamente lo stack che questa guida costruisce.
 
 ## Cosa cambia in HanX
 
