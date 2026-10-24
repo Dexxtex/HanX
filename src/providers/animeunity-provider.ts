@@ -19,7 +19,7 @@ import { checkIsAnimeById, applyUniversalAnimeTitleNormalization } from '../util
 import {
   buildTitleFallbackQueries,
   normalizeTitleForSearch as normalizeAnimeTitleForSearch,
-  titleMatchScore,
+  titleMatchScoreAny,
   type TitleNormalizationOptions,
 } from '../utils/anime-title-normalization.js';
 import {
@@ -501,16 +501,16 @@ async function getUnityCoStreamData(
   }
 }
 
-function filterAnimeResults(results: { version: AnimeUnitySearchResult; language_type: string }[], searchQuery: string) {
+function filterAnimeResults(results: { version: AnimeUnitySearchResult; language_type: string }[], queryTitles: string[]) {
   const scored = results.map((result) => {
     const titles = [result.version.name_eng || '', result.version.name_it || '', result.version.name || ''].filter(Boolean);
-    const score = Math.max(0, ...titles.map((title) => titleMatchScore(searchQuery, title)));
+    const score = Math.max(0, ...titles.map((title) => titleMatchScoreAny(queryTitles, title)));
     return { result, score };
   }).filter((entry) => entry.score > 0);
   const best = scored.reduce((max, entry) => Math.max(max, entry.score), 0);
   const filtered = best >= 0.5 ? scored.filter((entry) => entry.score === best).map((entry) => entry.result) : [];
 
-  debug(4, 'AnimeUnity', `[UniversalTitle][Filter][Legacy] Query ricerca: "${searchQuery}"`);
+  debug(4, 'AnimeUnity', `[UniversalTitle][Filter][Legacy] Query ricerca: "${queryTitles.join(' | ')}"`);
   debug(4, 'AnimeUnity', `[UniversalTitle][Filter][Legacy] Risultati prima del filtro:`, results.map(r => `${r.version.name} [it:"${r.version.name_it || 'N/A'}" eng:"${r.version.name_eng || 'N/A'}"]`));
   debug(4, 'AnimeUnity', `[UniversalTitle][Filter][Legacy] Risultati dopo il filtro:`, filtered.map(r => r.version.name));
   return filtered;
@@ -847,7 +847,7 @@ export class AnimeUnityProvider {
         const target = await resolveAnimeTarget(request, this.config);
         const title = target ? target.title || (await getKitsuTitle(target.kitsuId)) : '';
         if (target && title) {
-          return this.handleTitleRequest(title, target.displaySeason, target.kitsuEpisode, request.isMovie);
+          return this.handleTitleRequest(title, target.displaySeason, target.kitsuEpisode, request.isMovie, target.titleAlt);
         }
       }
       const unmapped = await this.handleUnmappedSeries(request, episodeNumber);
@@ -879,7 +879,7 @@ export class AnimeUnityProvider {
         const target = await resolveAnimeTarget(request, this.config);
         const title = target ? target.title || (await getKitsuTitle(target.kitsuId)) : '';
         if (target && title) {
-          return this.handleTitleRequest(title, target.displaySeason, target.kitsuEpisode, request.isMovie);
+          return this.handleTitleRequest(title, target.displaySeason, target.kitsuEpisode, request.isMovie, target.titleAlt);
         }
       }
       const unmapped = await this.handleUnmappedSeries(request, episodeNumber);
@@ -911,7 +911,7 @@ export class AnimeUnityProvider {
         const target = await resolveAnimeTarget(request, this.config);
         const title = target ? target.title || (await getKitsuTitle(target.kitsuId)) : '';
         if (target && title) {
-          return this.handleTitleRequest(title, target.displaySeason, target.kitsuEpisode, request.isMovie);
+          return this.handleTitleRequest(title, target.displaySeason, target.kitsuEpisode, request.isMovie, target.titleAlt);
         }
       }
       const unmapped = await this.handleUnmappedSeries(request, episodeNumber);
@@ -926,14 +926,17 @@ export class AnimeUnityProvider {
     }
   }
 
-  async handleTitleRequest(title: string, seasonNumber: number | null, episodeNumber: number | null, isMovie = false): Promise<{ streams: StreamForStremio[] }> {
-    debug(1, 'AnimeUnity', 'title request', { title, season: seasonNumber, episode: episodeNumber, isMovie });
+  async handleTitleRequest(title: string, seasonNumber: number | null, episodeNumber: number | null, isMovie = false, titleAlt?: string | null): Promise<{ streams: StreamForStremio[] }> {
+    debug(1, 'AnimeUnity', 'title request', { title, titleAlt, season: seasonNumber, episode: episodeNumber, isMovie });
     const universalTitle = applyUniversalAnimeTitleNormalization(title);
     const normalizedTitle = normalizeTitleForSearch(universalTitle);
     if (universalTitle !== title) {
       debug(3, 'AnimeUnity', `[UniversalTitle][Applied] ${title} -> ${universalTitle}`);
     }
     debug(2, 'AnimeUnity', `[AnimeUnity] Titolo normalizzato per ricerca: ${normalizedTitle}`);
+    // Romaji MAL: alcuni record del sito non hanno name_eng e il titolo inglese
+    // non supera la soglia. Serve solo al filtro, non alla query.
+    const queryTitles = titleAlt && titleAlt !== normalizedTitle ? [normalizedTitle, titleAlt] : [normalizedTitle];
     // Se il titolo originale è una chiave dell'exactMap allora saltiamo qualsiasi filtro successivo:
     // l'intento dell'utente è: se la ricerca parte da una chiave exactMap, NON applicare filterAnimeResults
     const skipFilter = Object.prototype.hasOwnProperty.call(exactMap, title);
@@ -956,7 +959,7 @@ export class AnimeUnityProvider {
       }
     }
     if (!skipFilter) {
-      animeVersions = filterAnimeResults(animeVersions, normalizedTitle);
+      animeVersions = filterAnimeResults(animeVersions, queryTitles);
     } else {
       debug(3, 'AnimeUnity', '[AnimeUnity][ExactMap] Uso risultati grezzi senza filtro (exactMap).');
       // STRICT EXACT FILTER: per le richieste exactMap, manteniamo SOLO i risultati
@@ -1000,7 +1003,7 @@ export class AnimeUnityProvider {
       // Budget ricerca <=2 fetch: una sola query di ripiego.
       const [fallbackQuery] = buildTitleFallbackQueries(normalizedTitle).filter(q => q && q !== normalizedTitle);
       if (fallbackQuery) {
-        const fallbackVersions = filterAnimeResults(await this.searchAllVersions(fallbackQuery), normalizedTitle);
+        const fallbackVersions = filterAnimeResults(await this.searchAllVersions(fallbackQuery), queryTitles);
         if (fallbackVersions.length) {
           debug(2, 'AnimeUnity', `[AnimeUnity] Trovato con query di ripiego: ${fallbackQuery}`);
           animeVersions = fallbackVersions;

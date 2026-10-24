@@ -52,6 +52,7 @@ const retryStatuses = retryArg
     ? ['error']
     : [];
 const publish = args.includes('--publish');
+const backfillTitles = args.includes('--backfill-titles');
 const limitArg = args.find((arg) => arg.startsWith('--limit='));
 const parsedLimit = limitArg ? Number.parseInt(limitArg.split('=')[1], 10) : 200;
 // 0 (o un valore non numerico) significa "tutto il catalogo in un colpo".
@@ -162,6 +163,7 @@ function validateIndex(index) {
         if (!/^\d+$/.test(String(range.kitsuId || ''))) errors.push(`series ${key} season ${season} invalid kitsuId`);
         if (!Number.isFinite(range.offset)) errors.push(`series ${key} season ${season} invalid offset`);
         if (range.title !== undefined && typeof range.title !== 'string') errors.push(`series ${key} season ${season} invalid title`);
+        if (range.titleAlt !== undefined && typeof range.titleAlt !== 'string') errors.push(`series ${key} season ${season} invalid titleAlt`);
         if (range.episodeCount !== undefined && range.episodeCount !== null && !(Number.isFinite(range.episodeCount) && range.episodeCount > 0)) {
           errors.push(`series ${key} season ${season} invalid episodeCount`);
         }
@@ -174,6 +176,7 @@ function validateIndex(index) {
   for (const [key, entry] of Object.entries(index?.movies || {})) {
     if (!/^(imdb|tmdb):.+/.test(key)) errors.push(`invalid movie key: ${key}`);
     if (!/^\d+$/.test(String(entry?.kitsuId || ''))) errors.push(`movie ${key} invalid kitsuId`);
+    if (entry?.titleAlt !== undefined && typeof entry.titleAlt !== 'string') errors.push(`movie ${key} invalid titleAlt`);
   }
   return errors;
 }
@@ -235,7 +238,7 @@ const tmdbKey = String(process.env.TMDB_API_KEY || '').trim();
 const tvdbKey = String(process.env.TVDB_API_KEY || '').trim();
 const tvdbPin = String(process.env.TVDB_PIN || '').trim();
 
-if (isDirectRun && (!tmdbKey || !tvdbKey)) {
+if (isDirectRun && (!tmdbKey || !tvdbKey) && !backfillTitles) {
   console.error('✗ Missing TMDB_API_KEY and/or TVDB_API_KEY.');
   console.error('  Set both environment variables, then rerun: pnpm mapping:build');
   console.error('  Existing mapping data was not modified.');
@@ -565,6 +568,11 @@ async function tmdbExternalIds(kind, id) {
 async function convertCatalogEntry(entry, index) {
   const at = new Date().toISOString().slice(0, 10);
   const title = String(entry?.title_english || entry?.title || '');
+  // Romaji MAL: i siti italiani listano spesso l'opera con questo titolo, che
+  // il filtro dei provider non ricava dall'inglese (token diversi). Il dato è
+  // già in Jikan, quindi costa zero chiamate in più.
+  const altTitle = String(entry?.title || '').trim();
+  const titleAlt = altTitle && altTitle !== title ? altTitle : '';
   // Titolo e tipo nel registro: senza, i miss non sono più ricostruibili.
   const record = { at, title, type: String(entry?.type || '') };
 
@@ -574,7 +582,7 @@ async function convertCatalogEntry(entry, index) {
     // TMDB non conosce il titolo (tipico dei seguiti): per le serie c'è il
     // mapping TVDB esplicito di Kitsu, che non dipende dal titolo.
     return query.kind === 'tv'
-      ? await convertFromTvdb(entry, index, record)
+      ? await convertFromTvdb(entry, index, record, titleAlt)
       : { ...record, status: 'no-tmdb' };
   }
 
@@ -607,21 +615,22 @@ async function convertCatalogEntry(entry, index) {
     }
     try {
       if (query.kind === 'movie') {
-        index.movies[`tmdb:${tmdb.id}`] = { kitsuId, title };
-        if (imdbId) index.movies[`imdb:${imdbId}`] = { kitsuId, title };
+        const mapped = titleAlt ? { kitsuId, title, titleAlt } : { kitsuId, title };
+        index.movies[`tmdb:${tmdb.id}`] = mapped;
+        if (imdbId) index.movies[`imdb:${imdbId}`] = mapped;
         return { ...record, kitsuId, status: 'ok' };
       }
 
       let result = null;
       if (tvdbId) {
         try {
-          result = await buildSeriesSeed({ kitsuId, tvdbId, tmdbId: String(tmdb.id) });
+          result = await buildSeriesSeed({ kitsuId, tvdbId, tmdbId: String(tmdb.id), titleAlt });
         } catch (error) {
           // Serie cancellata da TVDB: si allinea comunque su TMDB.
           if (!/HTTP 404 for api4\.thetvdb\.com/.test(error.message)) throw error;
         }
       }
-      if (!result) result = await buildSeriesSeedFromTmdb({ kitsuId, tmdbId: String(tmdb.id) });
+      if (!result) result = await buildSeriesSeedFromTmdb({ kitsuId, tmdbId: String(tmdb.id), titleAlt });
       if (!result) return { ...record, kitsuId, status: 'no-align' };
       for (const [key, value] of Object.entries(result.series)) {
         mergeSeries(index.series, key, value.title, value.seasons);
@@ -640,7 +649,7 @@ async function convertCatalogEntry(entry, index) {
  * il mapping TVDB esplicito di Kitsu, poi la ricerca TVDB per nome. L'indice è
  * già keyed su TVDB, quindi non serve inventare un id TMDB.
  */
-async function convertFromTvdb(entry, index, record) {
+async function convertFromTvdb(entry, index, record, titleAlt = '') {
   let kitsuId = await kitsuIdForMal(entry.mal_id);
   if (!kitsuId) kitsuId = await kitsuIdByMetadata(entry);
   if (!kitsuId) return { ...record, status: 'no-kitsu' };
@@ -651,7 +660,7 @@ async function convertFromTvdb(entry, index, record) {
   let result = null;
   try {
     // Senza tmdbId il seed contiene solo la chiave tvdb.
-    result = await buildSeriesSeed({ kitsuId, tvdbId });
+    result = await buildSeriesSeed({ kitsuId, tvdbId, titleAlt });
   } catch (error) {
     if (!/HTTP 404 for api4\.thetvdb\.com/.test(error.message)) throw error;
   }
@@ -838,6 +847,7 @@ export function rangesFrom(entries) {
       if (key === lastKey) continue;
       const range = { from: item.episode, kitsuId: item.kitsuId, offset };
       if (item.title) range.title = item.title;
+      if (item.titleAlt) range.titleAlt = item.titleAlt;
       if (Number.isFinite(item.episodeCount)) range.episodeCount = item.episodeCount;
       ranges.push(range);
       lastKey = key;
@@ -874,6 +884,9 @@ async function buildSeriesSeed(seed) {
     kitsuId,
     kitsuEpisode,
     title,
+    // Solo la cour della entry MAL convertita ha quel romaji: le altre cour
+    // della stessa serie TVDB hanno un titolo MAL diverso.
+    titleAlt: seed.titleAlt && String(kitsuId) === String(seed.kitsuId) ? seed.titleAlt : '',
     episodeCount,
   })));
 
@@ -922,6 +935,7 @@ async function buildSeriesSeedFromTmdb(seed) {
     kitsuId,
     kitsuEpisode,
     title,
+    titleAlt: seed.titleAlt && String(kitsuId) === String(seed.kitsuId) ? seed.titleAlt : '',
     episodeCount,
   })));
 
@@ -1095,7 +1109,67 @@ async function publishIndex() {
   console.log(`  pubblicato: https://github.com/${GH_REPO}/releases/download/${GH_TAG}/${GH_ASSET}`);
 }
 
-if (isDirectRun) {
+/**
+ * Aggiunge `titleAlt` (romaji MAL) alle entry già in indice: senza, i provider
+ * confrontano i siti solo col titolo inglese. Solo Jikan locale (il registro ha
+ * malId → kitsuId), nessun match nuovo, nessuna riscrittura delle stagioni.
+ */
+async function backfillTitleAlt() {
+  const index = readJson(outputFile);
+  if (!index?.series || !index?.movies) throw new Error(`indice assente o senza serie/film: ${outputFile}`);
+  const state = readJson(stateFile) || {};
+  const altByKitsu = new Map();
+  let asked = 0;
+  for (const [malId, record] of Object.entries(state.done || {})) {
+    if (!record?.kitsuId) continue;
+    asked += 1;
+    try {
+      const json = await fetchJson(`${JIKAN_API}/anime/${malId}`, {}, false);
+      const romaji = String(json?.data?.title || '').trim();
+      if (romaji) altByKitsu.set(String(record.kitsuId), romaji);
+    } catch {
+      // Un titolo mancante non ferma il backfill: resta senza titleAlt.
+    }
+    if (asked % 500 === 0) console.log(`  … ${asked} entry interrogate (${altByKitsu.size} titoli)`);
+  }
+
+  let touched = 0;
+  if (asked > 0 && altByKitsu.size === 0) {
+    throw new Error(`Jikan non ha risposto per nessuna delle ${asked} entry: controllo JIKAN_API_BASE (${JIKAN_API})`);
+  }
+  const apply = (holder, title) => {
+    const alt = altByKitsu.get(String(holder.kitsuId)) || '';
+    if (!alt || alt === title || holder.titleAlt === alt) return;
+    holder.titleAlt = alt;
+    touched += 1;
+  };
+  for (const entry of Object.values(index.series)) {
+    for (const ranges of Object.values(entry.seasons || {})) {
+      for (const range of ranges) apply(range, range.title || entry.title || '');
+    }
+  }
+  for (const entry of Object.values(index.movies)) apply(entry, entry.title || '');
+
+  index.generatedAt = new Date().toISOString();
+  const errors = validateIndex(index);
+  if (errors.length > 0) {
+    console.error('✗ Indice non valido, non scrivo.');
+    for (const error of errors.slice(0, 50)) console.error(`  - ${error}`);
+    process.exit(1);
+  }
+  writeJsonAtomic(outputFile, index);
+  console.log(`✓ ${outputFile}`);
+  console.log(`  titleAlt su ${touched} entry (${altByKitsu.size} kitsuId interrogati)`);
+  if (publish) await publishIndex();
+  process.exit(0);
+}
+
+if (isDirectRun && backfillTitles) {
+  backfillTitleAlt().catch((error) => {
+    console.error('✗ backfill titoli fallito:', error.message);
+    process.exit(1);
+  });
+} else if (isDirectRun) {
   main().catch((error) => {
     console.error('✗ mapping build failed:', error.message);
     process.exit(1);

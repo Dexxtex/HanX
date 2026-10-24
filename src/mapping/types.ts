@@ -46,6 +46,8 @@ export interface MappingTarget {
   kitsuId: string;
   kitsuEpisode: number;
   title: string;
+  /** Titolo MAL (romaji): i siti italiani listano spesso l'opera così. */
+  titleAlt?: string;
   /**
    * Season label to show/filter in the provider.
    * null for Kitsu (one ID == one season/entry) and for movies.
@@ -65,6 +67,8 @@ export interface SeasonRange {
   offset?: number;
   /** Kitsu entry title for this range (split cours have different titles). */
   title?: string;
+  /** Titolo MAL (romaji) della stessa cour, per la ricerca sui siti. */
+  titleAlt?: string;
   /** Kitsu entry episode count, used to reject out-of-range requests. */
   episodeCount?: number | null;
 }
@@ -78,6 +82,8 @@ export interface SeriesIndexEntry {
 export interface MovieIndexEntry {
   kitsuId: string;
   title?: string;
+  /** Titolo MAL (romaji) della stessa opera, per la ricerca sui siti. */
+  titleAlt?: string;
 }
 
 export interface AnimeMappingIndex {

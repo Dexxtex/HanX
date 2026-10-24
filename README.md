@@ -124,6 +124,7 @@ Il cursore e l'esito di ogni entry stanno in `data/jikan-progress.json` (volume 
 | `--retry-error` | scorciatoia per `--retry=error` |
 | `--reset` | ignora indice e cursore esistenti |
 | `--check` | valida il JSON senza rete |
+| `--backfill-titles` | aggiunge il romaji MAL (`titleAlt`) alle entry già in indice, solo da Jikan locale; con `--publish` lo pubblica |
 
 Stato reale (catalogo 13.799 entry, passata completa + retry finale del 24/10/2026):
 
@@ -146,7 +147,7 @@ Per le entry senza mapping MAL ufficiale il converter prova anche un match per m
 > - **`no-kitsu` via AniList.** La catena MAL → AniList → Kitsu esiste (`anilist/anime` è un sito di mapping Kitsu), ma su un campione di 100 distribuito sul registro dà **0** kitsuId: 79 MAL id non hanno una entry AniList, e per i 21 che ce l'hanno Kitsu non ha il mapping AniList. AniDB non è attraversabile: Kitsu ha il sito `anidb`, ma né Jikan né AniList espongono un id AniDB da cui partire.
 > - **Ancora MAL.** Salvare `{ malId, title }` per i 1.290 `no-kitsu` con `tmdbId` (824 film, 465 TV, 1 ONA) e togliere l'obbligo di `kitsuId` non aggiunge stream: sul miss i provider chiamano `getEnglishTitleFromAnyId`, che per un id TMDB/IMDB senza Kitsu usa già il titolo TMDB con stagione/episodio di Stremio, cioè lo stesso risultato che darebbe l'indice. Le 465 TV non hanno relazioni MAL: sarebbero stagioni singole, da verificare con l'allineamento date MAL↔TVDB per un guadagno non dimostrato.
 
-L'indice locale `src/mapping/data/anime-seasons.json` (o il percorso in `ANIME_MAPPING_FILE`) viene caricato una volta e usato senza rete; ogni range contiene il titolo della entry Kitsu e il conteggio episodi, così split cour e richieste fuori range non finiscono sull'episodio sbagliato. In caso di miss, il resolver può interrogare le API ufficiali (con cache in memoria e retry su 429/5xx). I provider non usano più un resolver di path esterni: risolvono `{ titolo, stagione, episodio Kitsu }` e cercano per titolo.
+L'indice locale `src/mapping/data/anime-seasons.json` (o il percorso in `ANIME_MAPPING_FILE`) viene caricato una volta e usato senza rete; ogni range contiene il titolo della entry Kitsu, il romaji MAL (`titleAlt`, il titolo con cui i siti italiani listano spesso l'opera) e il conteggio episodi, così split cour e richieste fuori range non finiscono sull'episodio sbagliato. In caso di miss, il resolver può interrogare le API ufficiali (con cache in memoria e retry su 429/5xx). I provider non usano più un resolver di path esterni: risolvono `{ titolo, stagione, episodio Kitsu }` e cercano per titolo.
 
 > **L'indice spedito è vuoto.** Il mapping multi-stagione/split-cour richiede l'indice incrementale qui sopra oppure entrambe le chiavi `TMDB_API_KEY` e `TVDB_API_KEY` per il fallback live.
 

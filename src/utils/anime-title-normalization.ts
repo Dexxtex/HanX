@@ -132,6 +132,19 @@ export function titleMatchScore(requested: string, candidate: string): number {
   return shared ? shared / Math.min(queryRest.length, foundRest.size) : 0;
 }
 
+/**
+ * Miglior punteggio tra i titoli noti dell'opera (inglese + romaji MAL): i siti
+ * italiani a volte listano il romaji, che con il solo titolo inglese prende 0.
+ */
+export function titleMatchScoreAny(titles: string[], candidate: string): number {
+  let best = 0;
+  for (const title of titles) {
+    const score = titleMatchScore(title, candidate);
+    if (score > best) best = score;
+  }
+  return best;
+}
+
 /** Chiave usata per confrontare titoli mostrati nei risultati. */
 export function normalizeSearchTitleKey(title: string): string {
   return String(title || '')

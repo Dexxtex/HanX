@@ -8,7 +8,7 @@ import { buildEasyProxyHlsUrl, buildEasyProxyStreamUrl } from '../utils/easyprox
 import {
   buildTitleFallbackQueries,
   normalizeTitleForSearch,
-  titleMatchScore,
+  titleMatchScoreAny,
   type TitleNormalizationOptions,
 } from '../utils/anime-title-normalization.js';
 import {
@@ -612,19 +612,19 @@ function normalizeApostrophes(str: string): string {
 
 function filterAnimeResults(
   results: { version: AnimeSaturnResult; language_type: string }[],
-  englishTitle: string
+  titles: string[]
 ) {
   const norm = (s: string) => normalizeApostrophes(normalizeUnicodeToAscii(s.toLowerCase().replace(/\s+/g, ' ').trim()));
-  const baseRaw = norm(englishTitle);
+  const baseRaw = norm(titles[0] || '');
   const scored = results
-    .map((result) => ({ result, score: titleMatchScore(englishTitle, result.version.title) }))
+    .map((result) => ({ result, score: titleMatchScoreAny(titles, result.version.title) }))
     .filter((entry) => entry.score > 0);
   const best = scored.reduce((max, entry) => Math.max(max, entry.score), 0);
   const filtered = best >= 0.5 ? scored.filter((entry) => entry.score === best).map((entry) => entry.result) : [];
 
   debug(4, 'AnimeSaturn', 'DEBUG filtro:', {
     base: baseRaw,
-    titoli: results.map(r => ({ raw: r.version.title, score: titleMatchScore(englishTitle, r.version.title) }))
+    titoli: results.map(r => ({ raw: r.version.title, score: titleMatchScoreAny(titles, r.version.title) }))
   });
 
   debug(3, 'AnimeSaturn', `[UniversalTitle] Risultati prima del filtro:`, results.map(r => r.version.title));
@@ -1028,7 +1028,7 @@ export class AnimeSaturnProvider {
         const target = await resolveAnimeTarget(request, this.config);
         const title = target ? target.title || (await getKitsuTitle(target.kitsuId)) : '';
         if (target && title) {
-          return this.handleTitleRequest(title, target.displaySeason, target.kitsuEpisode, request.isMovie);
+          return this.handleTitleRequest(title, target.displaySeason, target.kitsuEpisode, request.isMovie, target.titleAlt);
         }
       }
       const unmapped = await this.handleUnmappedSeries(request, episodeNumber);
@@ -1059,7 +1059,7 @@ export class AnimeSaturnProvider {
         const target = await resolveAnimeTarget(request, this.config);
         const title = target ? target.title || (await getKitsuTitle(target.kitsuId)) : '';
         if (target && title) {
-          return this.handleTitleRequest(title, target.displaySeason, target.kitsuEpisode, request.isMovie);
+          return this.handleTitleRequest(title, target.displaySeason, target.kitsuEpisode, request.isMovie, target.titleAlt);
         }
       }
       const unmapped = await this.handleUnmappedSeries(request, episodeNumber);
@@ -1090,7 +1090,7 @@ export class AnimeSaturnProvider {
         const target = await resolveAnimeTarget(request, this.config);
         const title = target ? target.title || (await getKitsuTitle(target.kitsuId)) : '';
         if (target && title) {
-          return this.handleTitleRequest(title, target.displaySeason, target.kitsuEpisode, request.isMovie);
+          return this.handleTitleRequest(title, target.displaySeason, target.kitsuEpisode, request.isMovie, target.titleAlt);
         }
       }
       const unmapped = await this.handleUnmappedSeries(request, episodeNumber);
@@ -1105,8 +1105,8 @@ export class AnimeSaturnProvider {
     }
   }
 
-  async handleTitleRequest(title: string, seasonNumber: number | null, episodeNumber: number | null, isMovie = false): Promise<{ streams: StreamForStremio[] }> {
-    debug(1, 'AnimeSaturn', 'title request', { title, season: seasonNumber, episode: episodeNumber, isMovie });
+  async handleTitleRequest(title: string, seasonNumber: number | null, episodeNumber: number | null, isMovie = false, titleAlt?: string | null): Promise<{ streams: StreamForStremio[] }> {
+    debug(1, 'AnimeSaturn', 'title request', { title, titleAlt, season: seasonNumber, episode: episodeNumber, isMovie });
     const universalTitle = applyUniversalAnimeTitleNormalization(title);
     if (universalTitle !== title) {
       debug(3, 'AnimeSaturn', `[UniversalTitle][Applied] ${title} -> ${universalTitle}`);
@@ -1114,12 +1114,16 @@ export class AnimeSaturnProvider {
     const normalizedTitle = normalizeTitleForSearch(universalTitle, animeSaturnTitleNormalization);
     debug(2, 'AnimeSaturn', `[AnimeSaturn] Titolo normalizzato per ricerca: ${normalizedTitle}`);
     debug(3, 'AnimeSaturn', '[AnimeSaturn] Query inviata allo scraper (post-normalize):', normalizedTitle);
-    let animeVersions = filterAnimeResults(await this.searchAllVersions(normalizedTitle), normalizedTitle);
+    // L'alternativo (romaji MAL) serve solo al filtro: se i siti listano l'opera
+    // col romaji, il titolo inglese non supera la soglia e i risultati giusti
+    // vengono scartati. Nessuna richiesta in più: si rifiltra lo stesso fetch.
+    const titles = titleAlt && titleAlt !== normalizedTitle ? [normalizedTitle, titleAlt] : [normalizedTitle];
+    let animeVersions = filterAnimeResults(await this.searchAllVersions(normalizedTitle), titles);
     if (!animeVersions.length) {
       // Budget ricerca <=2 fetch: una sola query di ripiego.
       const [fallbackQuery] = buildTitleFallbackQueries(normalizedTitle).filter(q => q && q !== normalizedTitle);
       if (fallbackQuery) {
-        const fallbackVersions = filterAnimeResults(await this.searchAllVersions(fallbackQuery), normalizedTitle);
+        const fallbackVersions = filterAnimeResults(await this.searchAllVersions(fallbackQuery), titles);
         if (fallbackVersions.length) {
           debug(2, 'AnimeSaturn', `[AnimeSaturn] Trovato con query di ripiego: ${fallbackQuery}`);
           animeVersions = fallbackVersions;

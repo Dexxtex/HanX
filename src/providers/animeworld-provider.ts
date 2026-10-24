@@ -11,7 +11,7 @@ import {
   normalizeSearchTitleKey,
   normalizeTitleForSearch,
   resolveExactMapKey,
-  titleMatchScore,
+  titleMatchScoreAny,
   type TitleNormalizationOptions,
 } from '../utils/anime-title-normalization.js';
 import {
@@ -792,7 +792,7 @@ export class AnimeWorldProvider {
         const target = await resolveAnimeTarget(request, this.config);
         const title = target ? target.title || (await getKitsuTitle(target.kitsuId)) : '';
         if (target && title) {
-          return this.handleTitleRequest(title, target.displaySeason, target.kitsuEpisode, request.isMovie);
+          return this.handleTitleRequest(title, target.displaySeason, target.kitsuEpisode, request.isMovie, target.titleAlt);
         }
       }
       const unmapped = await this.handleUnmappedSeries(request, episodeNumber);
@@ -817,7 +817,7 @@ export class AnimeWorldProvider {
         const target = await resolveAnimeTarget(request, this.config);
         const title = target ? target.title || (await getKitsuTitle(target.kitsuId)) : '';
         if (target && title) {
-          return this.handleTitleRequest(title, target.displaySeason, target.kitsuEpisode, request.isMovie);
+          return this.handleTitleRequest(title, target.displaySeason, target.kitsuEpisode, request.isMovie, target.titleAlt);
         }
       }
       const unmapped = await this.handleUnmappedSeries(request, episodeNumber);
@@ -843,7 +843,7 @@ export class AnimeWorldProvider {
         const target = await resolveAnimeTarget(request, this.config);
         const title = target ? target.title || (await getKitsuTitle(target.kitsuId)) : '';
         if (target && title) {
-          return this.handleTitleRequest(title, target.displaySeason, target.kitsuEpisode, request.isMovie);
+          return this.handleTitleRequest(title, target.displaySeason, target.kitsuEpisode, request.isMovie, target.titleAlt);
         }
       }
       const unmapped = await this.handleUnmappedSeries(request, episodeNumber);
@@ -854,8 +854,8 @@ export class AnimeWorldProvider {
     } catch(e){ console.error('[AnimeWorld] tvdb handler error', e); return { streams: [] }; }
   }
 
-  async handleTitleRequest(title: string, seasonNumber: number | null, episodeNumber: number | null, isMovie = false): Promise<{ streams: StreamForStremio[] }> {
-    debug(1, 'AnimeWorld', 'title request', { title, season: seasonNumber, episode: episodeNumber, isMovie });
+  async handleTitleRequest(title: string, seasonNumber: number | null, episodeNumber: number | null, isMovie = false, titleAlt?: string | null): Promise<{ streams: StreamForStremio[] }> {
+    debug(1, 'AnimeWorld', 'title request', { title, titleAlt, season: seasonNumber, episode: episodeNumber, isMovie });
     const universalTitle = applyUniversalAnimeTitleNormalization(title);
     if (universalTitle !== title) {
       debug(3, 'AnimeWorld', `[UniversalTitle][Applied] ${title} -> ${universalTitle}`);
@@ -874,7 +874,11 @@ export class AnimeWorldProvider {
     // Filtro slug base definito PRIMA della ricerca: searchAllVersions lo usa per
     // sondare SOLO gli slug base che poi sopravvivono a questo filtro (senza,
     // ogni ricerca sonda ~10 pagine /play/<slug> per determinare la lingua).
-    const normSlugKey = normalized.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    const slugKey = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    const normSlugKey = slugKey(normalized);
+    // Romaji MAL: molti slug AnimeWorld sono il titolo MAL, non quello inglese.
+    const slugKeys = [normSlugKey];
+    const titleKeys = [normalized];
     const wantsRewrite = /rewrite/i.test(normalized);
     const strictFilterActive = !skipExtraNormalization && !wantsRewrite;
     const allowedSuffixes = ['-ita', '-subita', '-sub-ita', '-cr-ita', '-ita-cr'];
@@ -883,9 +887,9 @@ export class AnimeWorldProvider {
       const basePart = raw.split('.')[0];
       const cleaned = basePart.replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
       if (/rewrite\b/.test(cleaned)) return false;
-      if (cleaned === normSlugKey) return true;
-      if (allowedSuffixes.some(suf => cleaned === normSlugKey + suf)) return true;
-      return titleMatchScore(normalized, basePart.replace(/-/g, ' ')) >= 0.5;
+      if (slugKeys.includes(cleaned)) return true;
+      if (allowedSuffixes.some(suf => slugKeys.some(key => cleaned === key + suf))) return true;
+      return titleMatchScoreAny(titleKeys, basePart.replace(/-/g, ' ')) >= 0.5;
     };
 
     const searchWithLogging = async (query: string) => {
@@ -942,7 +946,17 @@ export class AnimeWorldProvider {
       try {
         if (!wantsRewrite) {
           const beforeCount = versions.length;
-          const filtered = versions.filter(matchesBaseSlug);
+          let filtered = versions.filter(matchesBaseSlug);
+          if (!filtered.length && titleAlt && titleAlt !== normalized) {
+            // Stessi risultati già scaricati, filtro più largo: nessuna richiesta.
+            titleKeys.push(titleAlt);
+            const altKey = slugKey(titleAlt);
+            if (!slugKeys.includes(altKey)) slugKeys.push(altKey);
+            filtered = versions.filter(matchesBaseSlug);
+            if (filtered.length) {
+              debug(2, 'AnimeWorld', `[AnimeWorld] Match con titolo alternativo "${titleAlt}"`);
+            }
+          }
           debug(3, 'AnimeWorld', `[AnimeWorld] Strict base filter applied (${normSlugKey}) from ${beforeCount} -> ${filtered.length}`);
           if (!filtered.length) {
             debug(3, 'AnimeWorld', '[AnimeWorld] Strict filter produced 0 results, NOT restoring broad matches (no full title match).');

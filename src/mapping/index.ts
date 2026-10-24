@@ -2,13 +2,14 @@
  * Local anime mapping index.
  *
  * Schema v1:
- *   series: { "imdb:tt...": { title, seasons: { "3": [{ from, kitsuId, offset, title, episodeCount }] } } }
- *   movies: { "tmdb:...": { kitsuId, title } }
+ *   series: { "imdb:tt...": { title, seasons: { "3": [{ from, kitsuId, offset, title, titleAlt, episodeCount }] } } }
+ *   movies: { "tmdb:...": { kitsuId, title, titleAlt } }
  *
  * `from` is the external episode number where a Kitsu entry starts in that
  * season; `offset` is subtracted from the external episode. When offset is
- * omitted, from - 1 is used. A missing local match optionally falls back to
- * live official APIs (see live.ts).
+ * omitted, from - 1 is used. `titleAlt` is the MAL romaji, which is what the
+ * Italian sites often list (the English title alone scores 0 on their filter).
+ * A missing local match optionally falls back to live official APIs (see live.ts).
  */
 
 import { fileURLToPath } from 'node:url';
@@ -292,6 +293,7 @@ export function resolveLocalTarget(request: MappingRequest): MappingTarget | nul
       kitsuId: String(movieKitsuId),
       kitsuEpisode: 1,
       title: (typeof movieRaw === 'object' && movieRaw?.title) || '',
+      titleAlt: (typeof movieRaw === 'object' && movieRaw?.titleAlt) || '',
       displaySeason: null,
       source: 'local',
     };
@@ -348,6 +350,7 @@ export function resolveLocalTarget(request: MappingRequest): MappingTarget | nul
     kitsuId: String(range.kitsuId),
     kitsuEpisode,
     title: range.title || series.title || '',
+    titleAlt: range.titleAlt || '',
     displaySeason: request.season,
     source: 'local',
   };
