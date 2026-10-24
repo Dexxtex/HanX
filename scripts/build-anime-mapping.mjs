@@ -694,7 +694,8 @@ async function main() {
           stats.error = (stats.error || 0) + 1;
           console.error(`  ! ${type} ${malId}: ${error.message}`);
         }
-        if (processed % 25 === 0) persist();
+        // Il file indice cresce (MB): salvare ogni 100 entry, non ogni 25.
+        if (processed % 100 === 0) persist();
       }
       cursor.page += 1;
       cursor.pos = 0;
