@@ -393,7 +393,7 @@ function yearOf(value) {
  * MAL aggiunge suffissi che TMDB non usa: "Area 88 (TV)", "Rozen Maiden:
  * Träumend", "Yowamushi Pedal 2nd Season".
  */
-export function titleVariants(title) {
+export function titleVariants(title, stripSequel = false) {
   const variants = [String(title || '').trim()];
   const add = (value) => {
     const clean = String(value || '').trim();
@@ -402,6 +402,9 @@ export function titleVariants(title) {
   add(variants[0].replace(/\s*\([^)]*\)\s*$/, ''));
   add(variants[0].replace(/\s+(?:Season\s+\d+|\d+(?:st|nd|rd|th)\s+Season|Part\s+\d+)\s*$/i, ''));
   add(variants[0].split(/\s*[:–—-]\s+/)[0]);
+  // Solo per le serie: TMDB accorpa i seguiti nella serie madre ("City Hunter 2"
+  // -> "City Hunter"). Per i film la coda è un altro film, non una stagione.
+  if (stripSequel) add(variants[0].replace(/\s+(?:\d+|S\d+|[IVX]{1,4})\s*$/i, ''));
   return variants.filter(Boolean);
 }
 
@@ -412,7 +415,7 @@ export function tmdbQuery(entry) {
   for (const value of [entry?.title_english, entry?.title]) {
     const title = String(value || '').trim();
     if (!title) continue;
-    for (const variant of titleVariants(title)) {
+    for (const variant of titleVariants(title, kind === 'tv')) {
       if (!queries.includes(variant)) queries.push(variant);
     }
   }
