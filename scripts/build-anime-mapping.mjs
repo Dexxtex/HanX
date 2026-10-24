@@ -383,18 +383,33 @@ function yearOf(value) {
   return Number.isFinite(year) && year > 1900 ? year : null;
 }
 
+/**
+ * Varianti di titolo per la ricerca TMDB, dalla più specifica alla più generica.
+ * MAL aggiunge suffissi che TMDB non usa: "Area 88 (TV)", "Rozen Maiden:
+ * Träumend", "Yowamushi Pedal 2nd Season".
+ */
+export function titleVariants(title) {
+  const variants = [String(title || '').trim()];
+  const add = (value) => {
+    const clean = String(value || '').trim();
+    if (clean.length >= 3 && !variants.includes(clean)) variants.push(clean);
+  };
+  add(variants[0].replace(/\s*\([^)]*\)\s*$/, ''));
+  add(variants[0].replace(/\s+(?:Season\s+\d+|\d+(?:st|nd|rd|th)\s+Season|Part\s+\d+)\s*$/i, ''));
+  add(variants[0].split(/\s*[:–—-]\s+/)[0]);
+  return variants.filter(Boolean);
+}
+
 /** TMDB search terms for a Jikan catalog entry (MAL titles are Japanese-first). */
 export function tmdbQuery(entry) {
   const kind = String(entry?.type || '').toLowerCase() === 'movie' ? 'movie' : 'tv';
   const queries = [];
   for (const value of [entry?.title_english, entry?.title]) {
     const title = String(value || '').trim();
-    if (!title || queries.includes(title)) continue;
-    queries.push(title);
-    // "Rozen Maiden: Träumend" è la stagione 2 di "Rozen Maiden": TMDB non usa
-    // i sottotitoli MAL. Il titolo base va provato solo con anno compatibile.
-    const base = title.split(/\s*[:–—-]\s+/)[0].trim();
-    if (base.length >= 3 && base !== title && !queries.includes(base)) queries.push(base);
+    if (!title) continue;
+    for (const variant of titleVariants(title)) {
+      if (!queries.includes(variant)) queries.push(variant);
+    }
   }
   return {
     kind,
