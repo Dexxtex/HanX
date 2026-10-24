@@ -98,11 +98,10 @@ Le variabili d'ambiente che hanno un campo corrispondente nel manifest (`TMDB_AP
 Il livello `src/mapping/` risolve gli ID esterni verso una entry Kitsu usando esclusivamente API ufficiali:
 
 - **Kitsu** (pubblico) per titoli, date di inizio e relazioni `sequel`/`prequel` (split cour/parti)
-- **TMDB** per gli external ID e le stagioni
+- **TMDB** per gli external ID e i film
 - **TVDB v4** in **aired order** (`/episodes/default`) per serie e stagioni
-- **Fribb/anime-lists** solo come catalogo di ID (Kitsu ↔ TVDB/TMDB/IMDb): Kitsu non espone mapping TMDB/IMDb e ha solo 2.157 serie mappate su TVDB
 
-L'indice locale `src/mapping/data/anime-seasons.json` viene caricato una volta e usato senza rete; ogni range contiene il titolo della entry Kitsu e il conteggio episodi, così split cour e richieste fuori range non finiscono sull'episodio sbagliato. In caso di miss, il resolver può interrogare le API ufficiali (con cache in memoria e retry su 429/5xx). I provider non usano più un resolver di path esterni: risolvono `{ titolo, stagione, episodio Kitsu }` e cercano per titolo. L'indice generato copre ~4.300 serie e ~1.700 film; le entry senza ID esterni nel catalogo (oggi ~1.700 serie e ~2.400 film) restano risolte al volo via TMDB/IMDb + ricerca Kitsu.
+L'indice locale `src/mapping/data/anime-seasons.json` viene caricato una volta e usato senza rete; ogni range contiene il titolo della entry Kitsu e il conteggio episodi, così split cour e richieste fuori range non finiscono sull'episodio sbagliato. In caso di miss, il resolver può interrogare le API ufficiali (con cache in memoria e retry su 429/5xx). I provider non usano più un resolver di path esterni: risolvono `{ titolo, stagione, episodio Kitsu }` e cercano per titolo. L'indice generato copre le serie; i film vengono risolti al volo via TMDB/IMDb + ricerca Kitsu (Kitsu non espone mapping TMDB/IMDb per i film).
 
 > **L'indice spedito è vuoto.** Il mapping multi-stagione/split-cour richiede un indice generato (`pnpm mapping:build`) oppure entrambe le chiavi `TMDB_API_KEY` e `TVDB_API_KEY` per il fallback live. Senza di esse restano disponibili solo Kitsu e le ricerche per titolo; le richieste di stagioni successive non vengono forzate sul titolo base.
 

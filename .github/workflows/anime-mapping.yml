@@ -1,7 +1,7 @@
 name: Anime mapping
 
-# Genera l'indice di mapping (anime-lists + Kitsu/TVDB/TMDB) e lo pubblica come
-# asset della release "mapping". L'addon lo consuma con ANIME_MAPPING_URL.
+# Genera l'indice di mapping (Kitsu/TVDB/TMDB) e lo pubblica come asset della
+# release "mapping". L'addon lo consuma con ANIME_MAPPING_URL.
 #
 # Nota: i workflow schedulati girano solo dal branch di default (main).
 

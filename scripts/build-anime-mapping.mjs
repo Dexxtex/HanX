@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 /**
- * Builds src/mapping/data/anime-seasons.json from the Fribb/anime-lists
- * cross-id catalogue (seed ids) plus TVDB v4 (aired/default order), TMDB
- * (IMDb id) and Kitsu (episode relationships).
+ * Builds src/mapping/data/anime-seasons.json using official APIs only:
+ * Kitsu mapping/resources, TVDB v4 (aired/default order) and TMDB.
  *
  * Usage:
  *   node scripts/build-anime-mapping.mjs [--limit=N] [--check]
@@ -26,7 +25,6 @@ const cacheDir = path.join(root, '.cache', 'anime-mapping');
 const KITSU = 'https://kitsu.io/api/edge';
 const TMDB = 'https://api.themoviedb.org/3';
 const TVDB = 'https://api4.thetvdb.com/v4';
-const ANIME_LISTS = 'https://raw.githubusercontent.com/Fribb/anime-lists/master/anime-list-full.json';
 const SCHEMA_VERSION = 1;
 
 const args = process.argv.slice(2);
@@ -230,6 +228,11 @@ function kitsuEntry(resource) {
   };
 }
 
+async function getKitsuAnime(id) {
+  const json = await fetchJson(`${KITSU}/anime/${id}`);
+  return kitsuEntry(json?.data);
+}
+
 export async function getKitsuRelations(id) {
   const json = await fetchJson(`${KITSU}/anime/${id}?include=mediaRelationships.destination`);
   const entry = kitsuEntry(json?.data);
@@ -260,54 +263,29 @@ async function collectEntries(seed) {
   return [...byId.values()].sort((a, b) => (a.startDate || '').localeCompare(b.startDate || ''));
 }
 
-function firstId(value) {
-  if (Array.isArray(value)) return String(value.find(Boolean) || '');
-  return value ? String(value) : '';
-}
-
-/**
- * Seeds from the Fribb/anime-lists cross-id catalogue. Kitsu itself has no
- * TMDB/IMDb mappings and only 2.157 TVDB ones; this file carries the ids for
- * ~6.4k series and ~1.7k movies. Movies need no API: they go straight in.
- */
-export function animeListSeeds(entries) {
-  const series = [];
-  const movies = {};
-  const gap = { series: 0, movies: 0 };
-  const seenTvdb = new Set();
-  for (const entry of entries) {
-    const kitsuId = firstId(entry?.kitsu_id);
-    if (!kitsuId) continue;
-    const imdbId = firstId(entry.imdb_id);
-    const tmdb = entry.themoviedb_id || {};
-    const tmdbTv = typeof tmdb === 'number' ? '' : firstId(tmdb.tv);
-    const tmdbMovie = typeof tmdb === 'number' ? String(tmdb) : firstId(tmdb.movie);
-    if (entry.type === 'MOVIE') {
-      if (tmdbMovie) movies[`tmdb:${tmdbMovie}`] = { kitsuId };
-      if (imdbId) movies[`imdb:${imdbId}`] = { kitsuId };
-      if (!tmdbMovie && !imdbId) gap.movies += 1;
-      continue;
+async function* kitsuMappingsPage(externalSite, pageLimit = 20) {
+  let offset = 0;
+  while (offset < limit * pageLimit || limit === Infinity) {
+    const url =
+      `${KITSU}/mappings?filter[externalSite]=${encodeURIComponent(externalSite)}` +
+      `&page[limit]=${pageLimit}&page[offset]=${offset}&include=item`;
+    const json = await fetchJson(url);
+    const data = Array.isArray(json?.data) ? json.data : [];
+    if (data.length === 0) return;
+    const included = new Map();
+    for (const resource of json?.included || []) {
+      const entry = kitsuEntry(resource);
+      if (entry) included.set(entry.id, entry);
     }
-    // Without a TVDB id there is no episode order to align against.
-    if (!entry.tvdb_id) {
-      if (entry.type === 'TV') gap.series += 1;
-      continue;
+    for (const mapping of data) {
+      const tvdbId = mapping?.attributes?.externalId;
+      const itemId = mapping?.relationships?.item?.data?.id;
+      if (!tvdbId || !itemId) continue;
+      yield { externalId: String(tvdbId), itemId: String(itemId), included: included.get(String(itemId)) || null };
     }
-    // One row per season shares the TVDB id, and collectEntries follows
-    // sequel/prequel from any of them, so keep the first only.
-    const tvdbId = String(entry.tvdb_id);
-    if (seenTvdb.has(tvdbId)) continue;
-    seenTvdb.add(tvdbId);
-    series.push({ kitsuId, tvdbId, tmdbId: tmdbTv });
+    if (data.length < pageLimit) return;
+    offset += pageLimit;
   }
-  return { series, movies, gap };
-}
-
-async function loadAnimeList() {
-  // Always refetched: a cached copy would freeze the seed list forever and make
-  // the scheduled refresh pointless.
-  const json = await fetchJson(ANIME_LISTS, {}, false);
-  return animeListSeeds(Array.isArray(json) ? json : Object.values(json || {}));
 }
 
 async function getTvdbSeries(tvdbId) {
@@ -484,13 +462,14 @@ function mergeSeries(target, key, title, seasons) {
 }
 
 async function buildSeriesSeed(seed) {
-  const tvdbId = seed.tvdbId;
+  const tvdbId = seed.externalId;
   const tvdbSeries = await getTvdbSeries(tvdbId);
   if (!tvdbSeries) return null;
 
-  // collectEntries fetches the seed entry itself, so no separate lookup.
-  const entries = await collectEntries({ id: seed.kitsuId });
-  if (entries.length === 0) return null;
+  const seedAnime = seed.included || (await getKitsuAnime(seed.itemId));
+  if (!seedAnime) return null;
+
+  const entries = await collectEntries(seedAnime);
   const tvdbEpisodes = await getTvdbEpisodes(tvdbId);
   if (tvdbEpisodes.length === 0) return null;
   const assignment = alignEntries(tvdbEpisodes, entries);
@@ -508,12 +487,12 @@ async function buildSeriesSeed(seed) {
   const result = {
     title: tvdbSeries.name || entries[0]?.title || '',
     series: {},
+    movies: {},
   };
   mergeSeries(result.series, `tvdb:${tvdbId}`, result.title, tvdbRanges);
 
-  // IMDb key via TMDB external ids (the catalogue usually carries the TMDB id,
-  // so the TVDB->TMDB lookup is only a fallback).
-  const tmdbTv = seed.tmdbId ? { id: seed.tmdbId } : await findTmdbTv(tvdbId);
+  // IMDb key via TMDB external ids.
+  const tmdbTv = await findTmdbTv(tvdbId);
   if (!tmdbTv?.id) return result;
 
   const tmdbDetails = await getTmdbTvDetails(tmdbTv.id);
@@ -545,6 +524,18 @@ async function buildSeriesSeed(seed) {
     mergeSeries(result.series, `tmdb:${tmdbTv.id}`, result.title, rangesFrom(tmdbEntries));
   }
 
+  // Movies found while traversing split-cour relationships.
+  for (const entry of entries.filter((item) => item.subtype === 'movie')) {
+    const mappings = await fetchJson(`${KITSU}/anime/${entry.id}/mappings`);
+    for (const mapping of mappings?.data || []) {
+      const site = mapping?.attributes?.externalSite;
+      const externalId = mapping?.attributes?.externalId;
+      if (!externalId) continue;
+      if (site === 'themoviedb/movie') result.movies[`tmdb:${externalId}`] = { kitsuId: entry.id, title: entry.title };
+      if (site === 'imdb/movie') result.movies[`imdb:${externalId}`] = { kitsuId: entry.id, title: entry.title };
+    }
+  }
+
   return result;
 }
 
@@ -556,14 +547,12 @@ async function main() {
     movies: {},
   };
 
-  const { series: allSeeds, movies: seededMovies, gap } = await loadAnimeList();
-  Object.assign(index.movies, seededMovies);
-  const seriesSeeds = allSeeds.slice(0, limit);
-  console.log(
-    `anime-lists series seeds: ${seriesSeeds.length}/${allSeeds.length}` +
-      `${limit === Infinity ? '' : ` (limit ${limit})`}, movies: ${Object.keys(seededMovies).length}`,
-  );
-  console.log(`  senza id esterni (risoluzione live): ${gap.series} serie, ${gap.movies} film`);
+  const seriesSeeds = [];
+  for await (const seed of kitsuMappingsPage('thetvdb/series')) {
+    if (seriesSeeds.length >= limit) break;
+    seriesSeeds.push(seed);
+  }
+  console.log(`Kitsu TVDB series seeds: ${seriesSeeds.length}${limit === Infinity ? '' : ` (limit ${limit})`}`);
 
   const stats = { ok: 0, notFound: 0, skipped: 0 };
   const seriesResults = await runPool(seriesSeeds, 4, async (seed) => {
@@ -577,17 +566,18 @@ async function main() {
       // cancellata): il seed si salta, non è un errore del build.
       if (/HTTP 404/.test(error.message)) stats.notFound += 1;
       else stats.skipped += 1;
-      console.error(`  ! series seed ${seed.tvdbId}: ${error.message}`);
+      console.error(`  ! series seed ${seed.externalId}: ${error.message}`);
       return null;
     }
   });
   for (const result of seriesResults) {
     if (!result) continue;
     for (const [key, value] of Object.entries(result.series)) mergeSeries(index.series, key, value.title, value.seasons);
+    Object.assign(index.movies, result.movies);
   }
 
-  // Entries with no external id in the catalogue (see the gap counts above) are
-  // still resolved live at request time via TMDB/IMDb + Kitsu (src/mapping/live.ts).
+  // Kitsu has no TMDB/IMDb movie mappings. Movies are resolved live at request
+  // time via TMDB/IMDb + Kitsu search (see src/mapping/live.ts).
   applyOverrides(index, readJson(overridesFile));
   const errors = validateIndex(index);
   if (errors.length > 0) {
