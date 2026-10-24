@@ -61,6 +61,7 @@ export {
   normalizeEpisodesList,
   pickEpisodeEntry,
   collectMediaLinksFromEmbedHtml,
+  episodeTag,
   BLOCKED_DOMAINS,
   type NormalizedEpisode,
 } from './helpers.js';

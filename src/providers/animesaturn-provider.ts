@@ -5,7 +5,6 @@ import { getDomain } from '../utils/domains.js';
 import { debug, redactUrl } from '../utils/logger.js';
 import { checkIsAnimeById, applyUniversalAnimeTitleNormalization } from '../utils/animeGate.js';
 import { buildEasyProxyHlsUrl, buildEasyProxyStreamUrl } from '../utils/easyproxy.js';
-import { episodeTag } from './animeworld-provider.js';
 import {
   buildTitleFallbackQueries,
   normalizeTitleForSearch,
@@ -24,6 +23,7 @@ import {
   inferSourceTag,
   BLOCKED_DOMAINS,
   getEnglishTitleFromAnyId,
+  episodeTag,
 } from './anime-core/index.js';
 import {
   resolveMappingRequest,

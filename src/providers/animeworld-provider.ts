@@ -20,6 +20,7 @@ import {
   getProviderUrl,
   getEnglishTitleFromAnyId,
   isAbortOrTimeoutError,
+  episodeTag,
 } from './anime-core/index.js';
 import {
   resolveMappingRequest,
@@ -1241,17 +1242,6 @@ export function animeWorldDisplayName(name: string | undefined, slug: string, fa
   if (clean.length >= 3 && !looksLikeSlug) return clean;
   const fromSlug = animeWorldSlugBase(slug).replace(/[^a-z0-9]+/gi, ' ').trim();
   return fromSlug || String(fallback || '').trim() || slug;
-}
-
-/**
- * Etichetta S/E. La stagione si stampa solo quando e' davvero nota: negli id Kitsu ogni
- * stagione e' un anime a se', quindi il campo season vale sempre 1 e stamparlo mette "S1"
- * su episodi di S2. Per IMDB/TMDB la stagione e' reale e resta.
- */
-export function episodeTag(seasonNumber: number | null, episodeNumber: number | null): string {
-  const s = seasonNumber != null ? `S${seasonNumber}` : '';
-  const e = episodeNumber != null ? `E${episodeNumber}` : '';
-  return `${s}${e}`;
 }
 
 export { normalizeSearchTitleKey, animeWorldSlugBase };

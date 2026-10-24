@@ -17,6 +17,17 @@ export function isAbortOrTimeoutError(err: unknown): boolean {
   return /timeout|abort/i.test(`${e?.name || ''} ${e?.message || ''}`);
 }
 
+/**
+ * Etichetta S/E. La stagione si stampa solo quando e' davvero nota: negli id Kitsu ogni
+ * stagione e' un anime a se', quindi il campo season vale sempre 1 e stamparlo mette "S1"
+ * su episodi di S2. Per IMDB/TMDB la stagione e' reale e resta.
+ */
+export function episodeTag(seasonNumber: number | null, episodeNumber: number | null): string {
+  const s = seasonNumber != null ? `S${seasonNumber}` : '';
+  const e = episodeNumber != null ? `E${episodeNumber}` : '';
+  return `${s}${e}`;
+}
+
 // ─── Numeric helpers ────────────────────────────────────────
 
 /**

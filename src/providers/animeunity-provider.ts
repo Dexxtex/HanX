@@ -1,7 +1,6 @@
 import { getDomain } from '../utils/domains.js';
 import { debug, redactUrl } from '../utils/logger.js';
 import { buildEasyProxyHlsUrl, buildEasyProxyStreamUrl } from '../utils/easyproxy.js';
-import { episodeTag } from './animeworld-provider.js';
 import {
   decodeHtmlAttribute,
   parseEpisodesFromAnimeHtml,
@@ -37,6 +36,7 @@ import {
   collectMediaLinksFromEmbedHtml,
   sanitizeAnimeTitle,
   getEnglishTitleFromAnyId,
+  episodeTag,
 } from './anime-core/index.js';
 import {
   resolveMappingRequest,
