@@ -48,6 +48,15 @@ jobs:
           TVDB_API_KEY: ${{ secrets.TVDB_API_KEY }}
           TVDB_PIN: ${{ secrets.TVDB_PIN }}
         run: |
+          # Preflight: messaggio chiaro se i secret non arrivano al job.
+          if [ -z "$TMDB_API_KEY" ]; then
+            echo "::error::TMDB_API_KEY vuota. Va creata in Settings -> Secrets and variables -> Actions -> scheda Secrets (non Variables)."
+            exit 1
+          fi
+          if [ -z "$TVDB_API_KEY" ]; then
+            echo "::error::TVDB_API_KEY vuota. Va creata in Settings -> Secrets and variables -> Actions -> scheda Secrets (non Variables)."
+            exit 1
+          fi
           if [ -n "${{ inputs.limit }}" ]; then
             node scripts/build-anime-mapping.mjs --limit=${{ inputs.limit }}
           else
