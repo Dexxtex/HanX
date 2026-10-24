@@ -787,12 +787,12 @@ async function main() {
           stats.error = (stats.error || 0) + 1;
           console.error(`  ! ${type} ${malId}: ${error.message}`);
         }
-        // Il file indice cresce (MB): salvare ogni 100 entry, non ogni 25.
-        if (processed % 100 === 0) {
-          persist();
+        // Log ogni 25 (feedback), salvataggio su disco ogni 100 (il file cresce a MB).
+        if (processed % 25 === 0) {
           const consumed = (cursor.page - 1) * JIKAN_PAGE_SIZE + cursor.pos;
           console.log(`  … ${type} ${consumed}/${total}`);
         }
+        if (processed % 100 === 0) persist();
       }
       cursor.page += 1;
       cursor.pos = 0;
