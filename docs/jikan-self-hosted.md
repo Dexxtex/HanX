@@ -141,6 +141,26 @@ Conseguenze da sapere:
 - il `composer update` è **mirato** (`ocramius/package-versions -W`): non aggiorna
   Lumen né Scout, quindi il comportamento dell’app non cambia.
 
+### Perché non Lumen 11
+
+Verificato con il resolver: il tetto non è PHP 8.5, è il bridge RoadRunner.
+`pushrbx/lumen-roadrunner` è fermo alla **v5.9.1** e dichiara
+`laravel/lumen-framework ^9.0` — nessuna versione supporta Lumen 10 o 11.
+
+| Pacchetto | Ultima | Richiede |
+|---|---|---|
+| `laravel/lumen-framework` | 11.2 | illuminate 11 |
+| `jenssegers/mongodb` | 5.11 | illuminate 12/13 (la 4.9 vuole 10.36/11) |
+| `typesense/laravel-scout-typesense-driver` | 5.2.10 | illuminate 10+ (la 5.2.9 arriva a 9) |
+| `pushrbx/lumen-roadrunner` | 5.9.1 | **lumen ^9** ← il blocco |
+
+Quindi Lumen, Scout, Typesense e Mongo si aggiornano **insieme o per niente**, e il
+prerequisito è sostituire il bridge RoadRunner: fork con il vincolo allargato, oppure
+php-fpm/nginx al posto di RR (che cambia entrypoint, healthcheck e `.rr.yaml`).
+È una migrazione con modifiche al codice, non un `composer update`; per questo la
+guida resta su Lumen 9, che su PHP 8.5 gira — `php artisan --version` risponde e
+`composer why-not php 8.5.12` è vuoto.
+
 ### Trappole trovate costruendo
 
 1. **`mongodb-stable` rompe il lock.** Installava la 2.5.5, mentre `mongodb/mongodb 1.12.0` (fissata da `jenssegers/mongodb 3.9.5`) richiede `ext-mongodb ^1.13`. Va pinnata la 1.x: `mongodb-1.21.12`. Sarebbe fallito anche su PHP 8.1: è un difetto del `Dockerfile` upstream, non dell’aggiornamento.
