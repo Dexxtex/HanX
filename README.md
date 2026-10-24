@@ -125,16 +125,16 @@ Il cursore e l'esito di ogni entry stanno in `data/jikan-progress.json` (volume 
 | `--reset` | ignora indice e cursore esistenti |
 | `--check` | valida il JSON senza rete |
 
-Esempio di stato reale (catalogo 13.800 entry, passata completa del 24/10/2026, prima dell'ultimo retry):
+Stato reale (catalogo 13.799 entry, passata completa + retry finale del 24/10/2026):
 
 ```
-tv     8725/8738 (100%)
+tv     8725/8737 (100%)
 movie  5050/5062 (100%)
-registro: 13799/13800 entry (100%)
-  ok 7248, already 1082, no-tmdb 1938, no-align 84, no-kitsu 3446, error 1
+registro: 13799/13799 entry (100%)
+  ok 7353, already 1082, no-tmdb 1807, no-align 110, no-kitsu 3446, error 1
 ```
 
-Prima del retry: 8.330 entry mappate su 13.799 (60,4%). Il retry finale (`--retry=error,no-tmdb,no-align`) ha riaperto 1.996 entry e ne ha recuperate 78 (3,9%): il tetto è raggiunto, perché il residuo non è un errore di match ma un buco di catalogo.
+Sono 8.435 entry mappate su 13.799 (61,1%). Il retry finale (`--retry=error,no-tmdb,no-align`) ha riaperto 2.023 entry e ne ha recuperate 105 (5,2%): il tetto è raggiunto, perché il residuo non è un errore di match ma un buco di catalogo.
 
 Esiti registrati per entry: `ok` (allineata su TVDB, o su TMDB quando TVDB manca), `already` (split cour già coperto), `no-kitsu` (Kitsu non ha il mapping MAL né un titolo corrispondente), `no-tmdb` (titolo non trovato né su TMDB né, per le serie, su TVDB), `no-align` (TVDB esiste ma senza episodi datati compatibili), `error` (rete). Restano fuori dall'indice `no-kitsu`, `no-tmdb`, `no-align` ed `error`: i primi tre sono buchi di catalogo, non errori di match — senza `kitsuId` l'indice non può indicare la stagione, quindi la risoluzione live non li recupera. Resta il fallback per titolo dei provider (TMDB/Tenrai), che non può però correggere gli offset di stagione.
 
