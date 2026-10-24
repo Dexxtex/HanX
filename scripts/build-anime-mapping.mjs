@@ -69,7 +69,8 @@ async function fetchJson(url, init, useCache = true) {
       const response = await fetch(url, {
         ...init,
         headers: {
-          accept: 'application/json',
+          // Kitsu parla JSON:API e risponde 406 a "application/json".
+          accept: new URL(url).host.endsWith('kitsu.io') ? 'application/vnd.api+json' : 'application/json',
           ...(init?.body ? { 'content-type': 'application/json' } : {}),
           ...(init?.headers || {}),
         },
