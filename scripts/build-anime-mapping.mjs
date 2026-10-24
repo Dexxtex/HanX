@@ -675,7 +675,11 @@ async function main() {
     for (;;) {
       const entries = await jikanPage(type, cursor.page);
       if (entries.length === 0) {
-        console.log(`  catalogo ${type} completato (ultima pagina ${cursor.page - 1})`);
+        // Riavvolgi di una pagina: le entry nuove riempiono l'ultima pagina
+        // parziale, che altrimenti resterebbe dietro al cursore. `done` le salta.
+        cursor.page = Math.max(1, cursor.page - 1);
+        cursor.pos = 0;
+        console.log(`  catalogo ${type} completato (riparte da pagina ${cursor.page})`);
         break;
       }
       for (; cursor.pos < entries.length; cursor.pos += 1) {
