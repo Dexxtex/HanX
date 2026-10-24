@@ -25,8 +25,8 @@ questa guida cambia il converter del mapping, non la ricerca per titolo dei prov
 L’immagine ufficiale `jikanme/jikan-rest:latest` è costruita su **PHP 8.1.27**
 (`php:8.1.27-bullseye`, pinnato nel `Dockerfile` upstream). Per girare su 8.5
 bisogna ricompilare il sorgente: sotto c’è il `Dockerfile` upstream con la base
-cambiata e le tre correzioni che il lock richiede (versione di `mongodb`, flag
-Composer, `curl` per l’healthcheck).
+cambiata, la versione di `mongodb` corretta e le dipendenze allineate a 8.5 (vedi
+[Dipendenze aggiornate](#dipendenze-aggiornate-per-85)).
 
 ```bash
 cd apps/jikan-rest
@@ -77,10 +77,16 @@ USER jikanapi:jikanapi
 WORKDIR /app
 
 COPY --chown=jikanapi:jikanapi composer.json composer.lock /app/
-# Obbligatorio: roave/better-reflection 5.11.1 (via matchish/laravel-scout-elasticsearch)
-# dichiara "~8.0.12 || ~8.1.0 || ~8.2.0" e blocca l'installazione. È tooling di
-# codegen, non codice runtime: se in futuro il lock lo aggiorna, togli il flag.
-RUN composer install -n --no-dev --no-cache --no-ansi --no-autoloader --no-scripts --prefer-dist --ignore-platform-req=php
+
+# Aggiornamenti necessari per PHP 8.5:
+#  - ocramius/package-versions 2.7 dichiara solo ~8.1/~8.2; la 2.12 dichiara 8.4/8.5.
+#  - matchish/laravel-scout-elasticsearch (sperimentale, inutilizzato con Typesense)
+#    tiene roave/better-reflection 5.x, che si ferma a PHP 8.2.
+#  - no-api: il repository VCS di lumen-roadrunner altrimenti richiede un token
+#    GitHub anche solo per risolvere le dipendenze.
+RUN php -r '$f = "composer.json"; $j = json_decode(file_get_contents($f), true); unset($j["require"]["matchish/laravel-scout-elasticsearch"]); $j["require"]["ocramius/package-versions"] = "^2.12"; $j["require"]["guzzlehttp/guzzle"] = "^7.5"; $j["repositories"][0]["no-api"] = true; file_put_contents($f, json_encode($j, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");' \
+    && composer update ocramius/package-versions --with-all-dependencies --no-install --no-interaction --no-progress \
+    && composer install -n --no-dev --no-cache --no-ansi --no-autoloader --no-scripts --prefer-dist
 
 COPY --chown=jikanapi:jikanapi . /app/
 RUN set -eux \
@@ -110,12 +116,35 @@ Il `Dockerfile` qui sopra è stato costruito e avviato (Docker 29.9, 16 CPU):
 | `php -v` | `PHP 8.5.12 (cli)` |
 | estensioni | `intl`, `mongodb 1.21.12`, `redis`, `pcntl`, `sockets`, `opcache` |
 | `php artisan --version` | `Lumen (9.1.5)` — l’app si avvia |
+| `composer why-not php 8.5.12` | «no installed package depending on php in versions not matching» — **nessuna eccezione** |
+| `guzzlehttp/guzzle` | `7.5.0` presente e dichiarato nel `composer.json` |
+| `ocramius/package-versions` | `2.12.0` (dichiarava 8.4/8.5) |
 | patch `RepositoryQuery.php` con l’autoloader reale | classe caricata, estende `RepositoryQueryBase`, implementa il contratto, i tre `#[\Override]` validi |
 
-Le due trappole trovate costruendo, già risolte nello snippet:
+## Dipendenze aggiornate per 8.5
 
-1. **`mongodb-stable` rompe il lock.** Installava la 2.5.5, mentre `mongodb/mongodb 1.12.0` (fissata da `jenssegers/mongodb 3.9.5`) richiede `ext-mongodb ^1.13`. Va pinnata la 1.x: `mongodb-1.21.12`.
-2. **`--ignore-platform-req=php` è obbligatorio.** `roave/better-reflection 5.11.1`, tirato da `matchish/laravel-scout-elasticsearch`, dichiara `~8.0.12 || ~8.1.0 || ~8.2.0`. È tooling di code generation, non codice runtime.
+Nessun `--ignore-platform-req`: il lock è stato sistemato alla radice. Tre modifiche,
+tutte nel `RUN` che prepari il `composer.json`:
+
+| Pacchetto | Prima | Dopo | Perché |
+|---|---|---|---|
+| `ocramius/package-versions` | 2.7.0 (`~8.1\|\|~8.2`) | **2.12.0** (`~8.4\|\|~8.5`) | versione compatibile già pubblicata; l’API usata dal codice non cambia |
+| `matchish/laravel-scout-elasticsearch` | V6.0.2 | **rimosso** | sperimentale, inutilizzato con `SCOUT_DRIVER=typesense`; teneva `roave/better-reflection` 5.x, fermo a PHP 8.2 |
+| `guzzlehttp/guzzle` | implicito (dipendenza dell’ES) | **`^7.5` esplicito** | `UpdateCacheJob` e `UpdateDatabaseJob` usano `GuzzleHttp\Client`: senza dichiararlo, rimuovere l’ES se lo portava via |
+
+Conseguenze da sapere:
+
+- il driver Elasticsearch non esiste più in questa immagine: `SCOUT_DRIVER=Matchish\…`
+  non funziona, mentre `typesense` (l’unico che serve) e `null` restano;
+- `no-api: true` sul repository VCS di `pushrbx/lumen-roadrunner` evita che Composer
+  chieda un token GitHub già solo per risolvere le dipendenze durante il build;
+- il `composer update` è **mirato** (`ocramius/package-versions -W`): non aggiorna
+  Lumen né Scout, quindi il comportamento dell’app non cambia.
+
+### Trappole trovate costruendo
+
+1. **`mongodb-stable` rompe il lock.** Installava la 2.5.5, mentre `mongodb/mongodb 1.12.0` (fissata da `jenssegers/mongodb 3.9.5`) richiede `ext-mongodb ^1.13`. Va pinnata la 1.x: `mongodb-1.21.12`. Sarebbe fallito anche su PHP 8.1: è un difetto del `Dockerfile` upstream, non dell’aggiornamento.
+2. **`composer remove` falliva per autenticazione GitHub**, perché il repository VCS richiede l'API. Da qui `no-api: true`.
 
 ### Rumore nei log
 
@@ -550,7 +579,7 @@ monta un `.rr.yaml` su `/app/.rr.yaml` che aggiunge: `queue:work --max-time=3600
 | Query per genere lentissime | indici Mongo assenti: devono essere 29 |
 | Porta 8080 già occupata | lo stack usa `expose`, non `ports`: nessun conflitto atteso |
 | `php -v` dice ancora 8.1 | il servizio usa `image:` invece di `build:` | ripristina il blocco `build` del compose |
-| `composer install` rifiuta il lock | `roave/better-reflection` vs 8.5 | il `Dockerfile` ha già `--ignore-platform-req=php` |
+| `composer install` rifiuta il lock | è saltato il `RUN` che aggiorna le dipendenze | ripristinalo: `why-not php 8.5` deve essere vuoto |
 | `ext-mongodb` versione sbagliata al boot | `mongodb-stable` installa la 2.x | pinna `mongodb-1.21.12` |
 
 ---
