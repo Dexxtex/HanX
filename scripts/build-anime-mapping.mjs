@@ -670,6 +670,8 @@ async function main() {
   outer: for (const type of catalogTypes) {
     const cursor = state.cursor[type] || { page: 1, pos: 0 };
     state.cursor[type] = cursor;
+    const total = await jikanTotal(type);
+    console.log(`  ${type}: ${total} entry nel catalogo`);
     for (;;) {
       const entries = await jikanPage(type, cursor.page);
       if (entries.length === 0) {
@@ -695,7 +697,11 @@ async function main() {
           console.error(`  ! ${type} ${malId}: ${error.message}`);
         }
         // Il file indice cresce (MB): salvare ogni 100 entry, non ogni 25.
-        if (processed % 100 === 0) persist();
+        if (processed % 100 === 0) {
+          persist();
+          const consumed = (cursor.page - 1) * JIKAN_PAGE_SIZE + cursor.pos;
+          console.log(`  … ${type} ${consumed}/${total}`);
+        }
       }
       cursor.page += 1;
       cursor.pos = 0;
