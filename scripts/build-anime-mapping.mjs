@@ -554,10 +554,18 @@ async function main() {
   }
   console.log(`Kitsu TVDB series seeds: ${seriesSeeds.length}${limit === Infinity ? '' : ` (limit ${limit})`}`);
 
+  const stats = { ok: 0, notFound: 0, skipped: 0 };
   const seriesResults = await runPool(seriesSeeds, 4, async (seed) => {
     try {
-      return await buildSeriesSeed(seed);
+      const result = await buildSeriesSeed(seed);
+      if (result) stats.ok += 1;
+      else stats.skipped += 1;
+      return result;
     } catch (error) {
+      // 404 = mapping Kitsu stantio (serie rimossa da TVDB o entry Kitsu
+      // cancellata): il seed si salta, non è un errore del build.
+      if (/HTTP 404/.test(error.message)) stats.notFound += 1;
+      else stats.skipped += 1;
       console.error(`  ! series seed ${seed.externalId}: ${error.message}`);
       return null;
     }
@@ -581,6 +589,7 @@ async function main() {
   writeJsonAtomic(dataFile, index);
   console.log(`✓ wrote ${dataFile}`);
   console.log(`  series: ${Object.keys(index.series).length}, movies: ${Object.keys(index.movies).length}`);
+  console.log(`  seed: ${stats.ok} ok, ${stats.notFound} 404 (mapping Kitsu stantio), ${stats.skipped} altri scarti`);
 }
 
 if (isDirectRun) {
