@@ -297,7 +297,16 @@ async function collectEntries(seed) {
     const id = queue.shift();
     if (visited.has(id)) continue;
     visited.add(id);
-    const { entry, relatedIds } = await getKitsuRelations(id);
+    let entry;
+    let relatedIds;
+    try {
+      ({ entry, relatedIds } = await getKitsuRelations(id));
+    } catch (error) {
+      // Entry Kitsu cancellata tra le relazioni: il resto del franchise resta
+      // valido. Se è la entry di partenza, il chiamante decide (fallback).
+      if (id === String(seed.id)) throw error;
+      continue;
+    }
     if (entry) byId.set(entry.id, entry);
     for (const relatedId of relatedIds) if (!visited.has(relatedId)) queue.push(relatedId);
   }
@@ -442,40 +451,64 @@ async function convertCatalogEntry(entry, index) {
   const at = new Date().toISOString().slice(0, 10);
   const title = String(entry?.title_english || entry?.title || '');
 
-  const kitsuId = (await kitsuIdForMal(entry.mal_id)) || (await kitsuIdByMetadata(entry));
-  if (!kitsuId) return { at, status: 'no-kitsu' };
-
   const query = tmdbQuery(entry);
   const tmdb = await findTmdb(query);
-  if (!tmdb?.id) return { at, status: 'no-tmdb', kitsuId };
+  if (!tmdb?.id) return { at, status: 'no-tmdb' };
 
   const external = await tmdbExternalIds(query.kind, tmdb.id);
   const imdbId = external?.imdb_id || '';
-  const record = { at, kitsuId, tmdbId: String(tmdb.id), tmdbTitle: tmdb.name || tmdb.title || '' };
-
-  if (query.kind === 'movie') {
-    index.movies[`tmdb:${tmdb.id}`] = { kitsuId, title };
-    if (imdbId) index.movies[`imdb:${imdbId}`] = { kitsuId, title };
-    return { ...record, status: 'ok' };
-  }
-
-  // TMDB gives the TVDB id for series; when it is missing we still align on
-  // TMDB episodes, so the entry does not fall out of the dataset.
   const tvdbId = external?.tvdb_id ? String(external.tvdb_id) : '';
+  // TMDB has the TVDB id for series; when it is missing we align on TMDB
+  // episodes, so the entry does not fall out of the dataset.
+  const record = { at, tmdbId: String(tmdb.id), tmdbTitle: tmdb.name || tmdb.title || '' };
+
   // Split-cour entries share the same series: the first one already mapped it.
-  if ((tvdbId && index.series[`tvdb:${tvdbId}`]) || index.series[`tmdb:${tmdb.id}`]) {
+  // Checked before Kitsu, so those entries cost no lookup at all.
+  if (query.kind === 'movie') {
+    if (index.movies[`tmdb:${tmdb.id}`]) return { ...record, status: 'already' };
+  } else if ((tvdbId && index.series[`tvdb:${tvdbId}`]) || index.series[`tmdb:${tmdb.id}`]) {
     return { ...record, status: 'already' };
   }
 
-  const result =
-    (tvdbId ? await buildSeriesSeed({ kitsuId, tvdbId, tmdbId: String(tmdb.id) }) : null) ||
-    (await buildSeriesSeedFromTmdb({ kitsuId, tmdbId: String(tmdb.id) }));
-  if (!result) return { ...record, status: 'no-align' };
-  for (const [key, value] of Object.entries(result.series)) {
-    mergeSeries(index.series, key, value.title, value.seasons);
+  // A Kitsu mapping can point to a deleted entry (HTTP 404): then fall back to
+  // the strict metadata match, exactly like entries with no mapping at all.
+  let kitsuId = await kitsuIdForMal(entry.mal_id);
+  let metadataTried = false;
+  for (;;) {
+    if (!kitsuId) {
+      if (metadataTried) return { ...record, status: 'no-kitsu' };
+      metadataTried = true;
+      kitsuId = await kitsuIdByMetadata(entry);
+      if (!kitsuId) return { ...record, status: 'no-kitsu' };
+    }
+    try {
+      if (query.kind === 'movie') {
+        index.movies[`tmdb:${tmdb.id}`] = { kitsuId, title };
+        if (imdbId) index.movies[`imdb:${imdbId}`] = { kitsuId, title };
+        return { ...record, kitsuId, status: 'ok' };
+      }
+
+      let result = null;
+      if (tvdbId) {
+        try {
+          result = await buildSeriesSeed({ kitsuId, tvdbId, tmdbId: String(tmdb.id) });
+        } catch (error) {
+          // Serie cancellata da TVDB: si allinea comunque su TMDB.
+          if (!/HTTP 404 for api4\.thetvdb\.com/.test(error.message)) throw error;
+        }
+      }
+      if (!result) result = await buildSeriesSeedFromTmdb({ kitsuId, tmdbId: String(tmdb.id) });
+      if (!result) return { ...record, kitsuId, status: 'no-align' };
+      for (const [key, value] of Object.entries(result.series)) {
+        mergeSeries(index.series, key, value.title, value.seasons);
+      }
+      const viaTvdb = Object.keys(result.series).some((key) => key.startsWith('tvdb:'));
+      return { ...record, kitsuId, status: 'ok', via: viaTvdb ? 'tvdb' : 'tmdb' };
+    } catch (error) {
+      if (!/HTTP 404 for kitsu\.io/.test(error.message)) throw error;
+      kitsuId = null;
+    }
   }
-  const viaTvdb = Object.keys(result.series).some((key) => key.startsWith('tvdb:'));
-  return { ...record, status: 'ok', via: viaTvdb ? 'tvdb' : 'tmdb' };
 }
 
 async function getTvdbSeries(tvdbId) {
