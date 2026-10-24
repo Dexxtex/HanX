@@ -197,9 +197,12 @@ niente. Salva come `apps/jikan-rest/RepositoryQuery.php`:
 ```php
 <?php
 
+declare(strict_types=1);
+
 namespace App\Support;
 
 use App\Contracts\RepositoryQuery as RepositoryQueryContract;
+use Closure;
 use Illuminate\Contracts\Database\Query\Builder;
 use Illuminate\Support\Collection;
 use Laravel\Scout\Builder as ScoutBuilder;
@@ -215,7 +218,7 @@ class RepositoryQuery extends RepositoryQueryBase implements RepositoryQueryCont
         return $this->queryable(true)->filter($params);
     }
 
-    public function search(string $keywords, ?\Closure $callback = null): ScoutBuilder
+    public function search(string $keywords, ?Closure $callback = null): ScoutBuilder
     {
         return $this->searchable($keywords, $callback, true);
     }
@@ -233,6 +236,11 @@ Gli import sono tutti classi già presenti nell’immagine (`App\Contracts\Repos
 nessuna dipendenza nuova. Il file è identico a quello upstream tranne `queryable(true)`
 in `filter()` e `where()`: quando aggiorni jikan-rest, fai il diff con l’originale
 invece di ricopiare questa versione.
+
+La sintassi resta volutamente su **PHP 8.1**, la versione dell’immagine
+(`php:8.1.27-bullseye` nel `Dockerfile` upstream): union types e `mixed` sono 8.0,
+`declare(strict_types=1)` è 7.0. Niente `#[\Override]` (8.3, verrebbe ignorato) né
+costrutti 8.4/8.5 (errore fatale): si aggiornano solo dopo aver aggiornato l’immagine.
 
 Crea **sia** questo file sia `mongo-init.js` prima del primo `docker compose up -d`:
 se mancano, Docker crea una directory al posto del file e il mount fallisce.
