@@ -226,6 +226,13 @@ class RepositoryQuery extends RepositoryQueryBase implements RepositoryQueryCont
 }
 ```
 
+Gli import sono tutti classi già presenti nell’immagine (`App\Contracts\RepositoryQuery`,
+`App\Support\RepositoryQueryBase`, `Illuminate\Contracts\Database\Query\Builder`,
+`Illuminate\Support\Collection`, `Laravel\Scout\Builder`): nessun `composer require`,
+nessuna dipendenza nuova. Il file è identico a quello upstream tranne `queryable(true)`
+in `filter()` e `where()`: quando aggiorni jikan-rest, fai il diff con l’originale
+invece di ricopiare questa versione.
+
 Crea **sia** questo file sia `mongo-init.js` prima del primo `docker compose up -d`:
 se mancano, Docker crea una directory al posto del file e il mount fallisce.
 
