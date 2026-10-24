@@ -423,20 +423,26 @@ export function pickTmdbResult(results, year) {
 async function findTmdb({ kind, queries, year }) {
   if (!queries || queries.length === 0) return null;
   const path = kind === 'movie' ? 'search/movie' : 'search/tv';
-  const search = async (query, withYear) => {
+  const fetchResults = async (query, useApiYear) => {
     const params = new URLSearchParams({ query, api_key: tmdbKey });
-    if (withYear && year) params.set(kind === 'movie' ? 'year' : 'first_air_date_year', String(year));
+    if (useApiYear && year) params.set(kind === 'movie' ? 'year' : 'first_air_date_year', String(year));
     const json = await fetchJson(`${TMDB}/${path}?${params}`);
-    return pickTmdbResult(json?.results, withYear ? year : null);
+    return json?.results || [];
   };
   for (const [index, query] of queries.entries()) {
-    const hit = await search(query, true);
-    if (hit) return hit;
-    // Solo il titolo originale può essere ritentato senza anno: un titolo base
-    // senza vincolo d'anno pescherebbe il remake sbagliato.
-    if (year && index === 0) {
-      const bare = await search(query, false);
-      if (bare) return bare;
+    // `first_air_date_year` è esatto lato API, mentre MAL e TMDB divergono
+    // spesso di un anno (Vandread: MAL 2001, TMDB 2000): si riprova senza il
+    // filtro server e si applica il ±1 in locale.
+    for (const useApiYear of year ? [true, false] : [false]) {
+      const results = await fetchResults(query, useApiYear);
+      const strict = pickTmdbResult(results, year ?? null);
+      if (strict) return strict;
+      // Solo il titolo originale, e solo al tentativo senza filtro: se l'anno
+      // MAL è sbagliato di più di un anno, meglio il primo giapponese che un buco.
+      if (index === 0 && !useApiYear) {
+        const loose = pickTmdbResult(results, null);
+        if (loose) return loose;
+      }
     }
   }
   return null;
