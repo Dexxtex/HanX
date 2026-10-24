@@ -6,45 +6,35 @@ on:
 
 jobs:
   generate-pr-animeunity:
+    if: |
+      contains(github.event.issue.labels.*.name, 'normalizzazione-animeunity') ||
+      contains(github.event.issue.labels.*.name, 'richiesta-animeunity')
     runs-on: ubuntu-latest
     permissions:
       contents: write
       pull-requests: write
-      issues: write
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Esci se manca la label dedicata
-        if: |
-          !contains(github.event.issue.labels.*.name, 'normalizzazione-animeunity') &&
-          !contains(github.event.issue.labels.*.name, 'richiesta-animeunity')
-        run: |
-          echo "Etichetta animeunity mancante, esco"
-          exit 1
-
-      - name: Debug issue body
-        run: |
-          echo "BODY="
-          echo "${{ github.event.issue.body }}"
-
       - id: parse
+        env:
+          ISSUE_BODY: ${{ github.event.issue.body }}
         run: |
-          MAL_NAME=$(echo "${{ github.event.issue.body }}" | awk '/^### MAL English name/{getline; while($0 ~ /^ *$/){getline}; print $0}')
-          AU_NAME=$(echo "${{ github.event.issue.body }}" | awk '/^### AnimeUnity name/{getline; while($0 ~ /^ *$/){getline}; print $0}')
-          echo "Estratto MAL_NAME: $MAL_NAME"
-          echo "Estratto AU_NAME: $AU_NAME"
-          echo "mal_name=$MAL_NAME" >> $GITHUB_OUTPUT
-          echo "au_name=$AU_NAME" >> $GITHUB_OUTPUT
-          echo "MAL_NAME_ENV=$MAL_NAME" >> $GITHUB_ENV
-          echo "AU_NAME_ENV=$AU_NAME" >> $GITHUB_ENV
+          MAL_NAME=$(printf '%s\n' "$ISSUE_BODY" | awk '/^### MAL English name/{getline; while($0 ~ /^ *$/){getline}; print $0}')
+          AU_NAME=$(printf '%s\n' "$ISSUE_BODY" | awk '/^### AnimeUnity name/{getline; while($0 ~ /^ *$/){getline}; print $0}')
+          if [ -z "$MAL_NAME" ] || [ -z "$AU_NAME" ]; then
+            echo "Campi MAL/AnimeUnity mancanti nella issue." >&2
+            exit 1
+          fi
+          echo "mal_name=$MAL_NAME" >> "$GITHUB_OUTPUT"
+          echo "au_name=$AU_NAME" >> "$GITHUB_OUTPUT"
 
       - name: Aggiungi riga di normalizzazione AnimeUnity
         env:
-          MAL_NAME: ${{ env.MAL_NAME_ENV }}
-          AU_NAME: ${{ env.AU_NAME_ENV }}
-        run: |
-          python3 scripts/auto_normalize_animeunity.py
+          MAL_NAME: ${{ steps.parse.outputs.mal_name }}
+          AU_NAME: ${{ steps.parse.outputs.au_name }}
+        run: python3 scripts/auto_normalize_animeunity.py
 
       - name: Crea PR
         uses: peter-evans/create-pull-request@v6

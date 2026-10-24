@@ -1,0 +1,69 @@
+name: Anime mapping
+
+# Genera l'indice di mapping (Kitsu/TVDB/TMDB) e lo pubblica come asset della
+# release "mapping". L'addon lo consuma con ANIME_MAPPING_URL.
+#
+# Nota: i workflow schedulati girano solo dal branch di default (main).
+
+on:
+  schedule:
+    # Ogni lunedì alle 03:00 UTC.
+    - cron: '0 3 * * 1'
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: 'Numero massimo di serie da processare (vuoto = tutte)'
+        required: false
+        default: ''
+
+concurrency:
+  group: anime-mapping
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      # La cache rende i giri successivi incrementali (lo script evita le
+      # richieste già fatte); cambia solo con lo script o gli override.
+      - uses: actions/cache@v4
+        with:
+          path: .cache/anime-mapping
+          key: anime-mapping-${{ hashFiles('scripts/build-anime-mapping.mjs', 'src/mapping/overrides.json') }}
+          restore-keys: anime-mapping-
+
+      - name: Build indice
+        env:
+          TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
+          TVDB_API_KEY: ${{ secrets.TVDB_API_KEY }}
+          TVDB_PIN: ${{ secrets.TVDB_PIN }}
+        run: |
+          if [ -n "${{ inputs.limit }}" ]; then
+            node scripts/build-anime-mapping.mjs --limit=${{ inputs.limit }}
+          else
+            node scripts/build-anime-mapping.mjs
+          fi
+
+      - name: Valida indice (gate)
+        run: |
+          node scripts/build-anime-mapping.mjs --check
+          node -e "const i=require('./src/mapping/data/anime-seasons.json');const n=Object.keys(i.series||{}).length+Object.keys(i.movies||{}).length;if(!n){console.error('indice vuoto: non pubblico');process.exit(1)}console.log(n+' entry')"
+
+      - name: Pubblica asset release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view mapping >/dev/null 2>&1 || gh release create mapping \
+            --title "Anime mapping" \
+            --notes "Indice di mapping generato automaticamente dal workflow Anime mapping."
+          gh release upload mapping src/mapping/data/anime-seasons.json --clobber

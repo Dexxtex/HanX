@@ -1,37 +1,65 @@
-# Dipendenze
+# Dipendenze e build
 node_modules
-package-lock.json
-
-# Build
 dist
 data
+*.tsbuildinfo
+package-lock.json
 
-# Secrets and local environment files
+# Segreti e ambiente (il build non ne ha bisogno)
 .env
 .env.*
-!.env.example
 
-# Git
+# Git, GitHub e documentazione
 .git
+.github
 .gitignore
+README.md
+ISSUES.md
+LICENSE.txt
+MEMORY
+
+# Test e script non usati dal build
+tests
+test-provider*.ps1
+docker-compose.yml
+
+# Solo build-copy.js serve a `pnpm run build`
+scripts/*
+!scripts/build-copy.js
+
+# Backup generati a runtime
+config/*.jsonbk
+
+# Grafo, cache e artefatti locali
+graphify-out
+coverage
+.nyc_output
+.cache
+__pycache__
+*.py[cod]
+*.log
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.sqlite3
+*.sqlite3-shm
+*.sqlite3-wal
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
+*.pid
+*.tmp
+*.bak
 
 # IDE
 .vscode
 .idea
 *.swp
 *.swo
+*~
 
 # OS
 .DS_Store
 Thumbs.db
-
-# Test
-tests
-test-provider.ps1
-test-provider-mal.ps1
-server.log
-
-# Documentazione
-README.md
-DEBUG_FETCH.md
-LICENSE.txt
+desktop.ini

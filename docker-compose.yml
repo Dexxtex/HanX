@@ -3,24 +3,32 @@ services:
     container_name: HanX
     build: .
     env_file:
-      - .env
+      # .env is optional and usually absent in git stacks.
+      - path: .env
+        required: false
+      # Dockhand writes non-secret Environment-tab overrides here.
+      - path: .env.dockhand
+        required: false
     ports:
       - "7000:7000"
     volumes:
       - hanx-data:/app/data
     environment:
       - PORT=7000
-      # Opzionale: chiavi API
-      # - TMDB_API_KEY=your_key_here
-      # Opzionale: MediaFlow Proxy
-      # - MFP_URL=http://localhost:3000
-      # - MFP_PSW=your_password
-      # Opzionale: URL base addon per evitare loop con VixSrc
-      # - ADDON_BASE_URL=https://tuo-dominio.com
-      # Opzionale: abilita/disabilita provider
-      # - ANIMEUNITY_ENABLED=true
-      # - ANIMESATURN_ENABLED=true
-      # - ANIMEWORLD_ENABLED=true
+      # Explicit mappings also carry Dockhand secrets, which are injected
+      # into the compose process environment but not written to a file.
+      - TMDB_API_KEY=${TMDB_API_KEY:-}
+      - TVDB_API_KEY=${TVDB_API_KEY:-}
+      - TVDB_PIN=${TVDB_PIN:-}
+      - EASYPROXY_URL=${EASYPROXY_URL:-}
+      - EASYPROXY_PASSWORD=${EASYPROXY_PASSWORD:-}
+      # Forward proxy for scraping, separate from EasyProxy playback.
+      # Disabled by default: set SEARCH_VIA_PROXY=true to use PROXY/*_PROXY.
+      - SEARCH_VIA_PROXY=${SEARCH_VIA_PROXY:-}
+      - PROXY=${PROXY:-}
+      - AU_PROXY=${AU_PROXY:-}
+      - AS_PROXY=${AS_PROXY:-}
+      - AW_PROXY=${AW_PROXY:-}
     restart: unless-stopped
 
 volumes:

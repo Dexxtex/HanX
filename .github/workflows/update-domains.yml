@@ -2,7 +2,7 @@ name: Update Domains
 
 on:
   schedule:
-    - cron: '0 22,8,12,18 * * *' # Every day at 22:00 UTC
+    - cron: '0 22,8,12,18 * * *' # Four times a day
   workflow_dispatch: {}
 
 jobs:
@@ -17,6 +17,9 @@ jobs:
         with:
           python-version: '3.x'
 
+      - name: Test updater
+        run: python3 scripts/test_update_domains.py
+
       - name: Run updater
         id: runupd
         run: |
@@ -24,7 +27,7 @@ jobs:
 
       - name: Detect changes
         run: |
-          files="config/domains.json config/domains.jsonbk"
+          files="config/domains.json config/domains.jsonbk config/provider_urls.json"
           if [ -f attenzione.check ]; then files="$files attenzione.check"; fi
           # Use -- to terminate pathspecs safely
           if git diff --quiet --exit-code -- $files; then
@@ -38,7 +41,7 @@ jobs:
         run: |
           git config user.name "github-actions"
           git config user.email "actions@users.noreply.github.com"
-          git add config/domains.json config/domains.jsonbk || true
+          git add config/domains.json config/domains.jsonbk config/provider_urls.json || true
           if [ -f attenzione.check ]; then git add attenzione.check; fi
           git commit -m "fix: domains update" || echo "Nothing to commit"
           git push || echo "Push skipped"

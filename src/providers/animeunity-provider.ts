@@ -1,70 +1,53 @@
-import { KitsuProvider } from './kitsu.js';
 import { getDomain } from '../utils/domains.js';
-import { formatMediaFlowUrl } from '../utils/mediaflow.js';
+import { debug, redactUrl } from '../utils/logger.js';
+import { buildEasyProxyHlsUrl, buildEasyProxyStreamUrl } from '../utils/easyproxy.js';
+import {
+  decodeHtmlAttribute,
+  parseEpisodesFromAnimeHtml,
+  parseEpisodeServers,
+  parseSearchResultsHtml,
+  parseUnityCoEpisodes,
+  parseVixcloudHls,
+  selectHighestHlsVariant,
+} from './animeunity-parsers.js';
+import type { AnimeUnityPageEpisode } from './animeunity-parsers.js';
 import { AnimeUnityConfig, StreamForStremio } from '../types/animeunity.js';
-import axios from 'axios';
 import * as cheerio from 'cheerio';
 import { SocksProxyAgent } from 'socks-proxy-agent';
-import { HttpsProxyAgent } from 'https-proxy-agent';
+import { ProxyAgent as UndiciProxyAgent } from 'undici';
 import { checkIsAnimeById, applyUniversalAnimeTitleNormalization } from '../utils/animeGate.js';
+import {
+  buildTitleFallbackQueries,
+  normalizeTitleForSearch as normalizeAnimeTitleForSearch,
+  titleMatchScore,
+  type TitleNormalizationOptions,
+} from '../utils/anime-title-normalization.js';
 import {
   createCaches,
   fetchResource,
   getProviderUrl,
-  mapLimit,
+  isSearchProxyEnabled,
   normalizeEpisodesList,
   normalizeRequestedEpisode,
   parseEpisodeNumber,
   parsePositiveInt,
   pickEpisodeEntry,
-  resolveLookupRequest,
-  fetchMappingPayload,
-  extractProviderPaths,
-  extractTmdbIdFromMappingPayload,
-  resolveEpisodeFromMappingPayload,
   toAbsoluteUrl,
-  inferSourceTag,
   collectMediaLinksFromEmbedHtml,
   sanitizeAnimeTitle,
-  getMalAnimeMetadata,
-  getPreferredMalTitle,
-  getMalTitleCandidates,
+  getEnglishTitleFromAnyId,
+  episodeTag,
 } from './anime-core/index.js';
+import {
+  resolveMappingRequest,
+  resolveAnimeTarget,
+  resolveSeasonFallbackTitle,
+  getKitsuTitle,
+  getTvdbTitle,
+  type MappingRequest,
+} from '../mapping/index.js';
 
 // --- Type definitions for external API responses ---
-interface HaglundResponseItem {
-  myanimelist?: string;
-}
-
-interface TmdbTitleResponse {
-  name?: string;
-  title?: string;
-}
-
-interface KitsuMappingAttribute {
-  externalSite?: string;
-  externalId?: number;
-}
-
-interface KitsuMappingItem {
-  attributes?: KitsuMappingAttribute;
-}
-
-interface KitsuMappingsResponse {
-  data?: KitsuMappingItem[];
-}
-
-interface KitsuAttributes {
-  titles?: { en?: string };
-}
-
-interface KitsuData {
-  attributes?: KitsuAttributes;
-}
-
-interface KitsuMainResponse {
-  data?: KitsuData;
-}
 
 const USER_AGENT =
   process.env.AU_USER_AGENT ||
@@ -82,16 +65,27 @@ const TTL = {
 
 const caches = createCaches();
 
-const PROXY_URL = process.env.AU_PROXY || process.env.PROXY || '';
 const DIRECT_TIMEOUT = 3000; // timeout breve per tentativo diretto (senza proxy)
-let proxyAgent: any = undefined;
-if (PROXY_URL) {
-  if (PROXY_URL.startsWith('socks')) {
-    proxyAgent = new SocksProxyAgent(PROXY_URL);
-  } else {
-    proxyAgent = new HttpsProxyAgent(PROXY_URL);
-  }
-}
+const PROXY_CONFIGS = (isSearchProxyEnabled() ? [
+  { label: 'AU_PROXY', url: String(process.env.AU_PROXY || '').trim() },
+  { label: 'globale', url: String(process.env.PROXY || '').trim() },
+] : [])
+  .filter((entry, index, all) => entry.url && all.findIndex((other) => other.url === entry.url) === index)
+  .flatMap((entry) => {
+    try {
+      const isSocks = entry.url.startsWith('socks');
+      return [{
+        ...entry,
+        type: isSocks ? 'SOCKS' : 'HTTP/HTTPS',
+        // fetchResource usa undici per HTTP(S), node-fetch per SOCKS.
+        nodeAgent: isSocks ? new SocksProxyAgent(entry.url) : undefined,
+        fetchAgent: isSocks ? undefined : new UndiciProxyAgent(entry.url),
+      }];
+    } catch (error: any) {
+      console.warn(`[AnimeUnity][Proxy] Configurazione ${entry.label} ignorata: ${error?.message || error}`);
+      return [];
+    }
+  });
 
 // --- Proxy diagnostic helpers ---
 function maskProxyUrl(url: string): string {
@@ -102,166 +96,51 @@ function maskProxyUrl(url: string): string {
   } catch { return url.replace(/:([^@:]+)@/, ':***@'); }
 }
 
-const PROXY_TYPE = PROXY_URL ? (PROXY_URL.startsWith('socks') ? 'SOCKS' : 'HTTP/HTTPS') : 'NONE';
-if (PROXY_URL) {
-  console.log(`[AnimeUnity][Proxy] Proxy configurato: tipo=${PROXY_TYPE} url=${maskProxyUrl(PROXY_URL)}`);
+if (PROXY_CONFIGS.length) {
+  for (const proxy of PROXY_CONFIGS) {
+    debug(4, 'AnimeUnity', `[AnimeUnity][Proxy] Proxy ${proxy.label} configurato: tipo=${proxy.type} url=${maskProxyUrl(proxy.url)}`);
+  }
 } else {
-  console.log('[AnimeUnity][Proxy] Nessun proxy configurato (AU_PROXY e PROXY non impostati)');
-}
-
-function isRetryableError(err: any): boolean {
-  const code = err?.code || '';
-  const status = err?.response?.status || 0;
-  const msg = String(err?.message || '');
-  return status === 403 || status === 503 || status >= 500
-    || /ECONNREFUSED|ECONNRESET|ETIMEDOUT|ENETUNREACH|ENOTFOUND|abort|timeout|socket hang up/i.test(code + msg);
+  debug(3, 'AnimeUnity', '[AnimeUnity][Proxy] Nessun proxy configurato (PROXY e AU_PROXY non impostati)');
 }
 
 /**
- * Messaggio di errore dettagliato per log diagnostici (status + body della risposta).
+ * fetchResource wrapper: con SEARCH_VIA_PROXY=true usa AU_PROXY, poi PROXY
+ * globale, poi il diretto. Senza la variabile (default) va sempre diretto.
  */
-function describeHttpError(err: any): string {
-  const status = err?.response?.status;
-  const rawBody = err?.response?.data;
-  const body = rawBody
-    ? String(typeof rawBody === 'string' ? rawBody : JSON.stringify(rawBody)).replace(/\s+/g, ' ').slice(0, 300)
-    : '';
-  return `status=${status ?? 'n/a'} msg=${err?.message || err}${body ? ` body="${body}"` : ''}`;
-}
-
-/**
- * POST che segue i redirect MANTENENDO il metodo HTTP.
- * axios (follow-redirects) di default converte POST in GET sui redirect 301/302:
- * con AnimeUnity (redirect da http:// o da host senza www) il GET risultante su
- * /livesearch o /archivio/get-animes produce HTTP 405. Qui gestiamo i redirect
- * manualmente ri-emettendo il POST verso la Location.
- */
-async function axiosPostKeepMethod(url: string, data: any, config: any = {}, maxRedirects = 3): Promise<any> {
-  let currentUrl = url;
-  for (let hop = 0; hop <= maxRedirects; hop++) {
-    const resp = await axios.post(currentUrl, data, {
-      ...config,
-      maxRedirects: 0,
-      validateStatus: (status: number) => status >= 200 && status < 400,
-    });
-    if (resp.status < 300) return resp;
-    const location = resp.headers?.location;
-    if (!location) return resp;
-    const nextUrl = new URL(String(location), currentUrl).toString();
-    console.log(`[AnimeUnity][Proxy] POST redirect ${resp.status}: ${currentUrl} -> ${nextUrl} (metodo POST mantenuto)`);
-    currentUrl = nextUrl;
-  }
-  throw new Error(`POST ${url}: superato il limite di redirect (${maxRedirects})`);
-}
-
-/**
- * axios GET con retry proxy: tenta prima DIRETTO (3s timeout), poi con proxy se fallisce.
- */
-async function auAxiosGet(url: string, config: any = {}): Promise<any> {
-  // Tentativo diretto
-  console.log(`[AnimeUnity][Proxy] GET diretto (${DIRECT_TIMEOUT}ms) -> ${url}`);
-  try {
-    const resp = await axios.get(url, { ...config, timeout: DIRECT_TIMEOUT, httpAgent: undefined, httpsAgent: undefined });
-    console.log(`[AnimeUnity][Proxy] GET diretto OK (${resp.status}) <- ${url}`);
-    return resp;
-  } catch (directErr: any) {
-    console.warn(`[AnimeUnity][Proxy] GET diretto FALLITO: ${describeHttpError(directErr)} <- ${url}`);
-    if (!proxyAgent) {
-      console.warn('[AnimeUnity][Proxy] Nessun proxy configurato, errore definitivo');
-      throw directErr;
-    }
-    if (!isRetryableError(directErr)) {
-      console.warn('[AnimeUnity][Proxy] Errore non retryable, non riprovo con proxy');
-      throw directErr;
-    }
-  }
-  // Retry con proxy
-  console.log(`[AnimeUnity][Proxy] Retry GET con proxy (${PROXY_TYPE}) -> ${url}`);
-  try {
-    const resp = await axios.get(url, { ...config, timeout: config.timeout || FETCH_TIMEOUT, httpAgent: proxyAgent, httpsAgent: proxyAgent });
-    console.log(`[AnimeUnity][Proxy] GET con proxy OK (${resp.status}) <- ${url}`);
-    return resp;
-  } catch (proxyErr: any) {
-    console.error(`[AnimeUnity][Proxy] GET FALLITO anche con proxy: ${describeHttpError(proxyErr)} <- ${url}`);
-    throw proxyErr;
-  }
-}
-
-/**
- * axios POST con retry proxy: tenta prima DIRETTO (3s timeout), poi con proxy se fallisce.
- */
-async function auAxiosPost(url: string, data: any, config: any = {}): Promise<any> {
-  console.log(`[AnimeUnity][Proxy] POST diretto (${DIRECT_TIMEOUT}ms) -> ${url}`);
-  try {
-    const resp = await axiosPostKeepMethod(url, data, { ...config, timeout: DIRECT_TIMEOUT, httpAgent: undefined, httpsAgent: undefined });
-    console.log(`[AnimeUnity][Proxy] POST diretto OK (${resp.status}) <- ${url}`);
-    return resp;
-  } catch (directErr: any) {
-    console.warn(`[AnimeUnity][Proxy] POST diretto FALLITO: ${describeHttpError(directErr)} <- ${url}`);
-    if (!proxyAgent) {
-      console.warn('[AnimeUnity][Proxy] Nessun proxy configurato, errore definitivo');
-      throw directErr;
-    }
-    if (!isRetryableError(directErr)) {
-      console.warn('[AnimeUnity][Proxy] Errore non retryable, non riprovo con proxy');
-      throw directErr;
-    }
-  }
-  console.log(`[AnimeUnity][Proxy] Retry POST con proxy (${PROXY_TYPE}) -> ${url}`);
-  try {
-    const resp = await axiosPostKeepMethod(url, data, { ...config, timeout: config.timeout || FETCH_TIMEOUT, httpAgent: proxyAgent, httpsAgent: proxyAgent });
-    console.log(`[AnimeUnity][Proxy] POST con proxy OK (${resp.status}) <- ${url}`);
-    return resp;
-  } catch (proxyErr: any) {
-    console.error(`[AnimeUnity][Proxy] POST FALLITO anche con proxy: ${describeHttpError(proxyErr)} <- ${url}`);
-    throw proxyErr;
-  }
-}
-
-/**
- * fetchResource wrapper con retry proxy: tenta prima DIRETTO (3s, agent: null),
- * poi con proxy agent se fallisce.
- */
-async function auFetchResource(url: string, providerCaches: any, options: any = {}): Promise<any> {
-  console.log(`[AnimeUnity][Proxy] fetchResource diretto (${DIRECT_TIMEOUT}ms) -> ${url}`);
-  try {
-    const result = await fetchResource(url, providerCaches, {
-      ...options,
-      agent: null,  // forza nessun proxy (override auto-detect in fetch-resource.ts)
-      timeoutMs: DIRECT_TIMEOUT,
-    });
-    console.log(`[AnimeUnity][Proxy] fetchResource diretto OK <- ${url}`);
-    return result;
-  } catch (directErr: any) {
-    const directMsg = directErr?.message || String(directErr);
-    console.warn(`[AnimeUnity][Proxy] fetchResource diretto FALLITO: ${directMsg} <- ${url}`);
-    if (!proxyAgent) {
-      console.warn('[AnimeUnity][Proxy] Nessun proxy per fetchResource, errore definitivo');
-      throw directErr;
-    }
-  }
-  console.log(`[AnimeUnity][Proxy] Retry fetchResource con proxy (${PROXY_TYPE}) -> ${url}`);
-  try {
-    const result = await fetchResource(url, providerCaches, {
-      ...options,
-      agent: proxyAgent,
+export async function auFetchResource(url: string, providerCaches: any, options: any = {}): Promise<any> {
+  const attempts = [
+    ...PROXY_CONFIGS.map((proxy) => ({
+      label: `proxy ${proxy.label} ${proxy.type}`,
+      agent: proxy.fetchAgent || proxy.nodeAgent,
       timeoutMs: options.timeoutMs || FETCH_TIMEOUT,
-    });
-    console.log(`[AnimeUnity][Proxy] fetchResource con proxy OK <- ${url}`);
-    return result;
-  } catch (proxyErr: any) {
-    console.error(`[AnimeUnity][Proxy] fetchResource FALLITO anche con proxy: ${proxyErr?.message || proxyErr} <- ${url}`);
-    throw proxyErr;
+    })),
+    // Senza proxy il diretto non è un fallback: deve usare il timeout normale.
+    { label: 'diretto', agent: null, timeoutMs: PROXY_CONFIGS.length ? DIRECT_TIMEOUT : (options.timeoutMs || FETCH_TIMEOUT) },
+  ];
+
+  // Cache separata per hop: un fallback diretto non deve "vincere" sul proxy
+  // nei successivi fetch dello stesso URL.
+  const baseCacheKey = options.cacheKey || url;
+  let lastError: any;
+  for (const attempt of attempts) {
+    debug(4, 'AnimeUnity', `[AnimeUnity][Proxy] fetchResource ${attempt.label} (${attempt.timeoutMs}ms) -> ${redactUrl(url)}`);
+    try {
+      const result = await fetchResource(url, providerCaches, {
+        ...options,
+        cacheKey: `${baseCacheKey}#${attempt.agent ? attempt.label : 'diretto'}`,
+        agent: attempt.agent,
+        timeoutMs: attempt.timeoutMs,
+      });
+      debug(4, 'AnimeUnity', `[AnimeUnity][Proxy] fetchResource ${attempt.label} OK <- ${redactUrl(url)}`);
+      return result;
+    } catch (error: any) {
+      lastError = error;
+      console.warn(`[AnimeUnity][Proxy] fetchResource ${attempt.label} FALLITO: ${error?.message || error} <- ${url}`);
+    }
   }
+  throw lastError;
 }
-
-interface AnimeUnitySession {
-  csrfToken: string;
-  cookieHeader: string;
-  expiresAt: number;
-}
-
-let sessionCache: AnimeUnitySession | null = null;
 
 interface AnimeUnitySearchResult {
   id: number;
@@ -270,33 +149,41 @@ interface AnimeUnitySearchResult {
   name_it?: string; // Titolo italiano (opzionale)
   name_eng?: string; // Titolo inglese (opzionale)
   episodes_count: number;
-}
-
-interface AnimeUnityEpisode {
-  id: number;
-  number: string | number;
-  name?: string;
+  type?: string; // Solo .co: TV / Movie / Special
 }
 
 interface AnimeUnityStreamData {
   episode_page: string | null;
   embed_url: string | null;
+  hls_url: string | null;
   mp4_url: string | null;
 }
 
 function getUnityBaseUrl(): string {
   const configured = getProviderUrl('animeunity', ['ANIMEUNITY_BASE_URL', 'AU_BASE_URL']);
-  const raw = String(configured || getDomain('animeunity') || 'animeunity.so').trim().replace(/\/+$/, '');
-  // Forza sempre https + www: AnimeUnity risponde con redirect 301 per http:// e per
-  // gli host senza www. axios, seguendo il redirect, converte POST in GET e Laravel
-  // restituisce 405 ("The GET method is not supported for this route") su /livesearch.
+  const raw = String(configured || getDomain('animeunity') || 'animeunity.at').trim().replace(/\/+$/, '');
+  // Il canonical è senza www: www risponde 301 verso l'apex, quindi tenerlo
+  // costerebbe un redirect (e un cookie perso) su ogni singola richiesta.
   try {
     const u = new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`);
-    if (!/^www\./i.test(u.hostname)) u.hostname = `www.${u.hostname}`;
+    if (/^www\./i.test(u.hostname)) u.hostname = u.hostname.slice(4);
     return u.origin;
   } catch {
     const host = raw.replace(/^https?:\/\//i, '').replace(/^www\./i, '');
-    return `https://www.${host || 'animeunity.so'}`;
+    return `https://${host || 'animeunity.at'}`;
+  }
+}
+
+/**
+ * AnimeUnity.co è un backend diverso (server-rendered, senza /ajax): ricerca su
+ * /archivio?title=, episodi nell'attributo `episodes`, embed per episodio su
+ * /anime/<id>-<slug>/<episodeId>. Tutto il resto del provider resta uguale.
+ */
+function isUnityCoBase(): boolean {
+  try {
+    return /(^|\.)animeunity\.co$/i.test(new URL(getUnityBaseUrl()).hostname);
+  } catch {
+    return false;
   }
 }
 
@@ -328,28 +215,6 @@ function buildUnityUrl(pathOrUrl: string | null | undefined): string | null {
   return `${getUnityBaseUrl()}/${text}`;
 }
 
-function parseVideoPlayerJson(rawValue: string | undefined | null, fallback: any) {
-  const text = String(rawValue || '').trim();
-  if (!text) return fallback;
-  const attempts = [
-    text,
-    text
-      .replace(/&quot;/g, '"')
-      .replace(/&#039;/g, "'")
-      .replace(/&amp;/g, '&')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>'),
-  ];
-  for (const candidate of attempts) {
-    try {
-      return JSON.parse(candidate);
-    } catch {
-      // continue
-    }
-  }
-  return fallback;
-}
-
 function extractAnimeIdSlugFromPath(animePath: string): { animeId: number | null; animeSlug: string | null } {
   const match = String(animePath || '').match(/^\/anime\/(\d+)(?:-([^/?#]+))?/i);
   return {
@@ -358,312 +223,296 @@ function extractAnimeIdSlugFromPath(animePath: string): { animeId: number | null
   };
 }
 
-async function getSessionData(): Promise<AnimeUnitySession | null> {
-  if (sessionCache && sessionCache.expiresAt > Date.now()) return sessionCache;
+let searchCooldownUntil = 0;
+
+async function searchEndpoint(query: string, _dubbed = false): Promise<AnimeUnitySearchResult[]> {
+  if (isUnityCoBase()) return searchUnityCo(query);
+  if (searchCooldownUntil > Date.now()) return [];
+
+  let payload: any;
   try {
-    const response = await auAxiosGet(`${getUnityBaseUrl()}/`, {
-      timeout: FETCH_TIMEOUT,
-      headers: {
-        'User-Agent': USER_AGENT,
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7',
-      },
-    });
-
-    const html = String(response.data || '');
-    const $ = cheerio.load(html);
-    const csrfToken = $('meta[name="csrf-token"]').attr('content') || '';
-    const setCookies: string[] = Array.isArray(response.headers['set-cookie']) ? response.headers['set-cookie'] : [];
-    const cookieHeader = setCookies.map((cookie) => String(cookie).split(';')[0]).filter(Boolean).join('; ');
-    if (!csrfToken) return null;
-
-    sessionCache = {
-      csrfToken,
-      cookieHeader,
-      expiresAt: Date.now() + TTL.http,
-    };
-    return sessionCache;
-  } catch (error: any) {
-    console.warn('[AnimeUnity] session bootstrap failed:', error?.message || error);
-    return null;
-  }
-}
-
-async function searchEndpoint(query: string, dubbed = false): Promise<AnimeUnitySearchResult[]> {
-  const session = await getSessionData();
-  if (!session) return [];
-
-  const headers = {
-    'User-Agent': USER_AGENT,
-    'X-Requested-With': 'XMLHttpRequest',
-    'Content-Type': 'application/json;charset=utf-8',
-    'X-CSRF-Token': session.csrfToken,
-    Referer: getUnityBaseUrl(),
-    Cookie: session.cookieHeader,
-  };
-
-  const seen = new Set<number>();
-  const out: AnimeUnitySearchResult[] = [];
-
-  const requests = [
-    auAxiosPost(
-      `${getUnityBaseUrl()}/livesearch`,
-      { title: query },
-      { timeout: FETCH_TIMEOUT, headers }
-    ).catch(() => null),
-    auAxiosPost(
-      `${getUnityBaseUrl()}/archivio/get-animes`,
-      {
-        title: query,
-        type: false,
-        year: false,
-        order: 'Lista A-Z',
-        status: false,
-        genres: false,
-        season: false,
-        offset: 0,
-        dubbed,
-      },
-      { timeout: FETCH_TIMEOUT, headers }
-    ).catch(() => null),
-  ];
-
-  const responses = await Promise.all(requests);
-  for (const response of responses) {
-    const records = response?.data?.records;
-    if (!Array.isArray(records)) continue;
-    for (const record of records) {
-      const id = Number(record?.id);
-      if (!id || seen.has(id)) continue;
-      seen.add(id);
-      const nameIt = String(record?.title_it || '').trim();
-      const nameEng = String(record?.title_eng || '').trim();
-      const fallbackName = String(record?.title || '').trim();
-      const display = nameIt || nameEng || fallbackName;
-      if (!display) continue;
-      out.push({
-        id,
-        slug: String(record?.slug || '').trim(),
-        name: display,
-        name_it: nameIt,
-        name_eng: nameEng,
-        episodes_count: Number(record?.episodes_count || 0),
-      });
-    }
-  }
-
-  return out;
-}
-
-async function fetchEpisodesRangeFromApi(animeId: number, requestedEpisode: number, animeUrl: string): Promise<AnimeUnityEpisode[]> {
-  const startRange = Math.floor((requestedEpisode - 1) / 120) * 120 + 1;
-  const endRange = startRange + 119;
-
-  try {
-    const payload = await auFetchResource(
-      `${getUnityBaseUrl()}/info_api/${animeId}/1?start_range=${startRange}&end_range=${endRange}`,
+    payload = await auFetchResource(
+      `${getUnityBaseUrl()}/ajax/anime/search?keyword=${encodeURIComponent(query)}`,
       caches,
       {
         as: 'json',
-        ttlMs: TTL.animePage,
-        cacheKey: `au-info:${animeId}:${startRange}:${endRange}`,
+        ttlMs: TTL.http,
+        cacheKey: `au-search:${query}`,
         timeoutMs: FETCH_TIMEOUT,
         headers: {
-          'x-requested-with': 'XMLHttpRequest',
-          referer: animeUrl,
+          'X-Requested-With': 'XMLHttpRequest',
+          'Accept': 'application/json, text/javascript, */*; q=0.01',
+          'Referer': `${getUnityBaseUrl()}/`,
         },
       }
     );
-    const rows = Array.isArray(payload?.episodes) ? payload.episodes : [];
-    return rows.map((entry: any, index: number) => ({
-      id: Number(entry?.id || 0),
-      number: parseEpisodeNumber(entry?.number || entry?.link, index + 1),
-      name: String(entry?.name || '').trim() || undefined,
-    })).filter((entry: AnimeUnityEpisode) => !!entry.id);
   } catch (error: any) {
-    console.warn('[AnimeUnity] info_api request failed:', error?.message || error);
+    // Il sito throttla aggressivamente: evita la catena di fallback per un minuto.
+    if (/\b429\b/.test(String(error?.message || error))) {
+      searchCooldownUntil = Date.now() + 60_000;
+      console.warn('[AnimeUnity] Ricerca in rate limit (429): pausa 60s');
+    }
+    return [];
+  }
+
+  const hits = parseSearchResultsHtml(String(payload?.result?.html || ''));
+  return hits.map((hit) => ({
+    ...hit,
+    name_it: hit.name,
+    name_eng: '',
+  }));
+}
+
+async function searchUnityCo(query: string): Promise<AnimeUnitySearchResult[]> {
+  try {
+    const html = String(await auFetchResource(
+      `${getUnityBaseUrl()}/archivio?title=${encodeURIComponent(query)}`,
+      caches,
+      {
+        ttlMs: TTL.http,
+        cacheKey: `au-co-search:${query}`,
+        timeoutMs: FETCH_TIMEOUT,
+        headers: { 'Referer': `${getUnityBaseUrl()}/` },
+      }
+    ) || '');
+
+    const raw = html.match(/\brecords="([^"]+)"/)?.[1];
+    if (!raw) return [];
+
+    const records = JSON.parse(decodeHtmlAttribute(raw)) as any[];
+    return records
+      .filter((record) => record && record.id && record.slug)
+      .map((record) => ({
+        id: Number(record.id),
+        slug: String(record.slug),
+        name: String(record.title || record.title_it || record.title_eng || '').trim(),
+        name_it: record.title_it ? String(record.title_it) : undefined,
+        name_eng: record.title_eng ? String(record.title_eng) : undefined,
+        episodes_count: Number(record.episodes_count) || 0,
+        type: record.type ? String(record.type) : undefined,
+      }))
+      .filter((record) => record.name);
+  } catch (error: any) {
+    console.warn('[AnimeUnity][co] ricerca fallita:', error?.message || error);
     return [];
   }
 }
 
-async function getStreamData(animeId: number, animeSlug: string, episodeId: number): Promise<AnimeUnityStreamData> {
-  const episodePage = `${getUnityBaseUrl()}/anime/${animeId}-${animeSlug}/${episodeId}`;
+/** Le serie lunghe hanno solo 120 episodi nella pagina: il resto arriva da /info_api. */
+async function fetchUnityCoEpisodeWindow(animeId: number, episode: number): Promise<AnimeUnityPageEpisode[]> {
+  try {
+    const payload = await auFetchResource(
+      `${getUnityBaseUrl()}/info_api/${animeId}/${episode}?start_range=${Math.max(1, episode - 30)}&end_range=${episode + 30}`,
+      caches,
+      {
+        as: 'json',
+        ttlMs: TTL.animePage,
+        cacheKey: `au-co-episodes:${animeId}:${episode}`,
+        timeoutMs: FETCH_TIMEOUT,
+        headers: {
+          'X-Requested-With': 'XMLHttpRequest',
+          'Accept': 'application/json, text/javascript, */*; q=0.01',
+          'Referer': `${getUnityBaseUrl()}/`,
+        },
+      }
+    ) as any;
+
+    return (payload?.episodes || []).map((entry: any) => ({
+      id: Number(entry?.id) || 0,
+      number: parseEpisodeNumber(entry?.number, 0),
+    })).filter((entry: AnimeUnityPageEpisode) => entry.id > 0);
+  } catch (error: any) {
+    console.warn('[AnimeUnity][co] info_api episodi fallita:', error?.message || error);
+    return [];
+  }
+}
+
+/** Su .co ogni scheda è una sola lingua: il flag `dub` dell'anime dice quale. */
+function isUnityCoDubPage(html: string): boolean {
+  const raw = String(html || '').match(/\banime="([^"]+)"/)?.[1];
+  if (!raw) return false;
+  try {
+    // Il JSON contiene anche `related[]`, ognuno col proprio `dub`: serve il campo top-level.
+    return JSON.parse(decodeHtmlAttribute(raw))?.dub === 1;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * .co tiene la versione ITA della stessa serie su una scheda separata
+ * ("<slug>-ita"), che l'archivio a volte non restituisce (es. One Piece):
+ * il link sta nella pagina della versione SUB.
+ */
+function findUnityCoItaSibling(html: string, currentPath: string): string | null {
+  const current = String(currentPath || '').match(/^\/anime\/(\d+)-([a-z0-9-]+)$/i);
+  if (!current) return null;
+  const baseSlug = current[2].toLowerCase();
+  if (/-ita$/i.test(baseSlug)) return null;
+  const target = `${baseSlug}-ita`;
+  for (const link of String(html || '').matchAll(/\/anime\/(\d+)-([a-z0-9-]+)/gi)) {
+    if (link[2].toLowerCase() === target) return `/anime/${link[1]}-${link[2]}`;
+  }
+  return null;
+}
+
+async function resolveServerEmbedUrl(linkId: string, referer: string): Promise<string | null> {
+  try {
+    const payload = await auFetchResource(
+      `${getUnityBaseUrl()}/ajax/server?get=${encodeURIComponent(linkId)}`,
+      caches,
+      {
+        as: 'json',
+        ttlMs: TTL.streamPage,
+        cacheKey: `au-server:${linkId}`,
+        timeoutMs: FETCH_TIMEOUT,
+        headers: {
+          'X-Requested-With': 'XMLHttpRequest',
+          Referer: referer,
+        },
+      }
+    );
+    return toAbsoluteUrl(payload?.result?.url || null, getUnityBaseUrl());
+  } catch (error: any) {
+    console.warn('[AnimeUnity] ajax/server failed:', error?.message || error);
+    return null;
+  }
+}
+
+async function resolveEmbedMedia(
+  embedUrl: string,
+  episodePage: string
+): Promise<{ hls_url: string | null; mp4_url: string | null }> {
+  let hlsUrl: string | null = null;
+  let mp4Url: string | null = null;
+
+  const fetchPage = (url: string) => auFetchResource(url, caches, {
+    ttlMs: TTL.streamPage,
+    cacheKey: `au-embed:${url}`,
+    timeoutMs: FETCH_TIMEOUT,
+    headers: { referer: episodePage, 'user-agent': USER_AGENT },
+  });
+
+  try {
+    const html = String(await fetchPage(embedUrl) || '');
+    hlsUrl = parseVixcloudHls(html, embedUrl);
+    mp4Url = collectMediaLinksFromEmbedHtml(html, embedUrl)
+      .find((entry) => /\.mp4(?:[?#].*)?$/i.test(entry.href))?.href || null;
+
+    // Alcuni embed sono un wrapper: il player vixcloud sta in un iframe.
+    if (!hlsUrl) {
+      const iframeSrc = toAbsoluteUrl(
+        cheerio.load(html)('iframe[src*="vixcloud"], iframe[src*="vixsrc"]').first().attr('src') || null,
+        embedUrl
+      );
+      if (iframeSrc) {
+        // vixcloud.co non risolve più ovunque: lo specchio attivo è vixsrc.to.
+        const mirrorUrl = iframeSrc.replace(/\/\/(?:www\.)?vixcloud\.co\//i, '//vixsrc.to/');
+        let playerHtml = '';
+        try {
+          playerHtml = String(await fetchPage(iframeSrc) || '');
+        } catch (error: any) {
+          if (mirrorUrl === iframeSrc) throw error;
+          console.warn('[AnimeUnity] iframe vixcloud non raggiungibile, provo vixsrc.to');
+          playerHtml = String(await fetchPage(mirrorUrl) || '');
+        }
+        hlsUrl = parseVixcloudHls(playerHtml, iframeSrc);
+        mp4Url = mp4Url || collectMediaLinksFromEmbedHtml(playerHtml, iframeSrc)
+          .find((entry) => /\.mp4(?:[?#].*)?$/i.test(entry.href))?.href || null;
+      }
+    }
+
+    if (hlsUrl) {
+      try {
+        const manifest = String(await fetchPage(hlsUrl) || '');
+        const highest = selectHighestHlsVariant(manifest, hlsUrl);
+        if (highest) {
+          hlsUrl = highest;
+          debug(4, 'AnimeUnity', '[AnimeUnity] Variante HLS massima selezionata');
+        }
+      } catch (error: any) {
+        console.warn('[AnimeUnity] Selezione variante HLS fallita:', error?.message || error);
+      }
+    }
+  } catch (error: any) {
+    console.warn('[AnimeUnity] embed media failed:', error?.message || error);
+  }
+
+  return { hls_url: hlsUrl, mp4_url: mp4Url };
+}
+
+async function getStreamData(
+  animeId: number,
+  animeSlug: string,
+  episodeId: number,
+  language: 'sub' | 'dub'
+): Promise<AnimeUnityStreamData> {
+  if (isUnityCoBase()) return getUnityCoStreamData(animeId, animeSlug, episodeId);
+  const episodePage = `${getUnityBaseUrl()}/anime/${animeId}-${animeSlug}/ep-${episodeId}`;
+  const empty: AnimeUnityStreamData = { episode_page: episodePage, embed_url: null, hls_url: null, mp4_url: null };
 
   try {
     const html = await auFetchResource(episodePage, caches, {
       ttlMs: TTL.streamPage,
       cacheKey: `au-ep:${animeId}:${episodeId}`,
       timeoutMs: FETCH_TIMEOUT,
-    });
+    }).catch(() => '');
 
-    const $ = cheerio.load(String(html || ''));
-    const vp = $('video-player').first();
-    let embedUrl = toAbsoluteUrl(vp.attr('embed_url') || null, getUnityBaseUrl());
+    const candidates = parseEpisodeServers(String(html || ''), episodeId)
+      .filter((server) => server.type === language);
+    const server = candidates.find((entry) => entry.host === 'vixcloud') || candidates[0];
+    if (!server) return empty;
 
-    if (!embedUrl) {
-      const iframeSrc = $('iframe[src*="vixcloud"]').first().attr('src');
-      embedUrl = toAbsoluteUrl(iframeSrc || null, getUnityBaseUrl());
-    }
+    const embedUrl = await resolveServerEmbedUrl(server.linkId, episodePage);
+    if (!embedUrl) return empty;
 
-    let mp4Url: string | null = null;
-    if (embedUrl) {
-      try {
-        const embedHtml = await auFetchResource(embedUrl, caches, {
-          ttlMs: TTL.streamPage,
-          cacheKey: `au-embed:${embedUrl}`,
-          timeoutMs: FETCH_TIMEOUT,
-          headers: {
-            referer: episodePage,
-            'user-agent': USER_AGENT,
-          },
-        });
-        const mediaLinks = collectMediaLinksFromEmbedHtml(String(embedHtml || ''), getUnityBaseUrl());
-        const preferred = mediaLinks.find((entry) => /\.mp4(?:[?#].*)?$/i.test(entry.href)) || mediaLinks[0];
-        mp4Url = preferred?.href || null;
-      } catch {
-        mp4Url = null;
-      }
-    }
-
-    return {
-      episode_page: episodePage,
-      embed_url: embedUrl,
-      mp4_url: mp4Url,
-    };
+    const media = await resolveEmbedMedia(embedUrl, episodePage);
+    return { ...empty, embed_url: embedUrl, ...media };
   } catch (error: any) {
     console.warn('[AnimeUnity] getStreamData failed:', error?.message || error);
-    return {
-      episode_page: episodePage,
-      embed_url: null,
-      mp4_url: null,
-    };
+    return empty;
   }
 }
 
-// Funzione universale per ottenere il titolo inglese da qualsiasi ID
-// Aggiunto fallback Kitsu diretto (titles.en) se manca MAL mapping, come in AnimeSaturn
-async function getEnglishTitleFromAnyId(id: string, type: 'imdb' | 'tmdb' | 'kitsu' | 'mal', tmdbApiKey?: string): Promise<string> {
-  let malId: string | null = null;
-  let tmdbId: string | null = null;
-  let fallbackTitle: string | null = null;
-  const tmdbKey = tmdbApiKey || process.env.TMDB_API_KEY || '';
-  if (type === 'imdb') {
-    if (!tmdbKey) throw new Error('TMDB_API_KEY non configurata');
-    const imdbIdOnly = id.split(':')[0];
-    const { getTmdbIdFromImdbId } = await import('../utils/tmdbResolver.js');
-    tmdbId = await getTmdbIdFromImdbId(imdbIdOnly, tmdbKey, 'tv');
-    if (!tmdbId) throw new Error('TMDB ID non trovato per IMDB: ' + id);
-    try {
-      const haglundResp = (await (await fetch(`https://arm.haglund.dev/api/v2/themoviedb?id=${tmdbId}&include=kitsu,myanimelist`)).json()) as HaglundResponseItem[];
-      malId = haglundResp[0]?.myanimelist?.toString() || null;
-    } catch { }
-  } else if (type === 'tmdb') {
-    tmdbId = id;
-    try {
-      const haglundResp = (await (await fetch(`https://arm.haglund.dev/api/v2/themoviedb?id=${tmdbId}&include=kitsu,myanimelist`)).json()) as HaglundResponseItem[];
-      malId = haglundResp[0]?.myanimelist?.toString() || null;
-    } catch { }
-  } else if (type === 'kitsu') {
-    const mappingsResp = (await (await fetch(`https://kitsu.io/api/edge/anime/${id}/mappings`)).json()) as KitsuMappingsResponse;
-    const malMapping = mappingsResp.data?.find((m: any) => m.attributes.externalSite === 'myanimelist/anime');
-    malId = malMapping?.attributes?.externalId?.toString() || null;
-    if (!malId) {
-      // Fallback: usa direttamente titles.en dal record principale se disponibile
-      try {
-        const kitsuMain = (await (await fetch(`https://kitsu.io/api/edge/anime/${id}`)).json()) as KitsuMainResponse;
-        const enTitle = kitsuMain?.data?.attributes?.titles?.en;
-        if (enTitle) {
-          console.log(`[UniversalTitle][KitsuFallback] Titolo inglese diretto da Kitsu (no MAL mapping): ${enTitle}`);
-          return enTitle;
-        } else {
-          console.warn(`[UniversalTitle][KitsuFallback] Nessun titles.en disponibile per Kitsu ${id}`);
-        }
-      } catch (e) {
-        console.warn(`[UniversalTitle][KitsuFallback] Errore recuperando titles.en per Kitsu ${id}:`, e);
-      }
-    }
-  } else if (type === 'mal') {
-    malId = id;
+async function getUnityCoStreamData(
+  animeId: number,
+  animeSlug: string,
+  episodeId: number
+): Promise<AnimeUnityStreamData> {
+  const episodePage = `${getUnityBaseUrl()}/anime/${animeId}-${animeSlug}/${episodeId}`;
+  const empty: AnimeUnityStreamData = { episode_page: episodePage, embed_url: null, hls_url: null, mp4_url: null };
+
+  try {
+    const html = String(await auFetchResource(episodePage, caches, {
+      ttlMs: TTL.streamPage,
+      cacheKey: `au-co-ep:${animeId}:${episodeId}`,
+      timeoutMs: FETCH_TIMEOUT,
+    }).catch(() => '') || '');
+
+    const raw = html.match(/\bembed_url="([^"]+)"/)?.[1];
+    if (!raw) return empty;
+
+    const embedUrl = decodeHtmlAttribute(raw);
+    const media = await resolveEmbedMedia(embedUrl, episodePage);
+    return { ...empty, embed_url: embedUrl, ...media };
+  } catch (error: any) {
+    console.warn('[AnimeUnity][co] getStreamData failed:', error?.message || error);
+    return empty;
   }
-  if (malId) {
-    try {
-      const metadata = await getMalAnimeMetadata(malId);
-      const englishTitle = getPreferredMalTitle(metadata) || '';
-      if (englishTitle) {
-        console.log(`[UniversalTitle] Titolo inglese trovato da Tenrai (${metadata?.cacheStatus || 'cache'}).`);
-        return englishTitle;
-      }
-    } catch (err) {
-      console.warn('[UniversalTitle] Errore Tenrai, provo fallback TMDB:', err);
-    }
-  }
-  if (tmdbId && tmdbKey) {
-    try {
-      let tmdbResp = (await (await fetch(`https://api.themoviedb.org/3/tv/${tmdbId}?api_key=${tmdbKey}`)).json()) as TmdbTitleResponse;
-      if (tmdbResp && tmdbResp.name) {
-        fallbackTitle = tmdbResp.name;
-      }
-      if (!fallbackTitle) {
-        tmdbResp = (await (await fetch(`https://api.themoviedb.org/3/movie/${tmdbId}?api_key=${tmdbKey}`)).json()) as TmdbTitleResponse;
-        if (tmdbResp && tmdbResp.title) {
-          fallbackTitle = tmdbResp.title;
-        }
-      }
-      if (fallbackTitle) {
-        console.warn(`[UniversalTitle] Fallback: uso titolo da TMDB: ${fallbackTitle}`);
-        return fallbackTitle;
-      }
-    } catch (err) {
-      console.warn('[UniversalTitle] Errore fallback TMDB:', err);
-    }
-  }
-  throw new Error('Impossibile ottenere titolo inglese da nessuna fonte per ' + id);
 }
 
 function filterAnimeResults(results: { version: AnimeUnitySearchResult; language_type: string }[], searchQuery: string) {
-  // LOGICA: usa il TITOLO CON CUI HAI CERCATO per filtrare (italiano O inglese)
-  // Accetta varianti con (ITA), (CR), ecc. MA esclude sequel con numeri (es: "Title 2")
-  const norm = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim();
-  const queryNorm = norm(searchQuery);
+  const scored = results.map((result) => {
+    const titles = [result.version.name_eng || '', result.version.name_it || '', result.version.name || ''].filter(Boolean);
+    const score = Math.max(0, ...titles.map((title) => titleMatchScore(searchQuery, title)));
+    return { result, score };
+  }).filter((entry) => entry.score > 0);
+  const best = scored.reduce((max, entry) => Math.max(max, entry.score), 0);
+  const filtered = best >= 0.5 ? scored.filter((entry) => entry.score === best).map((entry) => entry.result) : [];
 
-  // Genera le varianti ammesse: base, base + (ita), base + (cr), base + (ita) (cr)
-  // IMPORTANTE: NON rimuovere i numeri dalla query - fanno parte del titolo!
-  const queryBase = queryNorm.replace(/\s*\([^)]*\)/g, '').trim();
-  const allowedVariants = [
-    queryBase,
-    `${queryBase} (ITA)`,
-    `${queryBase} (CR)`,
-    `${queryBase} (ITA) (CR)`,
-    `${queryBase} (CR) (ITA)`
-  ];
-
-  const filtered = results.filter(r => {
-    // Raccogli tutti i titoli disponibili del risultato
-    const titles = [
-      r.version.name_eng || '',
-      r.version.name_it || '',
-      r.version.name || ''
-    ].filter(t => t.trim());
-
-    // Per ogni titolo disponibile, controlla se matcha con una delle varianti ammesse
-    for (const title of titles) {
-      const titleNorm = norm(title);
-      // Rimuovi solo le parentesi per il confronto (mantieni i numeri!)
-      const titleBase = titleNorm.replace(/\s*\([^)]*\)/g, '').trim();
-
-      // Match: il titolo base del risultato deve essere UGUALE al queryBase
-      if (titleBase === queryBase) {
-        return true;
-      }
-    }
-
-    return false;
-  });
-
-  console.log(`[UniversalTitle][Filter][Legacy] Query ricerca (norm): "${queryNorm}" -> base: "${queryBase}"`);
-  console.log(`[UniversalTitle][Filter][Legacy] Varianti ammesse:`, allowedVariants);
-  console.log(`[UniversalTitle][Filter][Legacy] Risultati prima del filtro:`, results.map(r => `${r.version.name} [it:"${r.version.name_it || 'N/A'}" eng:"${r.version.name_eng || 'N/A'}"]`));
-  console.log(`[UniversalTitle][Filter][Legacy] Risultati dopo il filtro:`, filtered.map(r => r.version.name));
+  debug(4, 'AnimeUnity', `[UniversalTitle][Filter][Legacy] Query ricerca: "${searchQuery}"`);
+  debug(4, 'AnimeUnity', `[UniversalTitle][Filter][Legacy] Risultati prima del filtro:`, results.map(r => `${r.version.name} [it:"${r.version.name_it || 'N/A'}" eng:"${r.version.name_eng || 'N/A'}"]`));
+  debug(4, 'AnimeUnity', `[UniversalTitle][Filter][Legacy] Risultati dopo il filtro:`, filtered.map(r => r.version.name));
   return filtered;
 }
 
@@ -728,56 +577,34 @@ const exactMap: Record<string, string> = {
 };
 // ==== AUTO-NORMALIZATION-EXACT-MAP-END ====
 
-// ==== AUTO-NORMALIZATION-GENERIC-MAP-START ====
-const genericMap: Record<string, string> = {
-
-
-  // << AUTO-INSERT-GENERIC >> (non rimuovere questo commento)
-  // Qui puoi aggiungere altre normalizzazioni custom
+const animeUnityTitleNormalization: TitleNormalizationOptions = {
+  exactMap,
+  replacements: [
+    ['Season', ''],
+    ['Shippuuden', 'Shippuden'],
+    ['-', ''],
+    ['Ore dake Level Up na Ken', 'Solo Leveling'],
+  ],
+  stripColonAfter: 'Naruto:',
+  collapseSpaces: false,
 };
-// ==== AUTO-NORMALIZATION-GENERIC-MAP-END ====
 
-// Funzione di normalizzazione per la ricerca (fase base + generic)
 function normalizeTitleForSearch(title: string): string {
-  // Se exact map colpisce il titolo originale, usiamo direttamente il valore e saltiamo tutto il resto.
   if (Object.prototype.hasOwnProperty.call(exactMap, title)) {
-    const mapped = exactMap[title];
-    console.log(`[AnimeUnity][ExactMap] Hit: "${title}" -> "${mapped}"`);
-    return mapped;
+    debug(3, 'AnimeUnity', `[AnimeUnity][ExactMap] Hit: "${title}" -> "${exactMap[title]}"`);
   }
-  // LOGICA LEGACY per i NON exact: usare un dizionario di replacements statico (come vecchio codice)
-  const replacements: Record<string, string> = {
-    'Season': '',
-    'Shippuuden': 'Shippuden',
-    '-': '',
-    'Ore dake Level Up na Ken': 'Solo Leveling',
-  };
-  let normalized = title;
-  for (const [key, value] of Object.entries(replacements)) {
-    if (normalized.includes(key)) {
-      normalized = normalized.replace(new RegExp(key, 'gi'), value);
-    }
-  }
-  if (normalized.includes('Naruto:')) {
-    normalized = normalized.replace(':', '');
-  }
-  return normalized.trim();
+  return normalizeAnimeTitleForSearch(title, animeUnityTitleNormalization);
 }
 
 export class AnimeUnityProvider {
-  private kitsuProvider = new KitsuProvider();
-
   constructor(private config: AnimeUnityConfig) { }
-
-  private get baseHost(): string { return getDomain('animeunity') || 'animeunity.so'; }
 
   private async extractStreamsFromAnimePath(
     animePath: string,
     requestedEpisodeInput: number | null,
     seasonNumber: number | null,
     isMovie: boolean,
-    titleOverride?: string,
-    languageOverride?: string
+    titleOverride?: string
   ): Promise<StreamForStremio[]> {
     const normalizedPath = normalizeAnimePath(animePath);
     if (!normalizedPath) return [];
@@ -794,262 +621,114 @@ export class AnimeUnityProvider {
     if (!html) return [];
 
     const $ = cheerio.load(String(html));
-    const vp = $('video-player').first();
-    const animeData = parseVideoPlayerJson(vp.attr('anime'), {});
-    const episodesData = parseVideoPlayerJson(vp.attr('episodes'), []);
     const pageTitle =
       $('meta[property="og:title"]').attr('content') ||
       $('title').first().text().trim() ||
       null;
-
-    const displayTitle = titleOverride || sanitizeAnimeTitle(
-      animeData?.title_it || animeData?.title_eng || animeData?.title || pageTitle
-    ) || 'Unknown Title';
-
-    const sourceTag = inferSourceTag(displayTitle, normalizedPath);
-    const langLabel = languageOverride || (sourceTag === 'ITA' ? 'ITA' : 'SUB');
+    const displayTitle = titleOverride || sanitizeAnimeTitle(pageTitle) || 'Unknown Title';
     const requestedEpisode = normalizeRequestedEpisode(requestedEpisodeInput);
 
-    const parsedPath = extractAnimeIdSlugFromPath(normalizedPath);
-    const animeId = parsedPath.animeId || parsePositiveInt(animeData?.id);
-    const animeSlug = parsedPath.animeSlug || String(animeData?.slug || '').trim();
+    const { animeId, animeSlug } = extractAnimeIdSlugFromPath(normalizedPath);
     if (!animeId || !animeSlug) return [];
 
-    let normalizedEpisodes = normalizeEpisodesList(
-      (Array.isArray(episodesData) ? episodesData : []).map((entry: any, index: number) => ({
-        num: parseEpisodeNumber(entry?.number || entry?.link, index + 1),
-        episodeId: entry?.id,
-        scwsId: entry?.scws_id,
-        fileName: entry?.file_name || entry?.link,
-        link: entry?.link || entry?.file_name,
-        embedUrl: entry?.embed_url || null,
+    // .co mette solo i primi 120 episodi nella pagina: per le serie lunghe
+    // chiediamo la finestra che contiene l'episodio richiesto a /info_api.
+    let pageEpisodes = isUnityCoBase()
+      ? parseUnityCoEpisodes(String(html))
+      : parseEpisodesFromAnimeHtml(String(html));
+    if (isUnityCoBase() && requestedEpisode
+      && !pageEpisodes.some((entry) => parseEpisodeNumber(entry.number, 0) === requestedEpisode)) {
+      pageEpisodes = [...pageEpisodes, ...(await fetchUnityCoEpisodeWindow(animeId, requestedEpisode))];
+    }
+
+    const normalizedEpisodes = normalizeEpisodesList(
+      pageEpisodes.map((entry, index) => ({
+        num: parseEpisodeNumber(entry.number, index + 1),
+        episodeId: entry.id,
+        link: null,
+        fileName: entry.name || null,
+        embedUrl: null,
       })),
       getUnityBaseUrl()
     );
 
-    const hasRequestedInList = (ep: number) =>
-      !!normalizedEpisodes.find((e: any) => Number(e?.num) === ep);
-
-    // AnimeUnity inserisce nell'HTML solo i primi ~120 episodi. Per serie lunghe
-    // (es. One Piece) gli episodi oltre il primo batch non sono presenti nel video-player.
-    // Fallback all'info_api anche quando la lista iniziale esiste ma non contiene
-    // l'episodio richiesto (per TV; per i movie non serve).
-    const needApiFallback = !isMovie && (
-      !normalizedEpisodes.length ||
-      (requestedEpisode > 0 && !hasRequestedInList(requestedEpisode))
-    );
-
-    if (needApiFallback) {
-      const fetched = await fetchEpisodesRangeFromApi(animeId, requestedEpisode || 1, animeUrl);
-      if (fetched.length) {
-        const apiEpisodes = normalizeEpisodesList(
-          fetched.map((entry, index) => ({
-            num: parseEpisodeNumber(entry.number, index + 1),
-            episodeId: entry.id,
-            link: null,
-            fileName: null,
-            embedUrl: null,
-          })),
-          getUnityBaseUrl()
-        );
-        if (!normalizedEpisodes.length) {
-          normalizedEpisodes = apiEpisodes;
-        } else {
-          // Unisci col batch iniziale evitando duplicati per num
-          const seenNums = new Set<number>(normalizedEpisodes.map((e: any) => Number(e?.num)));
-          for (const ep of apiEpisodes) {
-            const n = Number((ep as any)?.num);
-            if (!seenNums.has(n)) {
-              normalizedEpisodes.push(ep);
-              seenNums.add(n);
-            }
-          }
-        }
-      }
-    }
-
     const selected = pickEpisodeEntry(normalizedEpisodes, requestedEpisode, isMovie ? 'movie' : 'tv');
     if (!selected?.episodeId) return [];
 
-    const streamResult = await getStreamData(animeId, animeSlug, selected.episodeId);
+    const resolvedEpisodeNum = parsePositiveInt(selected.num) || requestedEpisode;
+    const preferMp4 = /^(1|true|on)$/i.test(String(process.env.ANIMEUNITY_PREFER_MP4 || process.env.ANIME_MP4_FALLBACK || '0'));
+
+    // --- 2 modalità (come StreamingCommunity) ---
+    // animeunityDirect = Direct (solo locale, IP-bound)
+    // animeunityProxy  = Proxy (cross-IP, tutto via EasyProxy)
+    // Default (nessuna selezione) = Proxy se EasyProxy configurato, altrimenti Direct
+    const wantsDirect = this.config.animeunityDirect === true;
+    const wantsProxy = this.config.animeunityProxy === true;
+    const noneSelected = !wantsDirect && !wantsProxy;
+    const directWanted = noneSelected ? !this.config.proxyUrl : wantsDirect;
+    const proxyWanted = noneSelected ? !!this.config.proxyUrl : wantsProxy;
+
     const streams: StreamForStremio[] = [];
     const seenLinks = new Set<string>();
+    const pushStream = (url: string, title: string) => {
+      if (!url || seenLinks.has(url)) return;
+      seenLinks.add(url);
+      streams.push({ title, url, behaviorHints: { notWebReady: true } });
+    };
 
-    const sNum = seasonNumber || 1;
-    let baseTitle = `${capitalize(displayTitle)} ▪ ${langLabel} ▪ S${sNum}`;
-    const resolvedEpisodeNum = parsePositiveInt(selected.num) || requestedEpisode;
-    if (resolvedEpisodeNum) baseTitle += `E${resolvedEpisodeNum}`;
+    // .at espone SUB e ITA nello stesso episodio; .co ha schede separate per lingua.
+    const languages: ('sub' | 'dub')[] = isUnityCoBase()
+      ? [isUnityCoDubPage(String(html)) ? 'dub' : 'sub']
+      : ['sub', 'dub'];
+    for (const language of languages) {
+      const streamResult = await getStreamData(animeId, animeSlug, selected.episodeId, language);
+      if (!streamResult.hls_url && !streamResult.mp4_url && !streamResult.embed_url) continue;
 
-    const preferMp4 = /^(1|true|on)$/i.test(String(process.env.ANIMEUNITY_PREFER_MP4 || '0'));
-    let added = false;
-    let hls403 = false;
+      const langLabel = language === 'dub' ? 'ITA' : 'SUB';
+      let baseTitle = `${capitalize(displayTitle)} ▪ ${langLabel} ▪ ${episodeTag(seasonNumber, resolvedEpisodeNum)}`;
 
-    if (!preferMp4 && streamResult.embed_url) {
-      try {
-        // extractFromUrl rimosso: non esisteva più in extractor.ts dopo pulizia anime-only.
-        // Il fallback MP4 (riga successiva) rimane funzionante.
-        console.warn('[AnimeUnity] HLS extractFromUrl disabilitato — uso solo fallback MP4');
-      } catch (error: any) {
-        const msg = error?.message || String(error);
-        if (/403/.test(msg)) {
-          hls403 = true;
-          console.warn('[AnimeUnity] HLS extractor 403 – consentito fallback MP4 (se MFP configurato)');
-        } else {
-          console.warn('[AnimeUnity] HLS extractor fallito (non 403):', msg);
-        }
-      }
-    }
-
-    const mfpConfigured = !!this.config.mfpUrl;
-    const allowMp4 = preferMp4 || (hls403 && !added);
-    if (allowMp4 && streamResult.mp4_url) {
-      if (!preferMp4 && hls403 && !mfpConfigured) {
-        console.log('[AnimeUnity] MP4 non mostrato: HLS 403 ma MFP non configurato');
-      } else {
-        try {
-          const mediaFlowUrl = formatMediaFlowUrl(
-            streamResult.mp4_url,
-            this.config.mfpUrl,
-            this.config.mfpPassword
-          );
-          if (!seenLinks.has(mediaFlowUrl)) {
-            streams.push({
-              title: baseTitle + (added ? ' (MP4)' : (preferMp4 ? ' (MP4 Preferred)' : ' (MP4 Fallback)')),
-              url: mediaFlowUrl,
-              behaviorHints: { notWebReady: true },
-            });
-            seenLinks.add(mediaFlowUrl);
+      if (directWanted) {
+        if (streamResult.hls_url) pushStream(streamResult.hls_url, baseTitle + ' (HLS)');
+        // MP4 solo se manca l'HLS o se richiesto esplicitamente: di default una
+        // stream per lingua, in HLS (l'MP4 era un doppione dello stesso episodio).
+        if (streamResult.mp4_url && (!streamResult.hls_url || preferMp4)) {
+          try {
+            pushStream(
+              buildEasyProxyStreamUrl(streamResult.mp4_url, this.config.proxyUrl, this.config.proxyPassword),
+              baseTitle + (preferMp4 ? ' (MP4 Preferred)' : ' (MP4)')
+            );
+          } catch (e: any) {
+            console.warn('[AnimeUnity] Errore fallback MP4:', e?.message || e);
           }
-        } catch (e: any) {
-          console.warn('[AnimeUnity] Errore fallback MP4:', e?.message || e);
         }
       }
-    }
 
-    // --- Nuova logica 3 modalità (come StreamingCommunity) ---
-    // animeunityDirect    = Direct (solo locale, IP-bound)
-    // animeunityDirectFhd = Synthetic FHD (solo locale, IP-bound)
-    // animeunityProxy     = Proxy (cross-IP, tutto via EasyProxy)
-    // Default (nessuna selezione) = Proxy se MFP presente, altrimenti Direct
-    const wantsDirect = this.config.animeunityDirect === true;
-    const wantsDirectFhd = this.config.animeunityDirectFhd === true;
-    const wantsProxy = this.config.animeunityProxy === true;
-    const noneSelected = !wantsDirect && !wantsDirectFhd && !wantsProxy;
-    const directWanted = noneSelected ? !this.config.mfpUrl : wantsDirect;
-    const directFhdWanted = noneSelected ? false : wantsDirectFhd;
-    const proxyWanted = noneSelected ? !!this.config.mfpUrl : wantsProxy;
-
-    // Genera versione Proxy cross-IP via EasyProxy generic HLS proxy.
-    const mfpWrapped: StreamForStremio[] = [];
-    if (proxyWanted && this.config.mfpUrl && streamResult.embed_url) {
-      const cleanMfp = this.config.mfpUrl.endsWith('/') ? this.config.mfpUrl.slice(0, -1) : this.config.mfpUrl;
-      const pwdParam = this.config.mfpPassword ? `&api_password=${encodeURIComponent(this.config.mfpPassword)}` : '';
-
-      try {
-        const embedReferer = streamResult.episode_page || animeUrl || 'https://animeunity.so/';
-        const targetEmbedUrl = (streamResult.embed_url || '').replace('vixcloud.co', 'vixsrc.to');
-        const proxyPlaylistUrl = `${cleanMfp}/proxy/hls/manifest.m3u8?d=${encodeURIComponent(targetEmbedUrl)}${pwdParam}`
-          + `&h_Origin=${encodeURIComponent('https://vixsrc.to')}`
-          + `&h_Referer=${encodeURIComponent(embedReferer)}`;
-        console.log('[AnimeUnity][MFP] Built generic proxy URL:', proxyPlaylistUrl);
-
-        mfpWrapped.push({
-          title: baseTitle + ' 🔒',
-          url: proxyPlaylistUrl,
-          behaviorHints: { notWebReady: true, animeunityMfpWrapped: true },
-        });
-      } catch (e: any) {
-        console.warn('[AnimeUnity][MFP] Errore costruzione proxy URL:', e?.message || e);
-      }
-    }
-
-    // Stream diretti: solo se Direct o Synthetic FHD richiesti
-    const directOut: StreamForStremio[] = [];
-    if (directWanted || directFhdWanted) {
-      directOut.push(...streams);
-    }
-
-    return [...directOut, ...mfpWrapped];
-  }
-
-  private async getStreamsFromMapping(
-    id: string,
-    seasonNumber: number | null,
-    episodeNumber: number | null,
-    isMovie: boolean,
-    providerContext: { kitsuId?: string; tmdbId?: string; imdbId?: string } | null,
-    titleFallback: string
-  ): Promise<StreamForStremio[]> {
-    const lookup = resolveLookupRequest(id, seasonNumber, episodeNumber, providerContext);
-    if (!lookup) return [];
-
-    let mappingPayload = await fetchMappingPayload(lookup, caches, 'AnimeUnity');
-    let animePaths = extractProviderPaths(mappingPayload, 'animeunity', normalizeAnimePath);
-
-    if (animePaths.length === 0 && String(lookup.provider || '').toLowerCase() === 'imdb') {
-      const tmdbFromContext = providerContext?.tmdbId && /^\d+$/.test(String(providerContext.tmdbId))
-        ? String(providerContext.tmdbId)
-        : null;
-      const tmdbFromPayload = extractTmdbIdFromMappingPayload(mappingPayload);
-      const fallbackTmdbId = tmdbFromContext || tmdbFromPayload;
-      if (fallbackTmdbId) {
-        const tmdbLookup = {
-          provider: 'tmdb' as const,
-          externalId: fallbackTmdbId,
-          season: lookup.season,
-          episode: lookup.episode,
-        };
-        const tmdbPayload = await fetchMappingPayload(tmdbLookup, caches, 'AnimeUnity');
-        const tmdbPaths = extractProviderPaths(tmdbPayload, 'animeunity', normalizeAnimePath);
-        if (tmdbPaths.length > 0) {
-          mappingPayload = tmdbPayload;
-          animePaths = tmdbPaths;
+      if (proxyWanted && this.config.proxyUrl.trim()) {
+        const target = streamResult.hls_url || streamResult.embed_url;
+        if (!target) continue;
+        let origin = '';
+        try {
+          origin = new URL(target).origin;
+        } catch {
+          origin = getUnityBaseUrl();
         }
+        const proxyPlaylistUrl = new URL(buildEasyProxyHlsUrl(
+          target,
+          this.config.proxyUrl,
+          this.config.proxyPassword,
+          {
+            Origin: origin,
+            Referer: streamResult.episode_page || animeUrl,
+          }
+        ));
+        // Se la selezione della variante fallisce, EasyProxy sceglie comunque la più alta.
+        proxyPlaylistUrl.searchParams.set('max_res', 'true');
+        debug(4, 'AnimeUnity', '[AnimeUnity][EasyProxy] Built HLS proxy URL for:', redactUrl(target));
+        pushStream(proxyPlaylistUrl.toString(), baseTitle + ' 🔒');
       }
     }
 
-    if (!animePaths.length) return [];
-
-    const requestedEpisode = resolveEpisodeFromMappingPayload(mappingPayload, lookup.episode);
-    const chunks = await mapLimit(animePaths, 3, (path) =>
-      this.extractStreamsFromAnimePath(path, requestedEpisode, seasonNumber, isMovie, titleFallback)
-    );
-    const merged = chunks.flat().filter((stream) => stream && stream.url);
-
-    const deduped: StreamForStremio[] = [];
-    const seen = new Set<string>();
-    for (const stream of merged) {
-      const key = String(stream.url).trim();
-      if (!key || seen.has(key)) continue;
-      seen.add(key);
-      deduped.push(stream);
-    }
-
-    return deduped;
-  }
-
-  private async handleLookupWithTitleFallback(
-    lookupId: string,
-    title: string,
-    seasonNumber: number | null,
-    episodeNumber: number | null,
-    isMovie: boolean,
-    providerContext: { kitsuId?: string; tmdbId?: string; imdbId?: string } | null
-  ): Promise<{ streams: StreamForStremio[] }> {
-    const fromMapping = await this.getStreamsFromMapping(
-      lookupId,
-      seasonNumber,
-      episodeNumber,
-      isMovie,
-      providerContext,
-      title
-    );
-    if (fromMapping.length) {
-      console.log('[AnimeUnity] Mapping API hit: uso stream da mapping path.');
-      return { streams: fromMapping };
-    }
-    console.log('[AnimeUnity] Mapping API miss: fallback a ricerca per titolo.');
-    return this.handleTitleRequest(title, seasonNumber, episodeNumber, isMovie);
+    return streams;
   }
 
   // Made public for catalog search
@@ -1061,8 +740,8 @@ export class AnimeUnityProvider {
       const [subResults, dubResults]: [AnimeUnitySearchResult[], AnimeUnitySearchResult[]] = await Promise.all([subPromise, dubPromise]);
       const results: { version: AnimeUnitySearchResult; language_type: string }[] = [];
 
-      console.log(`[AnimeUnity] Risultati SUB per "${title}":`, subResults?.length || 0);
-      console.log(`[AnimeUnity] Risultati DUB per "${title}":`, dubResults?.length || 0);
+      debug(2, 'AnimeUnity', `[AnimeUnity] Risultati SUB per "${title}":`, subResults?.length || 0);
+      debug(2, 'AnimeUnity', `[AnimeUnity] Risultati DUB per "${title}":`, dubResults?.length || 0);
 
       // Unisci tutti i risultati (SUB e DUB), ma assegna ITA o CR se il nome contiene
       const allResults = [...(subResults || []), ...(dubResults || [])];
@@ -1082,7 +761,7 @@ export class AnimeUnityProvider {
         }
         results.push({ version: r, language_type });
       }
-      console.log(`[AnimeUnity] Risultati totali dopo filtro duplicati:`, results.length);
+      debug(2, 'AnimeUnity', `[AnimeUnity] Risultati totali dopo filtro duplicati:`, results.length);
       return results;
     } catch (error) {
       console.error(`[AnimeUnity] Errore in searchAllVersions per "${title}":`, error);
@@ -1095,30 +774,16 @@ export class AnimeUnityProvider {
       return { streams: [] };
     }
     try {
-      const { kitsuId, seasonNumber, episodeNumber, isMovie } = this.kitsuProvider.parseKitsuId(kitsuIdString);
-      // Single quick Kitsu call for canonical title (stream label only)
-      // Heavy resolution (mappings, include=mappings, Tenrai) deferred to fallback path only
-      let quickTitle = kitsuId;
-      try {
-        const metaResp = await fetch(`https://kitsu.io/api/edge/anime/${kitsuId}`);
-        if (metaResp.ok) {
-          const j: any = await metaResp.json();
-          const attr = j?.data?.attributes || {};
-          quickTitle = attr.titles?.en || attr.titles?.en_jp || attr.canonicalTitle || kitsuId;
-        }
-      } catch { }
-      // Try mapping API first — no expensive title resolution yet
-      const fromMapping = await this.getStreamsFromMapping(
-        `kitsu:${kitsuId}`, seasonNumber, episodeNumber, isMovie, { kitsuId }, quickTitle
-      );
-      if (fromMapping.length) {
-        console.log('[AnimeUnity] Mapping hit (Kitsu): skipped heavy title resolution.');
-        return { streams: fromMapping };
+      const request = resolveMappingRequest(kitsuIdString);
+      if (!request) return { streams: [] };
+      let title = await getKitsuTitle(request.id);
+      if (!title) {
+        try {
+          title = await getEnglishTitleFromAnyId(request.id, 'kitsu', this.config.tmdbApiKey);
+        } catch { }
       }
-      // Mapping miss → now do full title resolution for the title search fallback
-      const englishTitle = await getEnglishTitleFromAnyId(kitsuId, 'kitsu', this.config.tmdbApiKey);
-      console.log(`[AnimeUnity] Mapping miss (Kitsu): ricerca con titolo inglese: ${englishTitle}`);
-      return this.handleTitleRequest(englishTitle, seasonNumber, episodeNumber, isMovie);
+      if (!title) return { streams: [] };
+      return this.handleTitleRequest(title, null, request.episode, request.isMovie);
     } catch (error) {
       console.error('Error handling Kitsu request:', error);
       return { streams: [] };
@@ -1133,27 +798,35 @@ export class AnimeUnityProvider {
       return { streams: [] };
     }
     try {
-      const parts = malIdString.split(':');
-      if (parts.length < 2) throw new Error('Formato MAL ID non valido. Usa: mal:ID o mal:ID:EPISODIO o mal:ID:STAGIONE:EPISODIO');
-      const malId = parts[1];
-      let seasonNumber: number | null = null;
-      let episodeNumber: number | null = null;
-      let isMovie = false;
-      if (parts.length === 2) {
-        isMovie = true;
-      } else if (parts.length === 3) {
-        episodeNumber = parseInt(parts[2]);
-      } else if (parts.length === 4) {
-        seasonNumber = parseInt(parts[2]);
-        episodeNumber = parseInt(parts[3]);
-      }
-      const englishTitle = await getEnglishTitleFromAnyId(malId, 'mal', this.config.tmdbApiKey);
-      console.log(`[AnimeUnity] Ricerca con titolo inglese: ${englishTitle}`);
-      return this.handleTitleRequest(englishTitle, seasonNumber, episodeNumber, isMovie);
+      const request = resolveMappingRequest(malIdString);
+      if (!request) return { streams: [] };
+      const englishTitle = await getEnglishTitleFromAnyId(request.id, 'mal', this.config.tmdbApiKey);
+      debug(2, 'AnimeUnity', `[AnimeUnity] Ricerca con titolo inglese: ${englishTitle}`);
+      return this.handleTitleRequest(englishTitle, request.season, request.episode, request.isMovie);
     } catch (error) {
       console.error('Error handling MAL request:', error);
       return { streams: [] };
     }
+  }
+
+  /**
+   * Split-cour safety net: on a mapping miss never search the base series title
+   * with an external episode number. Use the official season title, or nothing.
+   */
+  private async handleUnmappedSeries(
+    request: MappingRequest | null,
+    episodeNumber: number | null
+  ): Promise<{ streams: StreamForStremio[] } | null> {
+    if (!request || request.isMovie) return null;
+    const season = request.season ?? 1;
+    if (season <= 1) return null;
+    const seasonTitle = await resolveSeasonFallbackTitle(request, this.config);
+    if (!seasonTitle) {
+      console.warn(`[AnimeUnity] Mapping miss for ${request.provider}:${request.id} S${season}E${episodeNumber}: no season title, returning no stream`);
+      return { streams: [] };
+    }
+    console.warn(`[AnimeUnity] Mapping miss for ${request.provider}:${request.id} S${season}E${episodeNumber}: using season title "${seasonTitle}"`);
+    return this.handleTitleRequest(seasonTitle, season, episodeNumber, false);
   }
 
   async handleImdbRequest(imdbId: string, seasonNumber: number | null, episodeNumber: number | null, isMovie = false): Promise<{ streams: StreamForStremio[] }> {
@@ -1165,25 +838,23 @@ export class AnimeUnityProvider {
       if (gateEnabled) {
         const gate = await checkIsAnimeById('imdb', imdbId, this.config.tmdbApiKey, isMovie ? 'movie' : 'tv');
         if (!gate.isAnime) {
-          console.log(`[AnimeUnity] Skipping anime search: no MAL/Kitsu mapping (${gate.reason}) for ${imdbId}`);
+          debug(2, 'AnimeUnity', `[AnimeUnity] Skipping anime search: no MAL/Kitsu mapping (${gate.reason}) for ${imdbId}`);
           return { streams: [] };
         }
-        // Removed placeholder injection; icon added directly to titles
       }
-      const imdbIdClean = imdbId.split(':')[0];
-      // Try mapping API first — defer expensive title resolution to fallback path only
-      const fromMappingImdb = await this.getStreamsFromMapping(
-        imdbIdClean, seasonNumber, episodeNumber, isMovie, { imdbId: imdbIdClean }, ''
-      );
-      if (fromMappingImdb.length) {
-        console.log('[AnimeUnity] Mapping hit (IMDB): skipped title resolution.');
-        return { streams: fromMappingImdb };
+      const request = resolveMappingRequest(imdbId, seasonNumber, episodeNumber, isMovie);
+      if (request) {
+        const target = await resolveAnimeTarget(request, this.config);
+        const title = target ? target.title || (await getKitsuTitle(target.kitsuId)) : '';
+        if (target && title) {
+          return this.handleTitleRequest(title, target.displaySeason, target.kitsuEpisode, request.isMovie);
+        }
       }
-      // Mapping miss → resolve full English title for search fallback
+      const unmapped = await this.handleUnmappedSeries(request, episodeNumber);
+      if (unmapped) return unmapped;
       const englishTitle = await getEnglishTitleFromAnyId(imdbId, 'imdb', this.config.tmdbApiKey);
-      console.log(`[AnimeUnity] Mapping miss (IMDB): ricerca con titolo inglese: ${englishTitle}`);
-      const res = await this.handleTitleRequest(englishTitle, seasonNumber, episodeNumber, isMovie);
-      return res;
+      debug(2, 'AnimeUnity', `[AnimeUnity] Ricerca con titolo inglese: ${englishTitle}`);
+      return this.handleTitleRequest(englishTitle, seasonNumber, episodeNumber, isMovie);
     } catch (error) {
       console.error('Error handling IMDB request:', error);
       return { streams: [] };
@@ -1199,87 +870,95 @@ export class AnimeUnityProvider {
       if (gateEnabled) {
         const gate = await checkIsAnimeById('tmdb', tmdbId, this.config.tmdbApiKey, isMovie ? 'movie' : 'tv');
         if (!gate.isAnime) {
-          console.log(`[AnimeUnity] Skipping anime search: no MAL/Kitsu mapping (${gate.reason}) for TMDB ${tmdbId}`);
+          debug(2, 'AnimeUnity', `[AnimeUnity] Skipping anime search: no MAL/Kitsu mapping (${gate.reason}) for TMDB ${tmdbId}`);
           return { streams: [] };
         }
-        // Removed placeholder injection; icon added directly to titles
       }
-      // Try mapping API first — defer expensive title resolution to fallback path only
-      const fromMappingTmdb = await this.getStreamsFromMapping(
-        tmdbId, seasonNumber, episodeNumber, isMovie, { tmdbId }, ''
-      );
-      if (fromMappingTmdb.length) {
-        console.log('[AnimeUnity] Mapping hit (TMDB): skipped title resolution.');
-        return { streams: fromMappingTmdb };
+      const request = resolveMappingRequest(`tmdb:${tmdbId}`, seasonNumber, episodeNumber, isMovie);
+      if (request) {
+        const target = await resolveAnimeTarget(request, this.config);
+        const title = target ? target.title || (await getKitsuTitle(target.kitsuId)) : '';
+        if (target && title) {
+          return this.handleTitleRequest(title, target.displaySeason, target.kitsuEpisode, request.isMovie);
+        }
       }
-      // Mapping miss → resolve full English title for search fallback
+      const unmapped = await this.handleUnmappedSeries(request, episodeNumber);
+      if (unmapped) return unmapped;
       const englishTitle = await getEnglishTitleFromAnyId(tmdbId, 'tmdb', this.config.tmdbApiKey);
-      console.log(`[AnimeUnity] Mapping miss (TMDB): ricerca con titolo inglese: ${englishTitle}`);
-      const res = await this.handleTitleRequest(englishTitle, seasonNumber, episodeNumber, isMovie);
-      return res;
+      debug(2, 'AnimeUnity', `[AnimeUnity] Ricerca con titolo inglese: ${englishTitle}`);
+      return this.handleTitleRequest(englishTitle, seasonNumber, episodeNumber, isMovie);
     } catch (error) {
       console.error('Error handling TMDB request:', error);
       return { streams: [] };
     }
   }
 
+  async handleTvdbRequest(tvdbId: string, seasonNumber: number | null, episodeNumber: number | null, isMovie = false): Promise<{ streams: StreamForStremio[] }> {
+    if (!this.config.enabled) {
+      return { streams: [] };
+    }
+    try {
+      const gateEnabled = (process.env.ANIME_GATE_ENABLED || 'true') !== 'false';
+      if (gateEnabled) {
+        const gate = await checkIsAnimeById('tvdb', tvdbId, this.config.tmdbApiKey, isMovie ? 'movie' : 'tv');
+        if (!gate.isAnime) {
+          debug(2, 'AnimeUnity', `[AnimeUnity] Skipping anime search: no Kitsu mapping (${gate.reason}) for TVDB ${tvdbId}`);
+          return { streams: [] };
+        }
+      }
+      const request = resolveMappingRequest(`tvdb:${tvdbId}`, seasonNumber, episodeNumber, isMovie);
+      if (request) {
+        const target = await resolveAnimeTarget(request, this.config);
+        const title = target ? target.title || (await getKitsuTitle(target.kitsuId)) : '';
+        if (target && title) {
+          return this.handleTitleRequest(title, target.displaySeason, target.kitsuEpisode, request.isMovie);
+        }
+      }
+      const unmapped = await this.handleUnmappedSeries(request, episodeNumber);
+      if (unmapped) return unmapped;
+      const fallbackTitle = await getTvdbTitle(tvdbId, this.config);
+      if (!fallbackTitle) return { streams: [] };
+      debug(2, 'AnimeUnity', `[AnimeUnity] Ricerca con titolo TVDB: ${fallbackTitle}`);
+      return this.handleTitleRequest(fallbackTitle, seasonNumber, episodeNumber, isMovie);
+    } catch (error) {
+      console.error('Error handling TVDB request:', error);
+      return { streams: [] };
+    }
+  }
+
   async handleTitleRequest(title: string, seasonNumber: number | null, episodeNumber: number | null, isMovie = false): Promise<{ streams: StreamForStremio[] }> {
+    debug(1, 'AnimeUnity', 'title request', { title, season: seasonNumber, episode: episodeNumber, isMovie });
     const universalTitle = applyUniversalAnimeTitleNormalization(title);
     const normalizedTitle = normalizeTitleForSearch(universalTitle);
     if (universalTitle !== title) {
-      console.log(`[UniversalTitle][Applied] ${title} -> ${universalTitle}`);
+      debug(3, 'AnimeUnity', `[UniversalTitle][Applied] ${title} -> ${universalTitle}`);
     }
-    console.log(`[AnimeUnity] Titolo normalizzato per ricerca: ${normalizedTitle}`);
+    debug(2, 'AnimeUnity', `[AnimeUnity] Titolo normalizzato per ricerca: ${normalizedTitle}`);
     // Se il titolo originale è una chiave dell'exactMap allora saltiamo qualsiasi filtro successivo:
     // l'intento dell'utente è: se la ricerca parte da una chiave exactMap, NON applicare filterAnimeResults
     const skipFilter = Object.prototype.hasOwnProperty.call(exactMap, title);
     if (skipFilter) {
-      console.log(`[AnimeUnity][ExactMap] Skip filtro: titolo di input corrisponde a chiave exactMap -> "${title}"`);
+      debug(3, 'AnimeUnity', `[AnimeUnity][ExactMap] Skip filtro: titolo di input corrisponde a chiave exactMap -> "${title}"`);
     }
     let animeVersions = await this.searchAllVersions(normalizedTitle);
-    // Fallback: se non trova nulla, prova anche con titoli alternativi
+    // Budget ricerca <=2 fetch: una sola ricerca di ripiego, scelta nell'ordine
+    // (senza apostrofi, senza parentesi, prime 3 parole).
+    let usedFallbackSearch = false;
     if (!animeVersions.length) {
-        // Prova a ottenere titoli alternativi da Tenrai se il titolo contiene un MAL ID.
-      let fallbackTitles: string[] = [];
-      try {
-        // Prova a estrarre MAL ID dal titolo (se è un numero)
-        const malIdMatch = title.match && title.match(/\d+/);
-        const malId = malIdMatch ? malIdMatch[0] : null;
-        if (malId) {
-          const metadata = await getMalAnimeMetadata(malId);
-          fallbackTitles = getMalTitleCandidates(metadata);
-        }
-      } catch { }
-      // Prova fallback con titoli alternativi
-      for (const fallbackTitle of fallbackTitles) {
-        if (fallbackTitle && fallbackTitle !== normalizedTitle) {
-          animeVersions = await this.searchAllVersions(fallbackTitle);
-          if (animeVersions.length) break;
-        }
-      }
-      // Fallback: senza apostrofi
-      if (!animeVersions.length && normalizedTitle.includes("'")) {
-        const noApos = normalizedTitle.replace(/'/g, "");
-        animeVersions = await this.searchAllVersions(noApos);
-      }
-      // Fallback: senza parentesi
-      if (!animeVersions.length && normalizedTitle.includes("(")) {
-        const noParens = normalizedTitle.split("(")[0].trim();
-        animeVersions = await this.searchAllVersions(noParens);
-      }
-      // Fallback: prime 3 parole
-      if (!animeVersions.length) {
-        const words = normalizedTitle.split(" ");
-        if (words.length > 3) {
-          const first3 = words.slice(0, 3).join(" ");
-          animeVersions = await this.searchAllVersions(first3);
-        }
+      const candidates = [
+        normalizedTitle.includes("'") ? normalizedTitle.replace(/'/g, "") : '',
+        normalizedTitle.includes("(") ? normalizedTitle.split("(")[0].trim() : '',
+        normalizedTitle.split(" ").length > 3 ? normalizedTitle.split(" ").slice(0, 3).join(" ") : '',
+      ].filter(q => q && q !== normalizedTitle);
+      if (candidates.length) {
+        usedFallbackSearch = true;
+        animeVersions = await this.searchAllVersions(candidates[0]);
       }
     }
     if (!skipFilter) {
       animeVersions = filterAnimeResults(animeVersions, normalizedTitle);
     } else {
-      console.log('[AnimeUnity][ExactMap] Uso risultati grezzi senza filtro (exactMap).');
+      debug(3, 'AnimeUnity', '[AnimeUnity][ExactMap] Uso risultati grezzi senza filtro (exactMap).');
       // STRICT EXACT FILTER: per le richieste exactMap, manteniamo SOLO i risultati
       // il cui nome base NON contiene parole extra rispetto agli altri risultati dello stesso gruppo.
       // Esempio: se troviamo "Final Season" e "Final Season Parte 2", teniamo solo i primi.
@@ -1287,7 +966,7 @@ export class AnimeUnityProvider {
       // non con il titolo inglese di input.
       try {
         const before = animeVersions.length;
-        console.log(`[AnimeUnity][ExactMap][StrictFilter] Risultati da filtrare (${before}):`);
+        debug(4, 'AnimeUnity', `[AnimeUnity][ExactMap][StrictFilter] Risultati da filtrare (${before}):`);
 
         // Estrai i nomi base (senza parentesi) di tutti i risultati
         const baseNames = animeVersions.map(v => {
@@ -1296,25 +975,36 @@ export class AnimeUnityProvider {
             .replace(/\s+/g, ' ')
             .trim()
             .toLowerCase();
-          console.log(`  name="${v.version.name}" -> base="${base}"`);
+          debug(4, 'AnimeUnity', `  name="${v.version.name}" -> base="${base}"`);
           return base;
         });
 
         // Trova il nome più corto (quello senza "Parte 2", "Part 2", ecc.)
         const sortedByLength = [...baseNames].sort((a, b) => a.length - b.length);
         const shortestBase = sortedByLength[0];
-        console.log(`[AnimeUnity][ExactMap][StrictFilter] Nome base più corto (target): "${shortestBase}"`);
+        debug(4, 'AnimeUnity', `[AnimeUnity][ExactMap][StrictFilter] Nome base più corto (target): "${shortestBase}"`);
 
         // Filtra: mantieni solo i risultati che matchano esattamente il nome più corto
         animeVersions = animeVersions.filter((v, idx) => {
           const match = baseNames[idx] === shortestBase;
-          console.log(`  [${idx}] "${v.version.name}" -> match=${match}`);
+          debug(4, 'AnimeUnity', `  [${idx}] "${v.version.name}" -> match=${match}`);
           return match;
         });
 
-        console.log(`[AnimeUnity][ExactMap][StrictFilter] DOPO filtro: ${animeVersions.length} risultati rimasti`);
+        debug(4, 'AnimeUnity', `[AnimeUnity][ExactMap][StrictFilter] DOPO filtro: ${animeVersions.length} risultati rimasti`);
       } catch (e) {
         console.warn('[AnimeUnity][ExactMap][StrictFilter] errore:', (e as any)?.message || e);
+      }
+    }
+    if (!animeVersions.length && !skipFilter && !usedFallbackSearch) {
+      // Budget ricerca <=2 fetch: una sola query di ripiego.
+      const [fallbackQuery] = buildTitleFallbackQueries(normalizedTitle).filter(q => q && q !== normalizedTitle);
+      if (fallbackQuery) {
+        const fallbackVersions = filterAnimeResults(await this.searchAllVersions(fallbackQuery), normalizedTitle);
+        if (fallbackVersions.length) {
+          debug(2, 'AnimeUnity', `[AnimeUnity] Trovato con query di ripiego: ${fallbackQuery}`);
+          animeVersions = fallbackVersions;
+        }
       }
     }
     if (!animeVersions.length) {
@@ -1323,14 +1013,15 @@ export class AnimeUnityProvider {
     }
     const streams: StreamForStremio[] = [];
     const seenLinks = new Set();
-    for (const { version, language_type } of animeVersions) {
+    for (const { version } of animeVersions) {
+      // .co tipizza le schede: un film non è l'episodio di una serie.
+      if (!isMovie && version.type === 'Movie') continue;
       const cleanName = version.name
         .replace(/\s*\(ITA\)/i, '')
         .replace(/\s*\(CR\)/i, '')
         .replace(/ITA/gi, '')
         .replace(/CR/gi, '')
         .trim();
-      const langLabel = language_type === 'ITA' ? 'ITA' : 'SUB';
       const path = normalizeAnimePath(`/anime/${version.id}-${version.slug}`);
       if (!path) continue;
       const perVersion = await this.extractStreamsFromAnimePath(
@@ -1338,8 +1029,7 @@ export class AnimeUnityProvider {
         episodeNumber,
         seasonNumber,
         isMovie,
-        cleanName,
-        langLabel
+        cleanName
       );
       for (const st of perVersion) {
         if (!st || !st.url) continue;
@@ -1348,6 +1038,46 @@ export class AnimeUnityProvider {
         seenLinks.add(st.url);
       }
     }
+
+    // .co: se l'archivio non ha restituito la scheda ITA della stessa serie
+    // (es. One Piece), il link è nella pagina SUB appena letta (cache, 0 fetch).
+    if (isUnityCoBase() && !isMovie && !streams.some(s => /ITA/.test(String(s.title || '')))) {
+      const subVersion = animeVersions.find(v => !/-ita$/i.test(v.version.slug || ''));
+      if (subVersion) {
+        const subPath = normalizeAnimePath(`/anime/${subVersion.version.id}-${subVersion.version.slug}`);
+        const subUrl = subPath ? buildUnityUrl(subPath) : null;
+        if (subPath && subUrl) {
+          const html = String(await auFetchResource(subUrl, caches, {
+            ttlMs: TTL.animePage,
+            cacheKey: `au-anime:${subPath}`,
+            timeoutMs: FETCH_TIMEOUT,
+          }).catch(() => '') || '');
+          const itaPath = findUnityCoItaSibling(html, subPath);
+          if (itaPath) {
+            const cleanName = subVersion.version.name
+              .replace(/\s*\(ITA\)/i, '')
+              .replace(/\s*\(CR\)/i, '')
+              .replace(/ITA/gi, '')
+              .replace(/CR/gi, '')
+              .trim();
+            const extra = await this.extractStreamsFromAnimePath(itaPath, episodeNumber, seasonNumber, isMovie, cleanName);
+            for (const st of extra) {
+              if (!st || !st.url || seenLinks.has(st.url)) continue;
+              streams.push(st);
+              seenLinks.add(st.url);
+            }
+            if (extra.length) debug(2, 'AnimeUnity', `[AnimeUnity] Scheda ITA recuperata dalla pagina SUB: ${itaPath}`);
+          }
+        }
+      }
+    }
+    debug(1, 'AnimeUnity', 'streams', {
+      title: normalizedTitle,
+      count: streams.length,
+      season: seasonNumber,
+      episode: episodeNumber,
+      isMovie,
+    });
     return { streams };
   }
 }

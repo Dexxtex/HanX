@@ -5,6 +5,29 @@
  * URL handling, title sanitization, and concurrency control.
  */
 
+// ─── Errors ────────────────────────────────────────────────
+
+/**
+ * True per gli errori di abort/timeout di fetch e undici (AbortError,
+ * TimeoutError, "operation timed out", ...). Usato dai provider per
+ * distinguere un timeout da un errore definitivo.
+ */
+export function isAbortOrTimeoutError(err: unknown): boolean {
+  const e = err as { name?: unknown; message?: unknown } | null | undefined;
+  return /timeout|abort/i.test(`${e?.name || ''} ${e?.message || ''}`);
+}
+
+/**
+ * Etichetta S/E. La stagione si stampa solo quando e' davvero nota: negli id Kitsu ogni
+ * stagione e' un anime a se', quindi il campo season vale sempre 1 e stamparlo mette "S1"
+ * su episodi di S2. Per IMDB/TMDB la stagione e' reale e resta.
+ */
+export function episodeTag(seasonNumber: number | null, episodeNumber: number | null): string {
+  const s = seasonNumber != null ? `S${seasonNumber}` : '';
+  const e = episodeNumber != null ? `E${episodeNumber}` : '';
+  return `${s}${e}`;
+}
+
 // ─── Numeric helpers ────────────────────────────────────────
 
 /**
@@ -66,7 +89,7 @@ export function toAbsoluteUrl(href: string | null | undefined, baseUrl: string):
 /**
  * Check if a URL/path points to a directly playable media file (.mp4 / .m3u8).
  */
-export function isDirectMediaPath(value: string | null | undefined): boolean {
+function isDirectMediaPath(value: string | null | undefined): boolean {
   const text = String(value || '').trim();
   if (!text) return false;
 
@@ -163,28 +186,12 @@ export function sanitizeAnimeTitle(rawTitle: string | null | undefined): string 
  * Infer a language source tag from title and path.
  * Returns 'ITA' if Italian dub markers found, otherwise 'SUB'.
  */
-export function inferSourceTag(title: string | null | undefined, animePath: string | null | undefined): string {
+export function inferSourceTag(title: string | null | undefined, animePath: string | null | undefined): 'ITA' | 'SUB' {
   const titleText = String(title || '').toLowerCase();
   const pathText = String(animePath || '').toLowerCase();
   if (/(?:^|[^\w])ita(?:[^\w]|$)/i.test(titleText)) return 'ITA';
   if (/(?:^|[-_/])ita(?:[-_/]|$)/i.test(pathText)) return 'ITA';
   return 'SUB';
-}
-
-/**
- * Convert a source tag to a language emoji.
- */
-export function resolveLanguageEmoji(sourceTag: string | null | undefined): string {
-  return String(sourceTag || '').toUpperCase() === 'ITA' ? '🇮🇹' : '🇯🇵';
-}
-
-/**
- * Extract a quality hint from a URL or filename (e.g. "1080p", "720p").
- */
-export function extractQualityHint(value: string | null | undefined): string {
-  const text = String(value || '');
-  const match = text.match(/(\d{3,4}p)/i);
-  return match ? match[1] : 'Unknown';
 }
 
 /**
@@ -198,39 +205,6 @@ export function normalizeHostLabel(url: string): string | null {
   } catch {
     return null;
   }
-}
-
-// ─── Concurrency ────────────────────────────────────────────
-
-/**
- * Execute async tasks with limited concurrency.
- * Ported 1:1 from easystreams mapLimit().
- */
-export async function mapLimit<T, R>(
-  values: T[],
-  limit: number,
-  mapper: (value: T, index: number) => Promise<R>
-): Promise<R[]> {
-  if (!Array.isArray(values) || values.length === 0) return [];
-  const concurrency = Math.max(1, Math.min(limit, values.length));
-  const output: R[] = new Array(values.length);
-  let cursor = 0;
-
-  async function worker(): Promise<void> {
-    while (cursor < values.length) {
-      const current = cursor;
-      cursor += 1;
-      try {
-        output[current] = await mapper(values[current], current);
-      } catch (error: any) {
-        output[current] = [] as any;
-        console.error('[mapLimit] task failed:', error.message);
-      }
-    }
-  }
-
-  await Promise.all(Array.from({ length: concurrency }, () => worker()));
-  return output;
 }
 
 // ─── Episode list helpers ───────────────────────────────────

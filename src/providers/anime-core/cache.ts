@@ -23,29 +23,29 @@ export function getCached<T = any>(map: Map<string, CacheEntry<T>>, key: string)
   return entry.value;
 }
 
+const MAX_CACHE_ENTRIES = 500;
+
 /**
  * Store a value in the cache with the given TTL (milliseconds).
  * Returns the stored value for convenience (allows inline usage).
  */
 export function setCached<T = any>(map: Map<string, CacheEntry<T>>, key: string, value: T, ttlMs: number): T {
   map.set(key, { value, expiresAt: Date.now() + ttlMs });
-  return value;
-}
-
-/**
- * Deduplicate an array of strings, preserving insertion order.
- * Trims whitespace and discards empty values.
- */
-export function uniqueStrings(values: (string | null | undefined)[]): string[] {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const value of values) {
-    const text = String(value || '').trim();
-    if (!text || seen.has(text)) continue;
-    seen.add(text);
-    out.push(text);
+  // Limite come la cache provider dell'addon: prima scarta le entry scadute,
+  // poi le più vecchie. Senza questo la Map cresce per tutta la vita del processo.
+  if (map.size > MAX_CACHE_ENTRIES) {
+    const now = Date.now();
+    for (const [entryKey, entry] of map) {
+      if (entry.expiresAt <= now) map.delete(entryKey);
+    }
+    let excess = map.size - MAX_CACHE_ENTRIES;
+    for (const entryKey of map.keys()) {
+      if (excess <= 0) break;
+      map.delete(entryKey);
+      excess -= 1;
+    }
   }
-  return out;
+  return value;
 }
 
 /**

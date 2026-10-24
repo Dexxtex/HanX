@@ -1,45 +1,12 @@
 export interface AnimeUnityConfig {
-  mfpUrl: string;
-  mfpPassword: string;
+  proxyUrl: string;
+  proxyPassword: string;
   enabled: boolean;
-  useMediaFlow?: boolean;        // false/undefined = EasyProxy, true = MediaFlow
   tmdbApiKey?: string;
-  addonBase?: string; // URL base addon per endpoint sintetici (vixsynthetic.m3u8)
+  tvdbApiKey?: string;
+  tvdbPin?: string;
   animeunityDirect?: boolean;    // Direct master playlist (solo locale, IP-bound)
-  animeunityDirectFhd?: boolean; // Synthetic FHD (solo locale, IP-bound)
   animeunityProxy?: boolean;     // Proxy (cross-IP, tutto via EasyProxy)
-}
-
-export interface AnimeUnityResult {
-  id: number;
-  slug: string;
-  name: string;
-  episodes_count: number;
-  language_type: 'Original' | 'Italian Dub' | 'Italian Sub';
-}
-
-export interface AnimeUnityEpisode {
-  id: number;
-  number: number;
-  name: string;
-}
-
-export interface StreamData {
-  embed_url?: string;
-  mp4_url?: string;
-  episode_page?: string;
-}
-
-export interface KitsuAnime {
-  id: string;
-  attributes: {
-    titles: {
-      en?: string;
-      ja_jp?: string;
-    };
-    canonicalTitle: string;
-    startDate: string;
-  };
 }
 
 // ✅ AGGIUNTO: Export mancante
@@ -54,13 +21,12 @@ export interface StreamForStremio {
 }
 
 export interface AnimeSaturnConfig {
-  mfpUrl: string;
-  mfpPassword: string;
-  mfpProxyUrl: string;  // Aggiunto per supportare m3u8 proxy
-  mfpProxyPassword: string;  // Aggiunto per supportare m3u8 proxy
+  proxyUrl: string;
+  proxyPassword: string;
   enabled: boolean;
-  useMediaFlow?: boolean;        // false/undefined = EasyProxy, true = MediaFlow
   tmdbApiKey?: string;
+  tvdbApiKey?: string;
+  tvdbPin?: string;
 }
 
 export interface AnimeSaturnResult {
@@ -68,18 +34,13 @@ export interface AnimeSaturnResult {
   url: string;
 }
 
-export interface AnimeSaturnEpisode {
-  title: string;
-  url: string;
-}
-
-// === AnimeWorld ===
 export interface AnimeWorldConfig {
-  mfpUrl: string;
-  mfpPassword: string;
+  proxyUrl: string;
+  proxyPassword: string;
   enabled: boolean;
-  useMediaFlow?: boolean;        // false/undefined = EasyProxy, true = MediaFlow
   tmdbApiKey?: string;
+  tvdbApiKey?: string;
+  tvdbPin?: string;
 }
 
 export interface AnimeWorldResult {
@@ -93,6 +54,9 @@ export interface AnimeWorldResult {
   // quest'ultimo resta com'e' perche' un name vuoto e' il segnale su cui si regge
   // AdjustEmptyName nella classificazione di lingua.
   searchTitle?: string;
+  // Badge DUB nell'anchor "poster" della scheda di ricerca: presente solo sulle
+  // versioni ITA, serve a dedurre la lingua senza scaricare la pagina /play/<slug>.
+  dubBadge?: boolean;
 }
 
 export interface AnimeWorldEpisode {

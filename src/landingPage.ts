@@ -712,6 +712,7 @@ footer {
     }
     .rail nav {
         display: flex;
+        flex-wrap: wrap;
         gap: 10px;
         margin-bottom: 15px;
     }
@@ -784,6 +785,7 @@ const CLIENT_SCRIPT = String.raw`
     };
     var pageData = window.__HANX_PAGE_DATA__ || { defaults: {} };
     var defaults = pageData.defaults || {};
+    var configuredBaseUrl = pageData.publicBaseUrl || '';
     var mode = 'direct';
     var manifestUrl = '';
     var providers = [
@@ -820,22 +822,23 @@ const CLIENT_SCRIPT = String.raw`
         providers.forEach(function (provider) {
             config[provider[0]] = getElement(provider[0]).checked;
         });
-        ['animeunityDirect', 'animeunityDirectFhd', 'animeunityProxy'].forEach(
+        ['animeunityDirect', 'animeunityProxy'].forEach(
             function (key) {
                 config[key] = getElement(key).checked;
             }
         );
 
-        var tmdbKey = getElement('tmdbApiKey').value.trim();
-        if (tmdbKey) {
-            config.tmdbApiKey = tmdbKey;
-        }
+        ['tmdbApiKey', 'tvdbApiKey', 'tvdbPin'].forEach(function (key) {
+            var value = getElement(key).value.trim();
+            if (value) {
+                config[key] = value;
+            }
+        });
 
         if (mode === 'proxy') {
-            config.mediaFlowProxyUrl = getElement('mediaFlowProxyUrl')
+            config.easyProxyUrl = getElement('easyProxyUrl')
                 .value.trim().replace(/\/+$/, '');
-            config.mediaFlowProxyPassword = getElement('mediaFlowProxyPassword').value;
-            config.useMediaFlow = getElement('backend').value === 'mediaflow';
+            config.easyProxyPassword = getElement('easyProxyPassword').value;
         }
 
         return config;
@@ -851,9 +854,17 @@ const CLIENT_SCRIPT = String.raw`
             return provider[1];
         }).join(' / ') || 'Nessuna';
 
+        var configuredKeys = [];
+        if (getElement('tmdbApiKey').value.trim()) configuredKeys.push('TMDB');
+        if (getElement('tvdbApiKey').value.trim()) configuredKeys.push('TVDB');
+        if (getElement('tvdbPin').value.trim()) configuredKeys.push('TVDB PIN');
+        getElement('keysSummary').textContent = configuredKeys.length
+            ? configuredKeys.join(' + ')
+            : 'Fallback server';
+
         getElement('modeSummary').textContent = mode === 'direct'
             ? 'Direct'
-            : (getElement('backend').value === 'mediaflow' ? 'MediaFlow' : 'EasyProxy');
+            : 'EasyProxy';
         getElement('proxyFields').hidden = mode !== 'proxy';
 
         document.querySelectorAll('.source').forEach(function (card) {
@@ -869,12 +880,13 @@ const CLIENT_SCRIPT = String.raw`
             .replace(/\/(?:configure|index\.html)\/?$/, '')
             .replace(/\/+$/, '');
         var encodedConfig = encodeURIComponent(JSON.stringify(buildConfig()));
+        var baseOrigin = (configuredBaseUrl || window.location.origin).replace(/\/+$/, '');
 
-        manifestUrl = window.location.origin + basePath + '/'
+        manifestUrl = baseOrigin + basePath + '/'
             + encodedConfig + '/manifest.json';
 
         getElement('manifestUrl').value = manifestUrl;
-        getElement('serverSummary').textContent = window.location.host + basePath;
+        getElement('serverSummary').textContent = baseOrigin.replace(/^https?:\/\//, '') + basePath;
         getElement('installLink').href = 'stremio://'
             + manifestUrl.replace(/^https?:\/\//, '');
     }
@@ -889,20 +901,19 @@ const CLIENT_SCRIPT = String.raw`
 
         if (mode === 'proxy') {
             try {
-                var proxy = new URL(getElement('mediaFlowProxyUrl').value.trim());
+                var proxy = new URL(getElement('easyProxyUrl').value.trim());
                 if (!/^https?:$/.test(proxy.protocol) || proxy.username || proxy.password) {
                     throw new Error('Invalid proxy URL');
                 }
             } catch (_) {
-                showMessage('Inserisci un URL proxy valido, completo di http:// o https://.', true);
-                getElement('mediaFlowProxyUrl').focus();
+                showMessage('Inserisci un URL EasyProxy valido, completo di http:// o https://.', true);
+                getElement('easyProxyUrl').focus();
                 return false;
             }
         }
 
         if (getElement('animeunityEnabled').checked) {
             var hasVariant = getElement('animeunityDirect').checked
-                || getElement('animeunityDirectFhd').checked
                 || getElement('animeunityProxy').checked;
 
             if (!hasVariant) {
@@ -928,7 +939,7 @@ const CLIENT_SCRIPT = String.raw`
             showMessage('Seleziona almeno una sorgente.', true);
             return;
         }
-        if (number === 3 && !validateConfig()) {
+        if (number === 4 && !validateConfig()) {
             return;
         }
 
@@ -957,18 +968,14 @@ const CLIENT_SCRIPT = String.raw`
         providers.forEach(function (provider) {
             getElement(provider[0]).checked = toBoolean(defaults[provider[0]], true);
         });
-        ['animeunityDirect', 'animeunityDirectFhd', 'animeunityProxy'].forEach(function (key) {
+        ['animeunityDirect', 'animeunityProxy'].forEach(function (key) {
             getElement(key).checked = toBoolean(defaults[key], key === 'animeunityDirect');
         });
-        ['tmdbApiKey', 'mediaFlowProxyUrl', 'mediaFlowProxyPassword'].forEach(function (key) {
+        ['tmdbApiKey', 'tvdbApiKey', 'tvdbPin', 'easyProxyUrl', 'easyProxyPassword'].forEach(function (key) {
             getElement(key).value = typeof defaults[key] === 'string' ? defaults[key] : '';
         });
 
-        getElement('backend').value = toBoolean(defaults.useMediaFlow, false)
-            ? 'mediaflow' : 'easyproxy';
-
-        if (toBoolean(defaults.mediaflowMaster, false)
-            || getElement('mediaFlowProxyUrl').value.trim()) {
+        if (getElement('easyProxyUrl').value.trim()) {
             mode = 'proxy';
             if (!hasDefault('animeunityDirect')) {
                 getElement('animeunityDirect').checked = false;
@@ -999,11 +1006,21 @@ const CLIENT_SCRIPT = String.raw`
     });
 
     getElement('revealPassword').addEventListener('click', function () {
-        var input = getElement('mediaFlowProxyPassword');
+        var input = getElement('easyProxyPassword');
         var visible = input.type === 'password';
         input.type = visible ? 'text' : 'password';
         this.textContent = visible ? 'Nascondi' : 'Mostra';
         this.setAttribute('aria-label', visible ? 'Nascondi password' : 'Mostra password');
+    });
+
+    document.querySelectorAll('.reveal-key').forEach(function (button) {
+        button.addEventListener('click', function () {
+            var input = getElement(button.getAttribute('data-target'));
+            var visible = input.type === 'password';
+            input.type = visible ? 'text' : 'password';
+            button.textContent = visible ? 'Nascondi' : 'Mostra';
+            button.setAttribute('aria-label', visible ? 'Nascondi chiave' : 'Mostra chiave');
+        });
     });
 
     getElement('copyManifestBtn').addEventListener('click', async function () {
@@ -1108,17 +1125,43 @@ function serializeForScript(value: unknown): string {
         .replace(/\u2029/g, '\\u2029');
 }
 
-export function landingTemplate(manifest: any): string {
+// Env variables that have a matching manifest config field. Only these are prefilled.
+const ENV_CONFIG_DEFAULTS: Record<string, string> = {
+    EASYPROXY_URL: 'easyProxyUrl',
+    EASYPROXY_PASSWORD: 'easyProxyPassword',
+    TMDB_API_KEY: 'tmdbApiKey',
+    TVDB_API_KEY: 'tvdbApiKey',
+    TVDB_PIN: 'tvdbPin',
+};
+
+export function landingTemplate(
+    manifest: any,
+    env: Record<string, string | undefined> = process.env,
+    publicBaseUrl = ''
+): string {
     const defaults: Record<string, unknown> = {};
     const fields = Array.isArray(manifest.config) ? manifest.config : [];
+    const configKeys = new Set<string>();
 
     fields.forEach((field: any) => {
-        if (typeof field.key === 'string' && field.default !== undefined) {
+        if (typeof field.key !== 'string') return;
+        configKeys.add(field.key);
+        if (field.default !== undefined) {
             defaults[field.key] = field.default;
         }
     });
 
-    const pageData = serializeForScript({ defaults });
+    for (const [envKey, configKey] of Object.entries(ENV_CONFIG_DEFAULTS)) {
+        if (!configKeys.has(configKey)) continue;
+        const value = env[envKey];
+        if (!value) continue;
+        const normalized = envKey === 'EASYPROXY_PASSWORD' ? value : value.trim();
+        if (!normalized) continue;
+        defaults[configKey] = normalized;
+    }
+
+    const normalizedBaseUrl = String(publicBaseUrl || '').trim().replace(/\/+$/, '');
+    const pageData = serializeForScript({ defaults, publicBaseUrl: normalizedBaseUrl });
     const iconUrl = escapeHtml(HANX_ICON_URL);
 
     return `<!DOCTYPE html>
@@ -1148,8 +1191,9 @@ ${STYLESHEET}
                     <div class="kicker">Un addon. Infiniti nuovi mondi.</div>
                     <h1>YOUR NEXT<br><em>UNIVERSE.</em></h1>
                     <p>
-                        Scegli le tue sorgenti anime, configura la connessione
-                        e porta HanX su Stremio. Il prossimo arco narrativo comincia qui.
+                        Scegli le tue sorgenti anime, collega le chiavi ufficiali TMDB e TVDB
+                        e porta HanX su Stremio. Mapping split-cour, aired order e film:
+                        il prossimo arco narrativo comincia qui.
                     </p>
                 </div>
                 <div class="hero-art">
@@ -1160,7 +1204,7 @@ ${STYLESHEET}
 
             <div class="strip">
                 <span>AnimeUnity + AnimeSaturn + AnimeWorld</span>
-                <span class="fade">Configurazione in tre passaggi</span>
+                <span class="fade">Mapping ufficiale TMDB · TVDB · Kitsu</span>
                 <span>Solo anime</span>
             </div>
 
@@ -1172,10 +1216,13 @@ ${STYLESHEET}
                             <span>01 /</span>Le sorgenti
                         </button>
                         <button class="tab" type="button" data-step="2">
-                            <span>02 /</span>La connessione
+                            <span>02 /</span>Chiavi API
                         </button>
                         <button class="tab" type="button" data-step="3">
-                            <span>03 /</span>Il tuo link
+                            <span>03 /</span>La connessione
+                        </button>
+                        <button class="tab" type="button" data-step="4">
+                            <span>04 /</span>Il tuo link
                         </button>
                     </nav>
                     <p class="rail-note">
@@ -1219,23 +1266,82 @@ ${STYLESHEET}
 
                         <p class="hint">
                             Disponibilità, qualità e alternative di riproduzione dipendono dai provider.
+                            Il mapping usa TMDB, TVDB e Kitsu: nessun dataset di terze parti.
                         </p>
                         <div class="actions">
                             <span class="meta" id="providerCount">3 sorgenti selezionate</span>
                             <button class="btn blue" type="button" data-next="2">
-                                Scegli la connessione ↗
+                                Configura le chiavi API ↗
                             </button>
                         </div>
                     </section>
 
-                    <!-- 02: Connessione -->
+                    <!-- 02: Chiavi API -->
                     <section class="pane" data-pane="2">
+                        <div class="pane-head">
+                            <div>
+                                <h2>Le chiavi del multiverso.</h2>
+                                <p>TMDB e TVDB per il mapping ufficiale. Kitsu è pubblico e non richiede chiavi.</p>
+                            </div>
+                            <span class="meta">02 — API keys</span>
+                        </div>
+
+                        <div class="fields">
+                            <div class="pair">
+                                <label class="field">
+                                    TMDB API KEY · FACOLTATIVA
+                                    <div class="password-wrap">
+                                        <input id="tmdbApiKey" type="password" autocomplete="off" placeholder="Usa il fallback server se vuota">
+                                        <button class="reveal-key" data-target="tmdbApiKey" type="button" aria-label="Mostra TMDB API Key">
+                                            Mostra
+                                        </button>
+                                    </div>
+                                </label>
+                                <label class="field">
+                                    TVDB API KEY · FACOLTATIVA
+                                    <div class="password-wrap">
+                                        <input id="tvdbApiKey" type="password" autocomplete="off" placeholder="Usa il fallback server se vuota">
+                                        <button class="reveal-key" data-target="tvdbApiKey" type="button" aria-label="Mostra TVDB API Key">
+                                            Mostra
+                                        </button>
+                                    </div>
+                                </label>
+                            </div>
+                            <label class="field">
+                                TVDB PIN · SOLO SE RICHIESTO
+                                <div class="password-wrap">
+                                    <input id="tvdbPin" type="password" autocomplete="off" placeholder="PIN del progetto TVDB, se abilitato">
+                                    <button class="reveal-key" data-target="tvdbPin" type="button" aria-label="Mostra TVDB PIN">
+                                        Mostra
+                                    </button>
+                                </div>
+                            </label>
+
+                            <p class="hint">
+                                TMDB risolve IMDb/TMDB e i film; TVDB fornisce le stagioni in aired order.
+                                Se un campo resta vuoto, HanX usa la chiave del server quando disponibile.
+                            </p>
+                            <p class="hint">
+                                Le chiavi restano nel tuo link personale. Non vengono salvate sul server.
+                                In self-host vengono lette dal tuo .env e restano sulla tua istanza;
+                                se esponi la pagina su Internet, proteggila con autenticazione.
+                            </p>
+                        </div>
+
+                        <div class="actions">
+                            <button class="btn" type="button" data-next="1">← Sorgenti</button>
+                            <button class="btn blue" type="button" data-next="3">La connessione ↗</button>
+                        </div>
+                    </section>
+
+                    <!-- 03: Connessione -->
+                    <section class="pane" data-pane="3">
                         <div class="pane-head">
                             <div>
                                 <h2>Trova la tua strada.</h2>
                                 <p>Direct oppure il tuo proxy. Senza perdere il filo.</p>
                             </div>
-                            <span class="meta">02 — Connection</span>
+                            <span class="meta">03 — Connection</span>
                         </div>
 
                         <div class="modes">
@@ -1247,72 +1353,61 @@ ${STYLESHEET}
                             <button class="mode" type="button" data-mode="proxy" aria-pressed="false">
                                 <span class="letter">B / YOUR SETUP</span>
                                 <h3>Con proxy.</h3>
-                                <p>Collega il tuo EasyProxy o MediaFlow.</p>
+                                <p>Collega il tuo EasyProxy.</p>
                             </button>
                         </div>
 
                         <div class="fields" id="proxyFields" hidden>
                             <div class="pair">
                                 <label class="field">
-                                    BACKEND
-                                    <select id="backend">
-                                        <option value="easyproxy">EasyProxy</option>
-                                        <option value="mediaflow">MediaFlow</option>
-                                    </select>
+                                    URL EASYPROXY
+                                    <input id="easyProxyUrl" type="url" autocomplete="off" placeholder="https://easyproxy.example.com:7860">
                                 </label>
                                 <label class="field">
                                     PASSWORD · FACOLTATIVA
                                     <div class="password-wrap">
-                                        <input id="mediaFlowProxyPassword" type="password" autocomplete="off" placeholder="Password del tuo proxy">
+                                        <input id="easyProxyPassword" type="password" autocomplete="off" placeholder="API_PASSWORD di EasyProxy">
                                         <button id="revealPassword" type="button" aria-label="Mostra password">
                                             Mostra
                                         </button>
                                     </div>
                                 </label>
                             </div>
-                            <label class="field">
-                                URL DEL PROXY
-                                <input id="mediaFlowProxyUrl" type="url" autocomplete="off" placeholder="https://proxy.example.com">
-                            </label>
+                            <p class="hint">
+                                EasyProxy resta esterno: inserisci l’URL della tua istanza e, se impostata, la password API.
+                            </p>
                         </div>
 
                         <details id="advancedOptions">
                             <summary>Il dettaglio fa la differenza — opzioni avanzate</summary>
-                            <label class="field">
-                                TMDB API KEY · FACOLTATIVA
-                                <input id="tmdbApiKey" type="password" autocomplete="off" placeholder="Fallback del server se lasciata vuota">
-                            </label>
                             <label>
                                 <input id="animeunityDirect" type="checkbox" checked>
                                 AnimeUnity · Direct
-                            </label>
-                            <label>
-                                <input id="animeunityDirectFhd" type="checkbox">
-                                AnimeUnity · Synthetic FHD
                             </label>
                             <label>
                                 <input id="animeunityProxy" type="checkbox">
                                 AnimeUnity · Proxy
                             </label>
                             <p class="hint">
-                                Direct e Synthetic FHD dipendono dall’installazione e dai flussi disponibili.
+                                Direct e Proxy dipendono dall’installazione e dai flussi disponibili.
                                 La modalità proxy non verifica automaticamente l’accessibilità del servizio.
                             </p>
                         </details>
 
                         <div class="actions">
-                            <button class="btn" type="button" data-next="1">← Sorgenti</button>
-                            <button class="btn blue" type="button" data-next="3">Genera il mio link ↗</button>
+                            <button class="btn" type="button" data-next="2">← Chiavi API</button>
+                            <button class="btn blue" type="button" data-next="4">Genera il mio link ↗</button>
                         </div>
                     </section>
 
-                    <!-- 03: Manifest -->
-                    <section class="pane" data-pane="3">
+                    <!-- 04: Manifest -->
+                    <section class="pane" data-pane="4">
                         <div class="pane-head">
                             <div>
                                 <h2>Il tuo accesso<br>a un nuovo universo.</h2>
                                 <p>Controlla la configurazione. Poi copia il link.</p>
                             </div>
+                            <span class="meta">04 — Link</span>
                         </div>
 
                         <div class="pass">
@@ -1323,6 +1418,10 @@ ${STYLESHEET}
                             <div class="pass-row">
                                 <span>Sorgenti</span>
                                 <strong id="sourcesSummary"></strong>
+                            </div>
+                            <div class="pass-row">
+                                <span>Chiavi API</span>
+                                <strong id="keysSummary"></strong>
                             </div>
                             <div class="pass-row">
                                 <span>Connessione</span>
@@ -1348,13 +1447,13 @@ ${STYLESHEET}
                             </div>
                             <p class="hint">
                                 Incolla l’URL in Stremio per installare l’addon.
-                                Il link contiene l’eventuale password proxy: non pubblicarlo.
+                                Il link contiene le eventuali chiavi API e la password proxy: non pubblicarlo.
                                 La verifica del manifest non verifica gli stream.
                             </p>
                         </div>
 
                         <div class="actions">
-                            <button class="btn" type="button" data-next="2">← Modifica connessione</button>
+                            <button class="btn" type="button" data-next="3">← Modifica connessione</button>
                             <span class="meta">Made for your next arc.</span>
                         </div>
                     </section>

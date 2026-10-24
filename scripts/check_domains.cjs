@@ -10,103 +10,119 @@
 const fs = require('fs');
 const path = require('path');
 
-// NOTE: flaresolverr.ts deve essere compilato in dist/ prima dell'esecuzione.
-// Se dist/ non esiste, eseguire: pnpm build
-const flaresolverrPath = path.join(__dirname, '..', 'dist', 'providers', 'flaresolverr.js');
-const { fetchPage } = require(flaresolverrPath);
-
 const argv = process.argv.slice(2);
 const asFlag = (name, def) => {
-  const m = argv.find(a=>a.startsWith(`--${name}=`));
-  if (m) return m.split('=')[1];
-  return def;
+  const m = argv.find(a => a.startsWith(`--${name}=`));
+  return m ? m.split('=')[1] : def;
 };
 const WANT_JSON = argv.includes('--json');
-const TIMEOUT_MS = parseInt(asFlag('timeout','6000'),10) || 6000;
-const CONC = Math.max(1, parseInt(asFlag('concurrency','5'),10) || 5);
+const TIMEOUT_MS = parseInt(asFlag('timeout', '6000'), 10) || 6000;
+const CONC = Math.max(1, parseInt(asFlag('concurrency', '5'), 10) || 5);
 
-function classifyChallenge(bodyOrNote, status) {
-  if (!bodyOrNote) return false;
-  if (/cloudflare_challenge|challenge_body|challenge_detected/i.test(bodyOrNote)) return true;
-  const pats = [/cf-turnstile/i,/Just a moment/i,/__cf_chl_/i,/challenge-platform\//i];
+const USER_AGENT =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36';
+
+const CHALLENGE_PATTERNS = [
+  /cf-turnstile/i,
+  /Just a moment/i,
+  /__cf_chl_/i,
+  /challenge-platform\//i,
+  /enable javascript and cookies to continue/i,
+  /SecurityAW2-os=/i,
+  /__CF\$cv\$params/i,
+];
+
+function classifyChallenge(body, status) {
   if (status === 403) return true;
-  return pats.some(r=>r.test(String(bodyOrNote)));
+  const text = String(body || '');
+  return CHALLENGE_PATTERNS.some(re => re.test(text));
+}
+
+async function fetchPage(url) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  try {
+    const response = await fetch(url, {
+      redirect: 'follow',
+      signal: controller.signal,
+      headers: {
+        'user-agent': USER_AGENT,
+        accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'accept-language': 'it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7',
+      },
+    });
+    return { status: response.status, body: await response.text() };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function probe(key, host) {
   const url = `https://${host}`;
   const started = Date.now();
-  let outcome = { key, host, url, status: 'error', httpStatus: null, ms: 0, note: '' };
+  const outcome = { key, host, url, status: 'error', httpStatus: null, ms: 0, note: '' };
+
   try {
-    // first try fetchPage
-    try {
-      const body = await fetchPage(url, { noCache: true });
-      outcome.httpStatus = 200;
-      if (classifyChallenge(body, 200)) { outcome.status = 'blocked'; outcome.note = 'challenge_body'; }
-      else outcome.status = 'ok';
-      outcome.ms = Date.now() - started;
-      return outcome;
-    } catch (e) {
-      const msg = (e && e.message) ? e.message : String(e);
-      outcome.note = msg;
-      if (/cloudflare_challenge|http_403|blocked/i.test(msg)) {
-        outcome.status = 'blocked';
-        outcome.ms = Date.now() - started;
-        return outcome;
-      }
-      // fallback raw fetch
-      try {
-        const controller = new AbortController();
-        const to = setTimeout(()=>controller.abort(), TIMEOUT_MS);
-        const r = await fetch(url, { signal: controller.signal, headers: { 'User-Agent':'Mozilla/5.0' } });
-        clearTimeout(to);
-        outcome.httpStatus = r.status;
-        let txt = '';
-        try { txt = await r.text(); } catch {}
-        if (classifyChallenge(txt, r.status)) { outcome.status='blocked'; outcome.note='challenge_detected'; }
-        else if (r.status >=200 && r.status <=399) outcome.status='ok';
-        else outcome.status='error';
-        outcome.ms = Date.now() - started;
-        return outcome;
-      } catch (e2){
-        outcome.note += '; fallback fail: ' + (e2.message||e2);
-        outcome.status = 'error';
-        outcome.ms = Date.now() - started;
-        return outcome;
-      }
+    const { status, body } = await fetchPage(url);
+    outcome.httpStatus = status;
+    if (classifyChallenge(body, status)) {
+      outcome.status = 'blocked';
+      outcome.note = 'challenge_body';
+    } else if (status >= 200 && status <= 399) {
+      outcome.status = 'ok';
+    } else if (status === 429) {
+      outcome.note = 'too_many_requests';
+    } else {
+      outcome.note = `http_${status}`;
     }
-  } catch (finalErr) {
-    outcome.note = (finalErr && finalErr.message) ? finalErr.message : String(finalErr);
-    outcome.status = outcome.status === 'blocked' ? 'blocked' : 'error';
-    outcome.ms = Date.now() - started;
-    return outcome;
+  } catch (e) {
+    const msg = e && e.name === 'AbortError' ? 'timeout' : (e && e.message ? e.message : String(e));
+    outcome.note = msg;
+    outcome.status = /cloudflare|challenge|blocked/i.test(msg) ? 'blocked' : 'error';
   }
+
+  outcome.ms = Date.now() - started;
+  return outcome;
 }
 
 (async () => {
   const domainsPath = path.join(__dirname, '..', 'config', 'domains.json');
   let map;
-  try { map = JSON.parse(fs.readFileSync(domainsPath, 'utf8')); } catch (e){
+  try {
+    map = JSON.parse(fs.readFileSync(domainsPath, 'utf8'));
+  } catch (e) {
     console.error('Failed to read domains.json', e.message || e);
     process.exit(1);
   }
+
   const entries = Object.entries(map);
   const queue = entries.slice();
   const results = [];
-  async function worker(){
-    while(queue.length){
-      const [k,h] = queue.shift();
-      const r = await probe(k,h);
-      results.push(r);
+
+  async function worker() {
+    while (queue.length) {
+      const [key, host] = queue.shift();
+      const result = await probe(key, host);
+      results.push(result);
       if (!WANT_JSON) {
-        console.log(`[${r.status.padEnd(7)}] ${k.padEnd(12)} ${r.host.padEnd(25)} ${String(r.httpStatus||'-').padStart(3)} ${String(r.ms).padStart(5)}ms ${r.note?('- '+r.note.slice(0,60)):' '}`);
+        console.log(
+          `[${result.status.padEnd(7)}] ${key.padEnd(12)} ${result.host.padEnd(25)} ` +
+          `${String(result.httpStatus || '-').padStart(3)} ${String(result.ms).padStart(5)}ms ` +
+          `${result.note ? `- ${result.note.slice(0, 60)}` : ''}`
+        );
       }
     }
   }
-  const workers = Array(Math.min(CONC, entries.length)).fill(0).map(()=>worker());
+
+  const workers = Array(Math.min(CONC, entries.length)).fill(0).map(() => worker());
   await Promise.all(workers);
-  results.sort((a,b)=>a.key.localeCompare(b.key));
-  const summary = results.reduce((acc,r)=>{acc[r.status]=(acc[r.status]||0)+1;return acc;},{});
+
+  results.sort((a, b) => a.key.localeCompare(b.key));
+  const summary = results.reduce((acc, r) => {
+    acc[r.status] = (acc[r.status] || 0) + 1;
+    return acc;
+  }, {});
+
   if (WANT_JSON) {
     console.log(JSON.stringify({ summary, results, concurrency: CONC, timeoutMs: TIMEOUT_MS }, null, 2));
   } else {

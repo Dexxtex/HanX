@@ -1,3 +1,11 @@
 allowBuilds:
   esbuild: true
   sqlite3: true
+# Override di sicurezza per dipendenze transitive di stremio-addon-sdk/socks:
+# - path-to-regexp 0.1.13 chiude le ReDoS di 0.1.x (via router)
+# - tmp 0.2.7 chiude il path traversal di 0.2.x (via inquirer>external-editor)
+# - ip-address 10.7.4 chiude il ReDoS di Address6 (via socks)
+overrides:
+  path-to-regexp@<0.1.13: 0.1.13
+  tmp@<0.2.6: 0.2.7
+  ip-address@<=10.7.3: 10.7.4
