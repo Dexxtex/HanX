@@ -108,14 +108,12 @@ Il manifest offre questi campi di configurazione:
 
 | Chiave | Ruolo runtime |
 |---|---|
-| `tmdbApiKey` | Chiave TMDB personale. |
-| `mediaFlowProxyUrl`, `mediaFlowProxyPassword` | URL e password del proxy, se usati. |
-| `useMediaFlow` | Flag interpretato dall’handler e passato nella configurazione provider. I provider correnti non lo leggono per selezionare il formato dell’URL stream, quindi il suo effetto sul backend non è dimostrato dal percorso runtime. |
+| `tmdbApiKey`, `tvdbApiKey`, `tvdbPin` | Chiavi TMDB/TVDB e PIN del progetto TVDB. |
+| `easyProxyUrl`, `easyProxyPassword` | URL e password del proxy EasyProxy. |
 | `animeunityEnabled`, `animesaturnEnabled`, `animeworldEnabled` | Abilitazione dei provider. |
-| `animeunityDirect`, `animeunityDirectFhd`, `animeunityProxy` | Flag specifici per gli stream AnimeUnity. |
-| `personalTmdbKey`, `mediaflowMaster` | Toggle helper UI; non sono opzioni lette dalla logica stream per selezionare un provider o backend. |
+| `animeunityDirect`, `animeunityProxy` | Flag specifici per gli stream AnimeUnity (diretto o via EasyProxy). |
 
-Sono quindi **12 voci** nello schema del manifest, di cui le ultime due sono helper UI.
+Sono quindi **10 voci** nello schema del manifest.
 
 ### Override del manifest
 
@@ -146,15 +144,14 @@ I provider restituiscono una lista vuota per ID non riconosciuti o quando nessun
 
 ### Parsing e precedenza delle impostazioni
 
-La configurazione può arrivare come oggetto SDK o come stringa JSON, JSON URL-encoded o Base64. Il middleware tenta di decodificare il segmento configurazione della richiesta; per Base64 valido riscrive il segmento in JSON URL-encoded prima dell’inoltro al router SDK. `normalizeConfig()` converte i booleani riconosciuti, elimina gli slash finali dall’URL MFP, fa trim della chiave TMDB e preserva esattamente la password.
+La configurazione può arrivare come oggetto SDK o come stringa JSON, JSON URL-encoded o Base64. Il middleware tenta di decodificare il segmento configurazione della richiesta; per Base64 valido riscrive il segmento in JSON URL-encoded prima dell’inoltro al router SDK. `normalizeConfig()` converte i booleani riconosciuti, elimina gli slash finali dall’URL EasyProxy, fa trim delle chiavi e preserva esattamente la password.
 
 La precedenza **varia in base al campo**:
 
 | Campo | Risoluzione effettiva |
 |---|---|
-| URL MFP | Configurazione richiesta, poi `MFP_URL`. |
-| Password MFP | `mediaFlowProxyPassword`, poi `MFP_PSW`, poi `MFP_PASSWORD`. Una stringa vuota esplicita prevale sui fallback. |
-| Flag backend proxy | L’handler calcola `useMediaFlow` da un booleano esplicito; altrimenti da `PROXY_BACKEND` o `MFP_BACKEND` uguale a `mediaflow`/`mfp`; altrimenti `false`. Il valore entra nella firma cache ed è passato ai provider, ma questi non lo leggono nel codice corrente per cambiare la URL stream. |
+| URL EasyProxy | Configurazione richiesta, poi `EASYPROXY_URL`; gli slash finali vengono rimossi. |
+| Password EasyProxy | `easyProxyPassword`, poi `EASYPROXY_PASSWORD`. Una stringa vuota esplicita prevale, perché la risoluzione usa `??` e non `||`. |
 | Chiave TMDB | Configurazione richiesta, poi `TMDB_API_KEY`, poi il fallback interno passato ai provider. |
 | Abilitazione provider | Variabile d’ambiente corrispondente, se presente, prevale sulla richiesta. Il valore ambiente abilita solo se è esattamente `true` (case-insensitive). In assenza di flag ambiente, la richiesta abilita i provider con flag `true`. Se la richiesta non contiene nessuno dei tre flag provider, il percorso API li considera tutti abilitati. |
 
@@ -186,11 +183,11 @@ I provider sono implementati in moduli separati. AnimeUnity è importato diretta
 
 ### Produzione degli stream e proxy
 
-- **AnimeUnity:** legge i dati anime/episodi dalla pagina e seleziona l’episodio richiesto. L’estrazione HLS dall’embed è disabilitata nel provider corrente; resta il fallback MP4 condizionato e la costruzione di un URL proxy MFP per l’embed. Le opzioni `animeunityDirect`, `animeunityDirectFhd` e `animeunityProxy` controllano quali stream vengono restituiti; il flag `DirectFhd` non è sufficiente a dimostrare che venga costruita una playlist sintetica.
-- **AnimeWorld:** estrae link MP4 dalla pagina di riproduzione; senza URL MFP restituisce il link con gli header/referer nel `behaviorHints`, mentre con URL MFP costruisce un URL `/proxy/stream`.
-- **AnimeSaturn:** estrae e normalizza gli stream dalle pagine anime/episodio e dai player collegati. Nel codice provider corrente non risulta una lettura delle opzioni MFP o `useMediaFlow`.
+- **AnimeUnity:** legge i dati anime/episodi dalla pagina e seleziona l’episodio richiesto. L’estrazione HLS dall’embed è disabilitata nel provider corrente; resta il fallback MP4 condizionato e la costruzione di un URL EasyProxy (`/proxy/hls/manifest.m3u8`) per l’embed. Le opzioni `animeunityDirect` e `animeunityProxy` controllano quali stream vengono restituiti.
+- **AnimeWorld:** estrae link MP4 dalla pagina di riproduzione; senza `proxyUrl` restituisce il link con gli header/referer nel `behaviorHints`, mentre con EasyProxy costruisce `/proxy/stream` o `/proxy/hls/manifest.m3u8`.
+- **AnimeSaturn:** estrae e normalizza gli stream dalle pagine anime/episodio e dai player collegati, poi `applyEasyProxy()` li riscrive quando `proxyUrl` è configurato. Gli embed non riconosciuti restano diretti.
 
-La selezione del backend proxy non è quindi un comportamento uniforme tra i tre provider.
+Tutti e tre usano `src/utils/easyproxy.ts`; cambia solo il punto in cui viene applicato.
 
 ### Differenze nel lookup
 
@@ -357,14 +354,14 @@ Il `Dockerfile` corrente:
 
 - `addon-config.json` è presente in `/app`; `GET /manifest.json` restituisce HTTP 200 con ID `org.stremio.hanx`, nome `HanX` e versione `1.0.0`.
 - `/app/public/` contiene gli asset attesi: `GET /public/icon.png` e `/public/background.png` restituiscono entrambi HTTP 200 (`image/png`).
-- `domains.json` e `provider_urls.json` sono presenti nel percorso runtime `/app/config/`. Una verifica eseguita dal container ha letto `animeunity.so` dai domini e `https://anime.stremio-italia.eu` come Mapping API.
+- `domains.json` e `provider_urls.json` sono presenti nel percorso runtime `/app/config/`; una verifica eseguita dal container ha letto `animeunity.so` dai domini.
 - Il container è rimasto in stato `running` e l’health check Docker ha raggiunto `healthy`. `GET /` ha restituito HTTP 200 HTML; `/vixsynthetic` senza parametro `src` ha restituito HTTP 400, come previsto.
 - La build dell’immagine è riuscita usando Docker Desktop 4.95.0 / Engine 29.8.2, target `linux/amd64`. Il container usa `undici` `8.11.2`, corrispondente al lockfile e compatibile con la dichiarazione `^8.11.2` in `package.json`; il pin Docker ad `6.19.8` è stato rimosso.
 - Verifica migrazione: `GET /stream/anime/mal:1.json` ha restituito HTTP 200 con 2 stream AnimeWorld. Il DB del container ha una sola riga per MAL ID `1` e un solo evento Tenrai nonostante il fan-out a tre provider; l’ETag è stato persistito. Il volume di prova e la cache ETag sono stati inoltre testati con risposte `304` e aggiornamento `200`.
 - Dopo aver rimosso e ricreato il container usando lo stesso volume, `mal:1` ha restituito ancora 2 stream HTTP 200 senza una seconda richiesta Tenrai: riga SQLite, ETag e limiter sono sopravvissuti al riavvio.
 - `pnpm test`: 6 test superati per deduplicazione, persistenza, ETag, stale-on-error, `Retry-After` concorrente, cache negativa e budget richieste persistente.
 
-Sono state provate ricerche reali con `kitsu:1` e `mal:1` (Cowboy Bebop). La richiesta Kitsu ha restituito 4 stream HTTPS tramite Mapping API; quella MAL, dopo la migrazione Tenrai, ha restituito 2 stream AnimeWorld. Non è stata verificata la riproduzione dei media. Durante il test MAL AnimeUnity ha ricevuto HTTP 405 e AnimeSaturn HTTP 404 dal percorso di ricerca, ma il provider AnimeWorld ha prodotto stream.
+Sono state provate ricerche reali con `kitsu:1` e `mal:1` (Cowboy Bebop). La richiesta Kitsu ha restituito 4 stream HTTPS; quella MAL, dopo la migrazione Tenrai, ha restituito 2 stream AnimeWorld. Non è stata verificata la riproduzione dei media. Durante il test MAL AnimeUnity ha ricevuto HTTP 405 e AnimeSaturn HTTP 404 dal percorso di ricerca, ma il provider AnimeWorld ha prodotto stream.
 
 ---
 
@@ -376,8 +373,7 @@ Le variabili lette dai percorsi runtime documentati includono:
 |---|---|
 | `PORT` | Porta HTTP; default `7000`. |
 | `TMDB_API_KEY` | Chiave TMDB di fallback quando non fornita nella configurazione addon. |
-| `MFP_URL`, `MFP_PSW`, `MFP_PASSWORD` | URL e credenziali proxy di fallback. |
-| `PROXY_BACKEND`, `MFP_BACKEND` | Letti dall’handler per calcolare `useMediaFlow`; l’effetto sulla URL stream non è dimostrato perché i provider non leggono il flag. |
+| `EASYPROXY_URL`, `EASYPROXY_PASSWORD` | URL e password del proxy di fallback, usati quando la configurazione non li fornisce. |
 | `ANIMEUNITY_ENABLED`, `ANIMESATURN_ENABLED`, `ANIMEWORLD_ENABLED` | Override ambiente dell’abilitazione provider. |
 | `ANIME_GATE_ENABLED`, `ANIME_GATE_TMDB_FALLBACK` | Abilitazione e fallback TMDB del gate per IMDb/TMDB. |
 | `ADDON_BASE_URL` | Base URL addon passata al provider AnimeUnity. |
