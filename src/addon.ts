@@ -18,7 +18,7 @@ import { AnimeUnityProvider } from './providers/animeunity-provider.js';
 import { providerLabel } from './utils/unifiedNames.js';
 import { landingTemplate } from './landingPage.js';
 import { toNumericId, parseRequestId } from './mapping/request.js';
-import { getMappingVersion } from './mapping/index.js';
+import { getMappingVersion, refreshMappingFromUrl } from './mapping/index.js';
 import { debug, DEBUG_LEVEL } from './utils/logger.js';
 import { sendHtmlResponse } from './utils/http.js';
 import { detectPublicBaseUrl } from './utils/public-url.js';
@@ -758,4 +758,7 @@ app.get('/', (req: Request, res: ExpressResponse) => {
 const PORT = parseInt(process.env.PORT || '7000', 10);
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 HanX addon listening on http://0.0.0.0:${PORT}`);
+    // Indice mapping remoto: parte dopo il listen, non blocca l'avvio.
+    void refreshMappingFromUrl();
+    setInterval(() => void refreshMappingFromUrl(), 6 * 60 * 60 * 1000).unref();
 });

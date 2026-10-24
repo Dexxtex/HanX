@@ -113,6 +113,21 @@ pnpm mapping:check            # valida il JSON senza rete (avvisa se l'indice è
 pnpm mapping:verify           # check + test del mapping
 ```
 
+#### Aggiornamento automatico
+
+Il workflow `.github/workflows/anime-mapping.yml` rigenera l'indice ogni lunedì (o a
+mano da *Actions → Anime mapping → Run workflow*) e lo pubblica come asset della
+release `mapping`. Per consumarlo basta una variabile:
+
+```bash
+ANIME_MAPPING_URL=https://github.com/Dexxtex/HanX/releases/download/mapping/anime-seasons.json
+```
+
+Al primo avvio l'addon scarica l'indice in `data/anime-seasons.json` e lo ricontrolla
+ogni 24h con ETag. Se il download fallisce o il payload non è valido resta l'indice
+precedente (o quello nell'immagine): nessun avvio bloccato, nessuno stream perso.
+Senza `ANIME_MAPPING_URL` il comportamento è identico a prima.
+
 EasyProxy resta un servizio esterno all'addon: avvialo, poi inserisci URL e password API nella configurazione web.
 
 Interfaccia web: `http://localhost:7000/`

@@ -46,6 +46,30 @@ function defaultIndexPath(): string {
   return path.resolve(__dirname, 'data', 'anime-seasons.json');
 }
 
+/** TTL dell'indice scaricato da ANIME_MAPPING_URL: un giorno. */
+const REMOTE_TTL_MS = 24 * 60 * 60 * 1000;
+/** Un indice corrotto o enorme non deve finire in memoria. */
+const REMOTE_MAX_BYTES = 64 * 1024 * 1024;
+
+function remoteCachePath(): string {
+  return process.env.ANIME_MAPPING_FILE
+    ? path.resolve(process.env.ANIME_MAPPING_FILE)
+    : path.resolve('data', 'anime-seasons.json');
+}
+
+/**
+ * Ordine: file esplicito, indice remoto in cache, indice nell'immagine.
+ * Se il download remoto non è mai riuscito si continua col file locale.
+ */
+function indexFilePath(): string {
+  if (process.env.ANIME_MAPPING_FILE) return path.resolve(process.env.ANIME_MAPPING_FILE);
+  if (process.env.ANIME_MAPPING_URL) {
+    const cached = remoteCachePath();
+    if (statMtime(cached) !== -1) return cached;
+  }
+  return defaultIndexPath();
+}
+
 function overridesPath(): string {
   return process.env.ANIME_MAPPING_OVERRIDES
     ? path.resolve(process.env.ANIME_MAPPING_OVERRIDES)
@@ -103,7 +127,7 @@ function statMtime(filePath: string): number {
 }
 
 function loadIndex(): AnimeMappingIndex {
-  const filePath = process.env.ANIME_MAPPING_FILE ? path.resolve(process.env.ANIME_MAPPING_FILE) : defaultIndexPath();
+  const filePath = indexFilePath();
   const overridesFile = overridesPath();
   const mtimeMs = statMtime(filePath);
   const overridesMtimeMs = statMtime(overridesFile);
@@ -150,6 +174,72 @@ export function getMappingVersion(): string {
 export function resetMappingCache(): void {
   snapshot = null;
 }
+
+function writeAtomic(filePath: string, content: string): void {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  const temp = `${filePath}.tmp`;
+  fs.writeFileSync(temp, content);
+  fs.renameSync(temp, filePath);
+}
+
+function readEtag(filePath: string): string {
+  try {
+    return fs.readFileSync(filePath, 'utf8').trim();
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Scarica l'indice mapping da ANIME_MAPPING_URL (es. asset di una release) e lo
+ * mette in cache su disco. Best effort: senza URL, o con rete/schema rotti,
+ * resta il file precedente o quello nell'immagine. Non blocca l'avvio.
+ */
+export async function refreshMappingFromUrl(): Promise<void> {
+  const url = process.env.ANIME_MAPPING_URL;
+  if (!url) return;
+  const target = remoteCachePath();
+  const mtime = statMtime(target);
+  if (mtime !== -1 && Date.now() - mtime < REMOTE_TTL_MS) {
+    debug(4, 'Mapping', 'remote index fresh', { ageMs: Date.now() - mtime });
+    return;
+  }
+
+  const headers: Record<string, string> = {};
+  const etag = mtime === -1 ? '' : readEtag(`${target}.etag`);
+  if (etag) headers['if-none-match'] = etag;
+
+  try {
+    const res = await fetch(url, { headers, signal: AbortSignal.timeout(15000) });
+    if (res.status === 304 && mtime !== -1) {
+      // Contenuto identico: rinnova solo la scadenza, senza riscrivere il file.
+      const now = new Date();
+      fs.utimesSync(target, now, now);
+      debug(3, 'Mapping', 'remote index unchanged (304)');
+      return;
+    }
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const body = await res.text();
+    if (body.length > REMOTE_MAX_BYTES) throw new Error(`payload troppo grande (${body.length} byte)`);
+    const index = normalizeIndex(JSON.parse(body));
+    const entries = Object.keys(index.series).length + Object.keys(index.movies).length;
+    if (!index.version || entries === 0) throw new Error('indice vuoto o schema non supportato');
+    writeAtomic(target, body);
+    const nextEtag = res.headers.get('etag');
+    if (nextEtag) writeAtomic(`${target}.etag`, nextEtag);
+    snapshot = null;
+    debug(2, 'Mapping', 'remote index updated', {
+      series: Object.keys(index.series).length,
+      movies: Object.keys(index.movies).length,
+      generatedAt: index.generatedAt,
+    });
+  } catch (e) {
+    debug(2, 'Mapping', 'remote index refresh failed, keeping local', {
+      error: (e as any)?.message || String(e),
+    });
+  }
+}
+
 
 export function hasMappedSeries(provider: MappingProvider, id: string): boolean {
   return Boolean(loadIndex().series[`${provider}:${id}`]);
