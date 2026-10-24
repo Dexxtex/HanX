@@ -23,9 +23,11 @@ tests
 test-provider*.ps1
 docker-compose.yml
 
-# Solo build-copy.js serve a `pnpm run build`
+# Solo build-copy.js serve a `pnpm run build`; il converter del mapping gira
+# a mano dentro il container, quindi deve finire nell'immagine.
 scripts/*
 !scripts/build-copy.js
+!scripts/build-anime-mapping.mjs
 
 # Backup generati a runtime
 config/*.jsonbk
