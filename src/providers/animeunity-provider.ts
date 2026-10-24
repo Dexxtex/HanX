@@ -935,8 +935,9 @@ export class AnimeUnityProvider {
     }
     debug(2, 'AnimeUnity', `[AnimeUnity] Titolo normalizzato per ricerca: ${normalizedTitle}`);
     // Romaji MAL: alcuni record del sito non hanno name_eng e il titolo inglese
-    // non supera la soglia. Serve solo al filtro, non alla query.
-    const queryTitles = titleAlt && titleAlt !== normalizedTitle ? [normalizedTitle, titleAlt] : [normalizedTitle];
+    // non supera la soglia. Entra solo se l'inglese non trova nulla, e solo nel
+    // filtro: nessuna query in più.
+    const queryTitles = [normalizedTitle];
     // Se il titolo originale è una chiave dell'exactMap allora saltiamo qualsiasi filtro successivo:
     // l'intento dell'utente è: se la ricerca parte da una chiave exactMap, NON applicare filterAnimeResults
     const skipFilter = Object.prototype.hasOwnProperty.call(exactMap, title);
@@ -959,7 +960,15 @@ export class AnimeUnityProvider {
       }
     }
     if (!skipFilter) {
-      animeVersions = filterAnimeResults(animeVersions, queryTitles);
+      const rawVersions = animeVersions;
+      animeVersions = filterAnimeResults(rawVersions, queryTitles);
+      if (!animeVersions.length && titleAlt && titleAlt !== normalizedTitle) {
+        queryTitles.push(titleAlt);
+        animeVersions = filterAnimeResults(rawVersions, queryTitles);
+        if (animeVersions.length) {
+          debug(2, 'AnimeUnity', `[AnimeUnity] Match con titolo alternativo "${titleAlt}"`);
+        }
+      }
     } else {
       debug(3, 'AnimeUnity', '[AnimeUnity][ExactMap] Uso risultati grezzi senza filtro (exactMap).');
       // STRICT EXACT FILTER: per le richieste exactMap, manteniamo SOLO i risultati

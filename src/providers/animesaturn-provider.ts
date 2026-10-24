@@ -1114,11 +1114,19 @@ export class AnimeSaturnProvider {
     const normalizedTitle = normalizeTitleForSearch(universalTitle, animeSaturnTitleNormalization);
     debug(2, 'AnimeSaturn', `[AnimeSaturn] Titolo normalizzato per ricerca: ${normalizedTitle}`);
     debug(3, 'AnimeSaturn', '[AnimeSaturn] Query inviata allo scraper (post-normalize):', normalizedTitle);
-    // L'alternativo (romaji MAL) serve solo al filtro: se i siti listano l'opera
-    // col romaji, il titolo inglese non supera la soglia e i risultati giusti
-    // vengono scartati. Nessuna richiesta in più: si rifiltra lo stesso fetch.
-    const titles = titleAlt && titleAlt !== normalizedTitle ? [normalizedTitle, titleAlt] : [normalizedTitle];
-    let animeVersions = filterAnimeResults(await this.searchAllVersions(normalizedTitle), titles);
+    // L'alternativo (romaji MAL) entra solo se l'inglese non trova nulla: così
+    // non può scavalcare un match già buono. Serve solo al filtro, non alla
+    // query, e non costa richieste: si rifiltrano gli stessi risultati.
+    const titles = [normalizedTitle];
+    const rawVersions = await this.searchAllVersions(normalizedTitle);
+    let animeVersions = filterAnimeResults(rawVersions, titles);
+    if (!animeVersions.length && titleAlt && titleAlt !== normalizedTitle) {
+      titles.push(titleAlt);
+      animeVersions = filterAnimeResults(rawVersions, titles);
+      if (animeVersions.length) {
+        debug(2, 'AnimeSaturn', `[AnimeSaturn] Match con titolo alternativo "${titleAlt}"`);
+      }
+    }
     if (!animeVersions.length) {
       // Budget ricerca <=2 fetch: una sola query di ripiego.
       const [fallbackQuery] = buildTitleFallbackQueries(normalizedTitle).filter(q => q && q !== normalizedTitle);
