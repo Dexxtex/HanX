@@ -370,19 +370,32 @@ export function tvdbQueries(entry) {
 }
 
 /**
- * Solo titolo identico e anno ±1: TVDB risponde anche a ricerche larghe, e un
- * id sbagliato è peggio di un buco.
+ * Solo titolo identico (o contenuto nella serie madre) e un candidato unico:
+ * TVDB risponde anche a ricerche larghe, e un id sbagliato è peggio di un buco.
  */
 export function pickTvdbSeries(results, { queries, year }) {
-  const wanted = new Set(queries.map(titleKey).filter(Boolean));
-  const matches = (results || []).filter((item) => wanted.has(titleKey(item?.name)));
-  if (matches.length === 0) return null;
-  if (!year) return matches.length === 1 ? matches[0] : null;
-  const dated = matches.filter((item) => {
+  const wanted = [...new Set(queries.map(titleKey).filter(Boolean))];
+  const items = results || [];
+  const nameKey = (item) => titleKey(item?.name);
+
+  const exact = items.filter((item) => wanted.includes(nameKey(item)));
+  const dated = exact.filter((item) => {
     const resultYear = Number(item?.year);
-    return Number.isFinite(resultYear) && Math.abs(resultYear - year) <= 1;
+    return !year || (Number.isFinite(resultYear) && Math.abs(resultYear - year) <= 1);
   });
-  return dated.length === 1 ? dated[0] : null;
+  if (dated.length === 1) return dated[0];
+  // TVDB spesso non ha l'anno: titolo identico + candidato unico bastano.
+  if (exact.length === 1) {
+    const resultYear = Number(exact[0]?.year);
+    if (!year || !Number.isFinite(resultYear)) return exact[0];
+  }
+
+  // Serie accorpata nella madre: "超魔神英雄伝ワタル" -> "魔神英雄伝ワタル".
+  const loose = items.filter((item) => {
+    const key = nameKey(item);
+    return key.length >= 4 && wanted.some((value) => value !== key && (value.includes(key) || key.includes(value)));
+  });
+  return loose.length === 1 ? loose[0] : null;
 }
 
 async function searchTvdbSeries(query) {
