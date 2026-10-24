@@ -348,6 +348,57 @@ export function tvdbSeriesIdFromMappings(data) {
   return found?.attributes?.externalId ? String(found.attributes.externalId) : null;
 }
 
+/** Chiave di confronto: NFKC (ｘ = x, ！ = !), senza spazi né punteggiatura. */
+function titleKey(value) {
+  return String(value || '')
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, '');
+}
+
+/**
+ * TVDB cercato per nome. Il titolo giapponese è incluso perché molte serie
+ * esistono solo così ("Patalliro Saiyuuki!" -> "パタリロ西遊記!").
+ */
+export function tvdbQueries(entry) {
+  const queries = [];
+  for (const value of [entry?.title_english, entry?.title, entry?.title_japanese]) {
+    const title = String(value || '').trim();
+    if (title && !queries.includes(title)) queries.push(title);
+  }
+  return { queries, year: yearOf(entry?.aired?.from) };
+}
+
+/**
+ * Solo titolo identico e anno ±1: TVDB risponde anche a ricerche larghe, e un
+ * id sbagliato è peggio di un buco.
+ */
+export function pickTvdbSeries(results, { queries, year }) {
+  const wanted = new Set(queries.map(titleKey).filter(Boolean));
+  const matches = (results || []).filter((item) => wanted.has(titleKey(item?.name)));
+  if (matches.length === 0) return null;
+  if (!year) return matches.length === 1 ? matches[0] : null;
+  const dated = matches.filter((item) => {
+    const resultYear = Number(item?.year);
+    return Number.isFinite(resultYear) && Math.abs(resultYear - year) <= 1;
+  });
+  return dated.length === 1 ? dated[0] : null;
+}
+
+async function searchTvdbSeries(query) {
+  const json = await tvdbGet(`/search?query=${encodeURIComponent(query)}&type=series&limit=10`);
+  return json?.data || [];
+}
+
+async function tvdbIdBySearch(entry) {
+  const wanted = tvdbQueries(entry);
+  for (const query of wanted.queries) {
+    const found = pickTvdbSeries(await searchTvdbSeries(query), wanted);
+    if (found) return String(found.objectID || found.id || '') || null;
+  }
+  return null;
+}
+
 /**
  * TMDB non accorpa per titolo tutti i seguiti ("City Hunter 2" non esiste come
  * serie): Kitsu però ha il mapping TVDB esplicito, quindi si mappa su quello.
@@ -503,7 +554,7 @@ async function convertCatalogEntry(entry, index) {
     // TMDB non conosce il titolo (tipico dei seguiti): per le serie c'è il
     // mapping TVDB esplicito di Kitsu, che non dipende dal titolo.
     return query.kind === 'tv'
-      ? await convertFromKitsuTvdb(entry, index, record)
+      ? await convertFromTvdb(entry, index, record)
       : { ...record, status: 'no-tmdb' };
   }
 
@@ -565,16 +616,16 @@ async function convertCatalogEntry(entry, index) {
 }
 
 /**
- * Fallback for series TMDB cannot find by title: Kitsu maps the MAL entry to a
- * TVDB series, and the index already keys on TVDB. Nessun alias tmdb/imdb qui:
- * senza un id TMDB verosimile non se ne inventa uno.
+ * Fallback for series TMDB cannot find by title. Due tentativi, in ordine:
+ * il mapping TVDB esplicito di Kitsu, poi la ricerca TVDB per nome. L'indice è
+ * già keyed su TVDB, quindi non serve inventare un id TMDB.
  */
-async function convertFromKitsuTvdb(entry, index, record) {
+async function convertFromTvdb(entry, index, record) {
   let kitsuId = await kitsuIdForMal(entry.mal_id);
   if (!kitsuId) kitsuId = await kitsuIdByMetadata(entry);
   if (!kitsuId) return { ...record, status: 'no-kitsu' };
 
-  const tvdbId = await tvdbIdFromKitsu(kitsuId);
+  const tvdbId = (await tvdbIdFromKitsu(kitsuId)) || (await tvdbIdBySearch(entry));
   if (!tvdbId) return { ...record, kitsuId, status: 'no-tmdb' };
 
   let result = null;
