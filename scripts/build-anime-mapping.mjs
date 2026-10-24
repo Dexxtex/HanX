@@ -403,11 +403,18 @@ async function searchTvdbSeries(query) {
   return json?.data || [];
 }
 
+/** La ricerca TVDB usa "series-227501", gli endpoint vogliono "227501". */
+export function tvdbIdFromSearch(item) {
+  const raw = String(item?.objectID || item?.id || '');
+  const numeric = raw.match(/\d+/);
+  return numeric ? numeric[0] : null;
+}
+
 async function tvdbIdBySearch(entry) {
   const wanted = tvdbQueries(entry);
   for (const query of wanted.queries) {
     const found = pickTvdbSeries(await searchTvdbSeries(query), wanted);
-    if (found) return String(found.objectID || found.id || '') || null;
+    if (found) return tvdbIdFromSearch(found);
   }
   return null;
 }
