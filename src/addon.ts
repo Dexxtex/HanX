@@ -20,6 +20,7 @@ import { landingTemplate } from './landingPage.js';
 import { toNumericId, parseRequestId } from './mapping/request.js';
 import { getMappingVersion } from './mapping/index.js';
 import { debug, DEBUG_LEVEL } from './utils/logger.js';
+import { sendHtmlResponse } from './utils/http.js';
 import { detectPublicBaseUrl } from './utils/public-url.js';
 import { AnimeUnityConfig } from './types/animeunity.js';
 
@@ -736,21 +737,17 @@ console.log(`✅ Addon active on port ${process.env.PORT || 7000}`);
 debug(1, 'Addon', 'debug level', DEBUG_LEVEL);
 
 // Landing page per configurazione web
-app.get('/', (_req: Request, res: ExpressResponse) => {
+app.get('/', (req: Request, res: ExpressResponse) => {
     try {
         const manifest = loadCustomConfig();
         const publicBaseUrl = detectPublicBaseUrl({
-            host: _req.get('host'),
-            forwardedHost: _req.get('x-forwarded-host'),
-            forwardedPort: _req.get('x-forwarded-port'),
-            forwardedProto: _req.get('x-forwarded-proto'),
-            protocol: _req.protocol,
+            host: req.get('host'),
+            forwardedHost: req.get('x-forwarded-host'),
+            forwardedPort: req.get('x-forwarded-port'),
+            forwardedProto: req.get('x-forwarded-proto'),
+            protocol: req.protocol,
         });
-        const html = landingTemplate(manifest, process.env, publicBaseUrl);
-        res.setHeader('Content-Type', 'text/html; charset=utf-8');
-        // The page can contain env-prefilled keys/passwords: never cache it.
-        res.setHeader('Cache-Control', 'no-store');
-        res.send(html);
+        void sendHtmlResponse(req, res, landingTemplate(manifest, process.env, publicBaseUrl));
     } catch (e) {
         console.error('[Landing] error:', (e as any)?.message || e);
         res.status(500).send('Errore caricamento landing page');
