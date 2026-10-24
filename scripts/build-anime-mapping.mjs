@@ -5,7 +5,8 @@
  * TMDB (title + year) -> IMDb/TVDB ids -> TVDB episode order.
  *
  * Usage:
- *   node scripts/build-anime-mapping.mjs [--limit=N] [--type=tv|movie] [--reset] [--retry-error] [--check]
+ *   node scripts/build-anime-mapping.mjs [--limit=N] [--type=tv|movie] [--publish]
+ *                                        [--reset] [--retry-error] [--check]
  *
  * Each run converts the next N catalog entries (default 200) and merges them
  * into the existing index, so the map grows a little at a time.
@@ -15,6 +16,9 @@
  *      TVDB_API_KEY        required for series (TVDB_PIN optional)
  *      ANIME_MAPPING_FILE  output index (default src/mapping/data/anime-seasons.json)
  *      ANIME_MAPPING_STATE progress ledger (default data/jikan-progress.json)
+ *      GITHUB_TOKEN        only for --publish (contents: write)
+ *      GITHUB_REPO         default Dexxtex/HanX
+ *      GITHUB_MAPPING_TAG  release used as asset store (default mapping)
  */
 
 import fs from 'node:fs';
@@ -39,6 +43,7 @@ const args = process.argv.slice(2);
 const checkOnly = args.includes('--check');
 const reset = args.includes('--reset');
 const retryError = args.includes('--retry-error');
+const publish = args.includes('--publish');
 const limitArg = args.find((arg) => arg.startsWith('--limit='));
 const parsedLimit = limitArg ? Number.parseInt(limitArg.split('=')[1], 10) : 200;
 // 0 (o un valore non numerico) significa "tutto il catalogo in un colpo".
@@ -686,6 +691,73 @@ async function main() {
   console.log(
     `  cursore: tv ${state.cursor.tv?.page ?? 1}:${state.cursor.tv?.pos ?? 0}, movie ${state.cursor.movie?.page ?? 1}:${state.cursor.movie?.pos ?? 0}`,
   );
+
+  if (publish) await publishIndex();
+}
+
+const GH_TOKEN = String(process.env.GITHUB_TOKEN || '').trim();
+const GH_REPO = String(process.env.GITHUB_REPO || 'Dexxtex/HanX').trim();
+const GH_TAG = String(process.env.GITHUB_MAPPING_TAG || 'mapping').trim();
+const GH_ASSET = 'anime-seasons.json';
+
+function ghHeaders(extra = {}) {
+  return {
+    accept: 'application/vnd.github+json',
+    authorization: `Bearer ${GH_TOKEN}`,
+    'x-github-api-version': '2022-11-28',
+    'user-agent': 'HanX-mapping',
+    ...extra,
+  };
+}
+
+async function ghApi(url, init = {}) {
+  const response = await fetch(url.startsWith('http') ? url : `https://api.github.com${url}`, {
+    ...init,
+    headers: ghHeaders(init.headers),
+  });
+  if (!response.ok) {
+    throw new Error(`GitHub ${response.status} ${url}: ${(await response.text()).slice(0, 200)}`);
+  }
+  return response.json();
+}
+
+/** Pubblica l'indice come asset della release: URL stabile, nessun bloat git. */
+async function publishIndex() {
+  if (!GH_TOKEN) throw new Error('--publish richiede GITHUB_TOKEN (contents: write)');
+  if (!fs.existsSync(outputFile)) throw new Error(`indice assente: ${outputFile}`);
+
+  let release;
+  try {
+    release = await ghApi(`/repos/${GH_REPO}/releases/tags/${GH_TAG}`);
+  } catch (error) {
+    if (!/GitHub 404 /.test(error.message)) throw error;
+    release = await ghApi(`/repos/${GH_REPO}/releases`, {
+      method: 'POST',
+      body: JSON.stringify({
+        tag_name: GH_TAG,
+        name: 'Anime mapping',
+        body: 'Indice anime-seasons.json generato dal converter Jikan di HanX.',
+      }),
+    });
+  }
+
+  // Un asset si sostituisce solo eliminandolo: l'URL download resta lo stesso.
+  for (const asset of release.assets || []) {
+    if (asset.name !== GH_ASSET) continue;
+    await fetch(`https://api.github.com/repos/${GH_REPO}/releases/assets/${asset.id}`, {
+      method: 'DELETE',
+      headers: ghHeaders(),
+    });
+  }
+
+  const body = fs.readFileSync(outputFile);
+  const upload = await fetch(
+    `https://uploads.github.com/repos/${GH_REPO}/releases/${release.id}/assets?name=${GH_ASSET}`,
+    { method: 'POST', headers: ghHeaders({ 'content-type': 'application/json' }), body },
+  );
+  if (!upload.ok) throw new Error(`upload fallito: HTTP ${upload.status} ${(await upload.text()).slice(0, 200)}`);
+
+  console.log(`  pubblicato: https://github.com/${GH_REPO}/releases/download/${GH_TAG}/${GH_ASSET}`);
 }
 
 if (isDirectRun) {

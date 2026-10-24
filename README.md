@@ -116,6 +116,7 @@ Il cursore e l'esito di ogni entry stanno in `data/jikan-progress.json` (volume 
 | `--limit=N` | converti N entry nuove in questo run (default 200) |
 | `--limit=0` | tutto il catalogo rimanente |
 | `--type=tv` / `--type=movie` | limita il batch a un solo tipo (senza flag: prima TV, poi film) |
+| `--publish` | al termine pubblica l'indice come asset della release (`GITHUB_TOKEN`) |
 | `--retry-error` | riprova le entry finite in errore (es. chiave sbagliata) |
 | `--reset` | ignora indice e cursore esistenti |
 | `--check` | valida il JSON senza rete |
@@ -156,8 +157,37 @@ docker exec HanX node scripts/build-anime-mapping.mjs --limit=200
 ```
 
 L'addon ricarica l'indice quando il file cambia (mtime): nessun riavvio necessario.
-Se preferisci l'asset di una release, `ANIME_MAPPING_URL` continua a funzionare come prima:
-il workflow GitHub è stato rimosso perché da un runner non può raggiungere un Jikan locale.
+
+#### Pubblicazione su GitHub
+
+Il repo non è il posto giusto per l'indice (crescerebbe di MB a ogni batch): va come **asset di una release**, con URL stabile e CDN.
+
+1. Crea un token fine-grained con `contents: write` sul repo, poi mettilo in `.env`:
+
+```bash
+GITHUB_TOKEN=github_pat_...
+GITHUB_REPO=Dexxtex/HanX          # opzionale, è il default
+```
+
+2. Aggiungi `--publish` al batch:
+
+```bash
+docker exec HanX node scripts/build-anime-mapping.mjs --limit=200 --type=tv --publish
+```
+
+La prima volta crea la release `mapping`, poi sostituisce l'asset `anime-seasons.json`:
+
+```
+https://github.com/Dexxtex/HanX/releases/download/mapping/anime-seasons.json
+```
+
+Su un'altra installazione (mini PC, amici) basta:
+
+```bash
+ANIME_MAPPING_URL=https://github.com/Dexxtex/HanX/releases/download/mapping/anime-seasons.json
+```
+
+L'addon scarica l'indice al primo avvio e lo ricontrolla ogni 24h con ETag; se il download fallisce tiene il file precedente. La sostituzione dell'asset lascia una finestra di ~1 secondo in cui l'URL non risponde: irrilevante, perché il client in quel caso continua col file locale. Se il token manca o è scaduto, il batch viene salvato lo stesso e `--publish` esce con errore (il cron te lo segnala).
 
 EasyProxy resta un servizio esterno all'addon: avvialo, poi inserisci URL e password API nella configurazione web.
 
