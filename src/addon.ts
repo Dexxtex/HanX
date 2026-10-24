@@ -392,9 +392,6 @@ function createBuilder() {
                     };
                     const unifyStreams = (original: Stream[], providerLabelName: string): Stream[] => {
                         const providerKey = reverseProviderKey(providerLabelName);
-                        const hostMap: Record<string, string> = {
-                            'mixdrop': 'Mixdrop', 'dropload': 'Dropload', 'streamtape': 'Streamtape', 'supervideo': 'SuperVideo', 'doodstream': 'Doodstream', 'deltabit': 'Deltabit', 'delta bit': 'Deltabit', 'loadm': 'LoadM', 'maxstream': 'Maxstream', 'streamhg': 'StreamHG', 'audinifer': 'StreamHG'
-                        };
                         return original.map(st => {
                             const url = (st as any).url || '';
                             const rawTitle: string = (st.title || '').toString();
@@ -426,23 +423,8 @@ function createBuilder() {
                             //  - behaviorHints.proxyHeaders flag
                             const proxyOn = /\/proxy\//i.test(url)
                                 || /api_password=/i.test(url);
-                            // Player host detection
-                            let playerName: string | undefined;
                             let sizeHuman: string | undefined; // already formatted (e.g. 1.58Gb / 850MB)
                             let resHuman: string | undefined;  // e.g. 1080p
-                            const lowerAll = rawTitle.toLowerCase();
-                            for (const k of Object.keys(hostMap)) {
-                                if (lowerAll.includes(k)) { playerName = hostMap[k]; break; }
-                            }
-                            // Try to preserve existing player name line if not found
-                            if (!playerName) {
-                                for (const l of lines) {
-                                    if (l.includes('▶️')) {
-                                        playerName = l.replace('▶️', '').trim();
-                                        break;
-                                    }
-                                }
-                            }
                             // Try to parse existing size/res lines produced by extractors (line starting with 💾)
                             // Patterns we expect from extractors: "💾 <SIZE> • <RES>", "💾 <SIZE>", "💾 <SIZE> • <somethingp>", or combined tokens separated by spaces or bullets.
                             for (const l of lines) {
@@ -466,9 +448,8 @@ function createBuilder() {
                             // Assemble lines manually per new spec:
                             // 1 Title
                             // 2 Language line [ITA|SUB]
-                            // 3 Player line <Player> (if any)
-                            // 4 Size/Res line (<SIZE> <RES> | only if at least one present)
-                            // 5 Proxy line Proxy (ON|OFF)
+                            // 3 Size/Res line (<SIZE> <RES> | only if at least one present)
+                            // 4 Proxy line Proxy (ON|OFF)
                             // (Provider label removed from multiline)
                             // Nessuna icona: le icone le aggiunge chi personalizza l'addon.
                             const outLines: string[] = [];
@@ -476,7 +457,6 @@ function createBuilder() {
                             // Language line: logica legacy [ITA]/[SUB].
                             const langLine = `[${isSub ? 'SUB' : 'ITA'}]`;
                             outLines.push(langLine);
-                            if (playerName) outLines.push(playerName);
                             // Build size/res combined line before proxy if present
                             let sizeResLine = '';
                             if (sizeHuman || resHuman) {
