@@ -329,9 +329,11 @@ function yearOf(value) {
 /** TMDB search terms for a Jikan catalog entry (MAL titles are Japanese-first). */
 export function tmdbQuery(entry) {
   const kind = String(entry?.type || '').toLowerCase() === 'movie' ? 'movie' : 'tv';
+  // Romaji come secondo tentativo: sui titoli senza title_english è l'unica chiave.
+  const queries = [...new Set([entry?.title_english, entry?.title].map((value) => String(value || '').trim()).filter(Boolean))];
   return {
     kind,
-    query: String(entry?.title_english || entry?.title || '').trim(),
+    queries,
     year: yearOf(entry?.aired?.from),
   };
 }
@@ -353,17 +355,21 @@ export function pickTmdbResult(results, year) {
   );
 }
 
-async function findTmdb({ kind, query, year }) {
-  if (!query) return null;
+async function findTmdb({ kind, queries, year }) {
+  if (!queries || queries.length === 0) return null;
   const path = kind === 'movie' ? 'search/movie' : 'search/tv';
-  const search = async (withYear) => {
+  const search = async (query, withYear) => {
     const params = new URLSearchParams({ query, api_key: tmdbKey });
     if (withYear && year) params.set(kind === 'movie' ? 'year' : 'first_air_date_year', String(year));
     const json = await fetchJson(`${TMDB}/${path}?${params}`);
     return pickTmdbResult(json?.results, withYear ? year : null);
   };
-  // A wrong/unknown MAL start year would hide a real match, so retry bare once.
-  return (await search(true)) || (year ? await search(false) : null);
+  for (const query of queries) {
+    // A wrong/unknown MAL start year would hide a real match, so retry bare once.
+    const hit = (await search(query, true)) || (year ? await search(query, false) : null);
+    if (hit) return hit;
+  }
+  return null;
 }
 
 async function tmdbExternalIds(kind, id) {
@@ -392,18 +398,23 @@ async function convertCatalogEntry(entry, index) {
     return { ...record, status: 'ok' };
   }
 
-  // TMDB gives the TVDB id for series; without it there is no episode order.
+  // TMDB gives the TVDB id for series; when it is missing we still align on
+  // TMDB episodes, so the entry does not fall out of the dataset.
   const tvdbId = external?.tvdb_id ? String(external.tvdb_id) : '';
-  if (!tvdbId) return { ...record, status: 'no-tvdb' };
-  // Split-cour entries share the TVDB series: the first one already mapped it.
-  if (index.series[`tvdb:${tvdbId}`]) return { ...record, status: 'already' };
+  // Split-cour entries share the same series: the first one already mapped it.
+  if ((tvdbId && index.series[`tvdb:${tvdbId}`]) || index.series[`tmdb:${tmdb.id}`]) {
+    return { ...record, status: 'already' };
+  }
 
-  const result = await buildSeriesSeed({ kitsuId, tvdbId, tmdbId: String(tmdb.id) });
+  const result =
+    (tvdbId ? await buildSeriesSeed({ kitsuId, tvdbId, tmdbId: String(tmdb.id) }) : null) ||
+    (await buildSeriesSeedFromTmdb({ kitsuId, tmdbId: String(tmdb.id) }));
   if (!result) return { ...record, status: 'no-align' };
   for (const [key, value] of Object.entries(result.series)) {
     mergeSeries(index.series, key, value.title, value.seasons);
   }
-  return { ...record, status: 'ok' };
+  const viaTvdb = Object.keys(result.series).some((key) => key.startsWith('tvdb:'));
+  return { ...record, status: 'ok', via: viaTvdb ? 'tvdb' : 'tmdb' };
 }
 
 async function getTvdbSeries(tvdbId) {
@@ -439,6 +450,28 @@ async function getTvdbEpisodes(tvdbId) {
 
 async function getTmdbTvDetails(tmdbId) {
   return fetchJson(`${TMDB}/tv/${tmdbId}?api_key=${tmdbKey}&append_to_response=external_ids`);
+}
+
+async function getTmdbEpisodes(tmdbId, details) {
+  const episodes = [];
+  for (const seasonInfo of details?.seasons || []) {
+    if (!seasonInfo?.season_number && seasonInfo?.season_number !== 0) continue;
+    if (Number(seasonInfo.season_number) === 0) continue;
+    let seasonJson;
+    try {
+      seasonJson = await getTmdbSeason(tmdbId, seasonInfo.season_number);
+    } catch {
+      continue;
+    }
+    for (const episode of seasonJson?.episodes || []) {
+      episodes.push({
+        season: Number(episode.season_number),
+        number: Number(episode.episode_number),
+        aired: episode.air_date || null,
+      });
+    }
+  }
+  return episodes;
 }
 
 async function getTmdbSeason(tmdbId, seasonNumber) {
@@ -611,30 +644,43 @@ async function buildSeriesSeed(seed) {
   if (imdbId) mergeSeries(result.series, `imdb:${imdbId}`, result.title, tvdbRanges);
 
   // TMDB key: match TMDB episodes to TVDB episodes by air date (±1 day).
-  const tmdbEpisodes = [];
-  for (const seasonInfo of tmdbDetails?.seasons || []) {
-    if (!seasonInfo?.season_number && seasonInfo?.season_number !== 0) continue;
-    if (Number(seasonInfo.season_number) === 0) continue;
-    let seasonJson;
-    try {
-      seasonJson = await getTmdbSeason(tmdbTv.id, seasonInfo.season_number);
-    } catch {
-      continue;
-    }
-    for (const episode of seasonJson?.episodes || []) {
-      tmdbEpisodes.push({
-        season: Number(episode.season_number),
-        number: Number(episode.episode_number),
-        aired: episode.air_date || null,
-      });
-    }
-  }
+  const tmdbEpisodes = await getTmdbEpisodes(tmdbTv.id, tmdbDetails);
 
   const tmdbEntries = alignTmdbEpisodes([...assignment.values()], tmdbEpisodes);
   if (tmdbEntries.length > 0) {
     mergeSeries(result.series, `tmdb:${tmdbTv.id}`, result.title, rangesFrom(tmdbEntries));
   }
 
+  return result;
+}
+
+/**
+ * Fallback for series without a TVDB id (or where TVDB alignment failed):
+ * align the Kitsu franchise directly on TMDB episodes, which carry the same
+ * season/number/air_date shape.
+ */
+async function buildSeriesSeedFromTmdb(seed) {
+  const entries = await collectEntries({ id: seed.kitsuId });
+  if (entries.length === 0) return null;
+  const details = await getTmdbTvDetails(seed.tmdbId);
+  const episodes = await getTmdbEpisodes(seed.tmdbId, details);
+  if (episodes.length === 0) return null;
+  const assignment = alignEntries(episodes, entries);
+  if (assignment.size === 0) return null;
+
+  const ranges = rangesFrom([...assignment.values()].map(({ episode, kitsuId, kitsuEpisode, title, episodeCount }) => ({
+    season: episode.season,
+    episode: episode.number,
+    kitsuId,
+    kitsuEpisode,
+    title,
+    episodeCount,
+  })));
+
+  const result = { title: details?.name || entries[0]?.title || '', series: {} };
+  mergeSeries(result.series, `tmdb:${seed.tmdbId}`, result.title, ranges);
+  const imdbId = details?.external_ids?.imdb_id || null;
+  if (imdbId) mergeSeries(result.series, `imdb:${imdbId}`, result.title, ranges);
   return result;
 }
 
