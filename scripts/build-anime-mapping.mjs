@@ -212,17 +212,22 @@ if (isDirectRun && checkOnly) {
 if (isDirectRun && statusOnly) {
   const state = readJson(stateFile) || {};
   state.cursor = state.cursor || {};
+  let catalogue = 0;
   for (const type of ['tv', 'movie']) {
     const total = await jikanTotal(type);
+    catalogue += total;
     const cursor = state.cursor[type];
     const consumed = cursor ? (cursor.page - 1) * JIKAN_PAGE_SIZE + cursor.pos : 0;
     const pct = total > 0 ? Math.min(100, Math.round((consumed / total) * 100)) : 0;
-    console.log(`${type.padEnd(6)} ${consumed}/${total} (${pct}%)`);
+    console.log(`${type.padEnd(6)} cursore ${consumed}/${total} (${pct}%)`);
   }
   const records = Object.values(state.done || {});
   const byStatus = {};
   for (const record of records) byStatus[record?.status || '?'] = (byStatus[record?.status || '?'] || 0) + 1;
-  console.log(`registro: ${records.length} entry (${Object.entries(byStatus).map(([s, c]) => `${s} ${c}`).join(', ') || 'vuoto'})`);
+  // Il registro è la misura vera: dopo un --retry il cursore riparte da pagina 1.
+  const done = catalogue > 0 ? Math.round((records.length / catalogue) * 100) : 0;
+  console.log(`registro: ${records.length}/${catalogue} entry (${done}%)`);
+  console.log(`  ${Object.entries(byStatus).map(([s, c]) => `${s} ${c}`).join(', ') || 'vuoto'}`);
   process.exit(0);
 }
 
