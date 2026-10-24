@@ -130,7 +130,9 @@ movie  5099/5099 (100%)
 registro: 13837 entry (ok 11200, already 1500, no-tmdb 900, no-kitsu 200, error 37)
 ```
 
-Esiti registrati per entry: `ok` (allineata su TVDB, o su TMDB quando TVDB manca), `already` (split cour già coperto), `no-kitsu` (Kitsu non ha il mapping MAL), `no-tmdb` (titolo non trovato su TMDB), `no-align` (né TVDB né TMDB hanno episodi compatibili), `error`. Solo gli ultimi due restano scoperti dall'indice: fuori da lì, la risoluzione live copre comunque.
+Esiti registrati per entry: `ok` (allineata su TVDB, o su TMDB quando TVDB manca), `already` (split cour già coperto), `no-kitsu` (Kitsu non ha il mapping MAL né un titolo corrispondente), `no-tmdb` (titolo non trovato su TMDB), `no-align` (né TVDB né TMDB hanno episodi compatibili), `error`. Solo gli ultimi due restano scoperti dall'indice: fuori da lì, la risoluzione live copre comunque.
+
+Per le entry senza mapping MAL ufficiale il converter prova anche un match per metadati su Kitsu, volutamente severo: titolo normalizzato identico, stesso sottotipo (TV/film), anno ±1 e **un solo** candidato. Se i candidati sono due, meglio il buco: un id sbagliato manderebbe lo stream sulla serie sbagliata.
 
 L'indice locale `src/mapping/data/anime-seasons.json` (o il percorso in `ANIME_MAPPING_FILE`) viene caricato una volta e usato senza rete; ogni range contiene il titolo della entry Kitsu e il conteggio episodi, così split cour e richieste fuori range non finiscono sull'episodio sbagliato. In caso di miss, il resolver può interrogare le API ufficiali (con cache in memoria e retry su 429/5xx). I provider non usano più un resolver di path esterni: risolvono `{ titolo, stagione, episodio Kitsu }` e cercano per titolo.
 

@@ -321,6 +321,47 @@ async function kitsuIdForMal(malId) {
   return id ? String(id) : null;
 }
 
+function normalizeTitle(value) {
+  return String(value || '')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+/**
+ * Conservative metadata match for entries Kitsu has but never mapped to MAL
+ * (~8% of the catalog). Exact normalised title + same subtype + year ±1, and
+ * only when a single candidate survives: a wrong id is worse than a miss.
+ */
+export function pickKitsuResult(results, { titles, year, subtype }) {
+  const wanted = new Set(titles.map(normalizeTitle).filter(Boolean));
+  if (wanted.size === 0) return null;
+  const matches = results.filter((item) => {
+    const attributes = item?.attributes || {};
+    if (String(attributes.subtype || '').toLowerCase() !== subtype) return false;
+    const resultYear = yearOf(attributes.startDate);
+    if (year && resultYear && Math.abs(resultYear - year) > 1) return false;
+    const names = [attributes.canonicalTitle, ...Object.values(attributes.titles || {})].map(normalizeTitle);
+    return names.some((name) => wanted.has(name));
+  });
+  return matches.length === 1 ? matches[0] : null;
+}
+
+async function kitsuIdByMetadata(entry) {
+  const titles = [entry?.title, entry?.title_english].map((value) => String(value || '').trim()).filter(Boolean);
+  const subtype = String(entry?.type || '').toLowerCase() === 'movie' ? 'movie' : 'tv';
+  const year = yearOf(entry?.aired?.from);
+  for (const query of [...new Set(titles)]) {
+    const url = `${KITSU}/anime?filter[text]=${encodeURIComponent(query)}&page[limit]=10`;
+    const json = await fetchJson(url);
+    const hit = pickKitsuResult(json?.data || [], { titles, year, subtype });
+    if (hit?.id) return String(hit.id);
+  }
+  return null;
+}
+
 function yearOf(value) {
   const year = Number.parseInt(String(value || '').slice(0, 4), 10);
   return Number.isFinite(year) && year > 1900 ? year : null;
@@ -381,7 +422,7 @@ async function convertCatalogEntry(entry, index) {
   const at = new Date().toISOString().slice(0, 10);
   const title = String(entry?.title_english || entry?.title || '');
 
-  const kitsuId = await kitsuIdForMal(entry.mal_id);
+  const kitsuId = (await kitsuIdForMal(entry.mal_id)) || (await kitsuIdByMetadata(entry));
   if (!kitsuId) return { at, status: 'no-kitsu' };
 
   const query = tmdbQuery(entry);
