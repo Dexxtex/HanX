@@ -206,6 +206,9 @@ export async function refreshMappingFromUrl(): Promise<void> {
   }
 
   const headers: Record<string, string> = {};
+  // Repo privato: l'asset della release richiede un token (Contents: read).
+  const token = String(process.env.ANIME_MAPPING_TOKEN || '').trim();
+  if (token) headers.authorization = `Bearer ${token}`;
   const etag = mtime === -1 ? '' : readEtag(`${target}.etag`);
   if (etag) headers['if-none-match'] = etag;
 

@@ -185,7 +185,10 @@ Su un'altra installazione (mini PC, amici) basta:
 
 ```bash
 ANIME_MAPPING_URL=https://github.com/Dexxtex/HanX/releases/download/mapping/anime-seasons.json
+ANIME_MAPPING_TOKEN=github_pat_...   # solo se il repo è privato
 ```
+
+**Il repo `Dexxtex/HanX` oggi è privato**, e gli asset di un repo privato non si scaricano senza autenticazione: serve un secondo token fine-grained con **Contents: read** sul client (o rendere pubblico il repo e togliere la riga `ANIME_MAPPING_TOKEN`). Sul server che pubblica il token di scrittura basta; il client può usare uno read-only.
 
 L'addon scarica l'indice al primo avvio e lo ricontrolla ogni 24h con ETag; se il download fallisce tiene il file precedente. La sostituzione dell'asset lascia una finestra di ~1 secondo in cui l'URL non risponde: irrilevante, perché il client in quel caso continua col file locale. Se il token manca o è scaduto, il batch viene salvato lo stesso e `--publish` esce con errore (il cron te lo segnala).
 
