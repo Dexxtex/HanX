@@ -25,7 +25,8 @@ questa guida cambia il converter del mapping, non la ricerca per titolo dei prov
 L’immagine ufficiale `jikanme/jikan-rest:latest` è costruita su **PHP 8.1.27**
 (`php:8.1.27-bullseye`, pinnato nel `Dockerfile` upstream). Per girare su 8.5
 bisogna ricompilare il sorgente: sotto c’è il `Dockerfile` upstream con la base
-cambiata e `curl` aggiunto per l’healthcheck.
+cambiata e le tre correzioni che il lock richiede (versione di `mongodb`, flag
+Composer, `curl` per l’healthcheck).
 
 ```bash
 cd apps/jikan-rest
@@ -49,8 +50,10 @@ COPY --from=php-ext-installer /usr/bin/install-php-extensions /usr/local/bin/
 
 ENV COMPOSER_HOME="/tmp/composer"
 
+# mongodb-stable (2.x) non funziona con il lock: mongodb/mongodb 1.12 richiede
+# ext-mongodb ^1.13, quindi va pinnata la 1.x.
 RUN set -eux \
-    && install-php-extensions intl mbstring mongodb-stable redis opcache sockets pcntl \
+    && install-php-extensions intl mbstring mongodb-1.21.12 redis opcache sockets pcntl \
     && apt-get update \
     && apt-get install -y --no-install-recommends curl git openssl unzip wget \
     && wget -q "https://github.com/aptible/supercronic/releases/download/v0.1.12/supercronic-linux-$(dpkg --print-architecture)" -O /usr/bin/supercronic \
@@ -64,15 +67,20 @@ RUN set -eux \
     && chown -R jikanapi:jikanapi /app /var/run/rr /etc/supercronic/laravel \
     && chmod -R 777 /var/run/rr
 
+# Lumen forza error_reporting(-1) all'avvio, quindi le deprecation restano nei log:
+# qui si evita solo che finiscano nelle risposte.
+RUN printf 'display_errors=Off\nlog_errors=On\n' > "${PHP_INI_DIR}/conf.d/zz-php85.ini"
+
 COPY --from=roadrunner /usr/bin/rr /usr/bin/rr
 
 USER jikanapi:jikanapi
 WORKDIR /app
 
 COPY --chown=jikanapi:jikanapi composer.json composer.lock /app/
-# Se il lock upstream rifiuta 8.5, l'unica via è --ignore-platform-req=php
-# (a tuo rischio: il vincolo può essere lì per un motivo).
-RUN composer install -n --no-dev --no-cache --no-ansi --no-autoloader --no-scripts --prefer-dist
+# Obbligatorio: roave/better-reflection 5.11.1 (via matchish/laravel-scout-elasticsearch)
+# dichiara "~8.0.12 || ~8.1.0 || ~8.2.0" e blocca l'installazione. È tooling di
+# codegen, non codice runtime: se in futuro il lock lo aggiorna, togli il flag.
+RUN composer install -n --no-dev --no-cache --no-ansi --no-autoloader --no-scripts --prefer-dist --ignore-platform-req=php
 
 COPY --chown=jikanapi:jikanapi . /app/
 RUN set -eux \
@@ -92,13 +100,30 @@ docker compose exec jikan_rest php -v          # deve dire 8.5.x
 docker compose exec jikan_rest php -m | grep -E 'mongodb|redis|pcntl|sockets'
 ```
 
-### Se il build si ferma
+### Provato davvero
 
-| Errore | Causa | Rimedio |
-|---|---|---|
-| `your lock file does not contain a compatible set of packages` | il `composer.lock` upstream fissa una minor di PHP | aggiungi `--ignore-platform-req=php` al `composer install` |
-| `mongodb-stable` non compila | estensione non ancora pronta per 8.5 | `pecl install mongodb` esplicito, o torna all’immagine 8.1 |
-| deprecation a runtime | Lumen 9 è del 2022 | `LOG_LEVEL=error`; se una deprecation diventa fatal, l’unica via è 8.1 |
+Il `Dockerfile` qui sopra è stato costruito e avviato (Docker 29.9, 16 CPU):
+
+| Controllo | Esito |
+|---|---|
+| build completo | ok, immagine 1,08 GB |
+| `php -v` | `PHP 8.5.12 (cli)` |
+| estensioni | `intl`, `mongodb 1.21.12`, `redis`, `pcntl`, `sockets`, `opcache` |
+| `php artisan --version` | `Lumen (9.1.5)` — l’app si avvia |
+| patch `RepositoryQuery.php` con l’autoloader reale | classe caricata, estende `RepositoryQueryBase`, implementa il contratto, i tre `#[\Override]` validi |
+
+Le due trappole trovate costruendo, già risolte nello snippet:
+
+1. **`mongodb-stable` rompe il lock.** Installava la 2.5.5, mentre `mongodb/mongodb 1.12.0` (fissata da `jenssegers/mongodb 3.9.5`) richiede `ext-mongodb ^1.13`. Va pinnata la 1.x: `mongodb-1.21.12`.
+2. **`--ignore-platform-req=php` è obbligatorio.** `roave/better-reflection 5.11.1`, tirato da `matchish/laravel-scout-elasticsearch`, dichiara `~8.0.12 || ~8.1.0 || ~8.2.0`. È tooling di code generation, non codice runtime.
+
+### Rumore nei log
+
+Lumen 9 chiama `error_reporting(-1)` all’avvio, quindi le deprecation di PHP 8.5
+(«implicitly marking parameter as nullable») restano nei log anche con l’ini.
+Non bloccano nulla e, con `display_errors=Off`, non entrano nelle risposte. Se
+danno fastidio, l’unica soluzione pulita è aggiornare le dipendenze, non il
+`Dockerfile`.
 
 Il resto della guida non cambia: percorso, segreti, indici e seed sono identici.
 
@@ -525,7 +550,8 @@ monta un `.rr.yaml` su `/app/.rr.yaml` che aggiunge: `queue:work --max-time=3600
 | Query per genere lentissime | indici Mongo assenti: devono essere 29 |
 | Porta 8080 già occupata | lo stack usa `expose`, non `ports`: nessun conflitto atteso |
 | `php -v` dice ancora 8.1 | il servizio usa `image:` invece di `build:` | ripristina il blocco `build` del compose |
-| build fermo su `composer install` | il lock upstream non accetta 8.5 | vedi “Se il build si ferma” |
+| `composer install` rifiuta il lock | `roave/better-reflection` vs 8.5 | il `Dockerfile` ha già `--ignore-platform-req=php` |
+| `ext-mongodb` versione sbagliata al boot | `mongodb-stable` installa la 2.x | pinna `mongodb-1.21.12` |
 
 ---
 
