@@ -115,6 +115,7 @@ Il cursore e l'esito di ogni entry stanno in `data/jikan-progress.json` (volume 
 |---|---|
 | `--limit=N` | converti N entry nuove in questo run (default 200) |
 | `--limit=0` | tutto il catalogo rimanente |
+| `--type=tv` / `--type=movie` | limita il batch a un solo tipo (senza flag: prima TV, poi film) |
 | `--retry-error` | riprova le entry finite in errore (es. chiave sbagliata) |
 | `--reset` | ignora indice e cursore esistenti |
 | `--check` | valida il JSON senza rete |

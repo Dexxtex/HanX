@@ -5,7 +5,7 @@
  * TMDB (title + year) -> IMDb/TVDB ids -> TVDB episode order.
  *
  * Usage:
- *   node scripts/build-anime-mapping.mjs [--limit=N] [--reset] [--retry-error] [--check]
+ *   node scripts/build-anime-mapping.mjs [--limit=N] [--type=tv|movie] [--reset] [--retry-error] [--check]
  *
  * Each run converts the next N catalog entries (default 200) and merges them
  * into the existing index, so the map grows a little at a time.
@@ -43,6 +43,9 @@ const limitArg = args.find((arg) => arg.startsWith('--limit='));
 const parsedLimit = limitArg ? Number.parseInt(limitArg.split('=')[1], 10) : 200;
 // 0 (o un valore non numerico) significa "tutto il catalogo in un colpo".
 const limit = parsedLimit > 0 ? parsedLimit : Infinity;
+const requestedType = (args.find((arg) => arg.startsWith('--type=')) || '').split('=')[1];
+// Senza --type si parte dalle serie TV e poi i film; il cursore è per tipo.
+const catalogTypes = requestedType === 'tv' || requestedType === 'movie' ? [requestedType] : ['tv', 'movie'];
 
 const outputFile = process.env.ANIME_MAPPING_FILE
   ? path.resolve(process.env.ANIME_MAPPING_FILE)
@@ -636,7 +639,7 @@ async function main() {
   const stats = {};
   let processed = 0;
 
-  outer: for (const type of ['tv', 'movie']) {
+  outer: for (const type of catalogTypes) {
     const cursor = state.cursor[type] || { page: 1, pos: 0 };
     state.cursor[type] = cursor;
     for (;;) {
