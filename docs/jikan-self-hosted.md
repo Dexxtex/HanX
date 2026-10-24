@@ -143,23 +143,35 @@ Conseguenze da sapere:
 
 ### Perché non Lumen 11
 
-Verificato con il resolver: il tetto non è PHP 8.5, è il bridge RoadRunner.
-`pushrbx/lumen-roadrunner` è fermo alla **v5.9.1** e dichiara
-`laravel/lumen-framework ^9.0` — nessuna versione supporta Lumen 10 o 11.
+Provato davvero con il resolver (`composer update -W`, incluso un fork del bridge con
+i vincoli allargati): **non esiste una combinazione installabile**. Il muro non è PHP
+8.5, sono le versioni di Symfony.
 
-| Pacchetto | Ultima | Richiede |
+| Anello | Vincolo | Conflitto |
 |---|---|---|
-| `laravel/lumen-framework` | 11.2 | illuminate 11 |
-| `jenssegers/mongodb` | 5.11 | illuminate 12/13 (la 4.9 vuole 10.36/11) |
-| `typesense/laravel-scout-typesense-driver` | 5.2.10 | illuminate 10+ (la 5.2.9 arriva a 9) |
-| `pushrbx/lumen-roadrunner` | 5.9.1 | **lumen ^9** ← il blocco |
+| `laravel/lumen-framework` 11.2 | `symfony/* ^7.0` (mime, http-foundation) | — |
+| `pushrbx/lumen-roadrunner` 5.9.1 | `lumen ^9` | nessuna versione oltre la 5.9.1 |
+| `jikan-me/jikan` 4.0.13 | `fabpot/goutte ^4` → `symfony/mime ^4.4\|^5.0` | ❌ contro ^7 |
+| `jikan-me/jikan` 5.0.0 | `symfony/* ^8.0`, PHP ≥8.4.4 | ❌ contro ^7 |
 
-Quindi Lumen, Scout, Typesense e Mongo si aggiornano **insieme o per niente**, e il
-prerequisito è sostituire il bridge RoadRunner: fork con il vincolo allargato, oppure
-php-fpm/nginx al posto di RR (che cambia entrypoint, healthcheck e `.rr.yaml`).
-È una migrazione con modifiche al codice, non un `composer update`; per questo la
-guida resta su Lumen 9, che su PHP 8.5 gira — `php artisan --version` risponde e
-`composer why-not php 8.5.12` è vuoto.
+Allargando a mano i vincoli del bridge (fork locale, `^9|^10|^11`) il resolver passa
+il primo ostacolo e si ferma sul secondo:
+
+```
+laravel/lumen-framework v11.0.0 requires symfony/mime ^7.0
+fabpot/goutte v4.0.3            requires symfony/mime ^4.4|^5.0
+```
+
+Il problema è nello **scraper** `jikan-me/jikan`, che jikan-rest usa per parlare con
+MAL: la v4 è legata a Goutte e a Symfony 5, la v5 salta direttamente a Symfony 8.
+Lumen si ferma a Symfony 7. Per superarlo servirebbe un fork anche dello scraper, con
+le API del parser da adattare nel codice dell'app — cioè una migrazione applicativa,
+non un aggiornamento di dipendenze.
+
+Per questo la guida resta su Lumen 9, che su PHP 8.5 gira: `php artisan --version`
+risponde e `composer why-not php 8.5.12` è vuoto. Scout, Typesense e Mongo restano
+allineati a Lumen 9 per lo stesso motivo (`typesense` 5.2.10 e `jenssegers/mongodb`
+4.x richiedono illuminate 10+).
 
 ### Trappole trovate costruendo
 
