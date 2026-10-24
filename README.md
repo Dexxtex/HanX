@@ -162,6 +162,9 @@ networks:
     name: jikan_default
 ```
 
+La stack Jikan completa (compose, segreti, indici Mongo/Typesense, seed, patch RoadRunner)
+è in [`docs/jikan-self-hosted.md`](docs/jikan-self-hosted.md).
+
 Poi i batch si lanciano dalla shell di Dockhand:
 
 ```bash
