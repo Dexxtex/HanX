@@ -84,8 +84,9 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
-            # Non c'è più la build su main: latest si muove con la release.
-            type=raw,value=latest,enable=${{ github.ref_type == 'tag' }}
+            # Non c'è più la build su main: latest si muove con la release
+            # oppure con un run manuale esplicito.
+            type=raw,value=latest,enable=${{ github.ref_type == 'tag' || github.event_name == 'workflow_dispatch' }}
             type=sha,format=short
 
       - name: Build and push Docker image
