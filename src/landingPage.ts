@@ -794,10 +794,6 @@ const CLIENT_SCRIPT = String.raw`
         ['animeworldEnabled', 'AnimeWorld']
     ];
 
-    function hasDefault(key) {
-        return Object.prototype.hasOwnProperty.call(defaults, key);
-    }
-
     function toBoolean(value, fallback) {
         if (value === undefined || value === null) {
             return fallback;
@@ -822,11 +818,9 @@ const CLIENT_SCRIPT = String.raw`
         providers.forEach(function (provider) {
             config[provider[0]] = getElement(provider[0]).checked;
         });
-        ['animeunityDirect', 'animeunityProxy'].forEach(
-            function (key) {
-                config[key] = getElement(key).checked;
-            }
-        );
+        ['animeunityDirect', 'animeunityProxy'].forEach(function (key) {
+            config[key] = key === 'animeunityDirect' ? mode === 'direct' : mode === 'proxy';
+        });
 
         ['tmdbApiKey', 'tvdbApiKey', 'tvdbPin'].forEach(function (key) {
             var value = getElement(key).value.trim();
@@ -912,21 +906,6 @@ const CLIENT_SCRIPT = String.raw`
             }
         }
 
-        if (getElement('animeunityEnabled').checked) {
-            var hasVariant = getElement('animeunityDirect').checked
-                || getElement('animeunityProxy').checked;
-
-            if (!hasVariant) {
-                getElement('advancedOptions').open = true;
-                showMessage('AnimeUnity attivo: scegli almeno una variante nelle opzioni avanzate.', true);
-                return false;
-            }
-            if (getElement('animeunityProxy').checked && mode !== 'proxy') {
-                showMessage('La variante AnimeUnity Proxy richiede la modalità Con proxy.', true);
-                return false;
-            }
-        }
-
         return true;
     }
 
@@ -968,21 +947,12 @@ const CLIENT_SCRIPT = String.raw`
         providers.forEach(function (provider) {
             getElement(provider[0]).checked = toBoolean(defaults[provider[0]], true);
         });
-        ['animeunityDirect', 'animeunityProxy'].forEach(function (key) {
-            getElement(key).checked = toBoolean(defaults[key], key === 'animeunityDirect');
-        });
         ['tmdbApiKey', 'tvdbApiKey', 'tvdbPin', 'easyProxyUrl', 'easyProxyPassword'].forEach(function (key) {
             getElement(key).value = typeof defaults[key] === 'string' ? defaults[key] : '';
         });
 
         if (getElement('easyProxyUrl').value.trim()) {
             mode = 'proxy';
-            if (!hasDefault('animeunityDirect')) {
-                getElement('animeunityDirect').checked = false;
-            }
-            if (!hasDefault('animeunityProxy')) {
-                getElement('animeunityProxy').checked = true;
-            }
         }
     }
 
@@ -994,8 +964,6 @@ const CLIENT_SCRIPT = String.raw`
     document.querySelectorAll('[data-mode]').forEach(function (button) {
         button.addEventListener('click', function () {
             mode = button.getAttribute('data-mode');
-            getElement('animeunityDirect').checked = mode === 'direct';
-            getElement('animeunityProxy').checked = mode === 'proxy';
             updatePage();
             showMessage('');
         });
@@ -1348,12 +1316,12 @@ ${STYLESHEET}
                             <button class="mode active" type="button" data-mode="direct" aria-pressed="true">
                                 <span class="letter">A / ESSENTIAL</span>
                                 <h3>Direct.</h3>
-                                <p>Senza proxy di riproduzione configurato.</p>
+                                <p>Tutti e tre i provider in diretta. Nessun proxy nel link.</p>
                             </button>
                             <button class="mode" type="button" data-mode="proxy" aria-pressed="false">
                                 <span class="letter">B / YOUR SETUP</span>
                                 <h3>Con proxy.</h3>
-                                <p>Collega il tuo EasyProxy.</p>
+                                <p>Tutti e tre i provider via EasyProxy. Collega il tuo.</p>
                             </button>
                         </div>
 
@@ -1378,22 +1346,10 @@ ${STYLESHEET}
                             </p>
                         </div>
 
-                        <details id="advancedOptions">
-                            <summary>Il dettaglio fa la differenza — opzioni avanzate</summary>
-                            <label>
-                                <input id="animeunityDirect" type="checkbox" checked>
-                                AnimeUnity · Direct
-                            </label>
-                            <label>
-                                <input id="animeunityProxy" type="checkbox">
-                                AnimeUnity · Proxy
-                            </label>
-                            <p class="hint">
-                                Queste due spunte valgono solo per AnimeUnity. AnimeSaturn e AnimeWorld
-                                riproducono in diretta con i loro header e passano dal proxy solo se ne
-                                configuri uno. La modalità proxy non verifica l’accessibilità del servizio.
-                            </p>
-                        </details>
+                        <p class="hint">
+                            La scelta vale per AnimeUnity, AnimeSaturn e AnimeWorld insieme. La modalità
+                            proxy non verifica l’accessibilità del servizio.
+                        </p>
 
                         <div class="actions">
                             <button class="btn" type="button" data-next="2">← Chiavi API</button>

@@ -69,8 +69,6 @@ const baseManifest: Manifest = {
         { key: "easyProxyUrl", title: "☂️ EasyProxy URL", type: "text" },
         { key: "easyProxyPassword", title: "EasyProxy Password (opzionale)", type: "password" },
         { key: "animeunityEnabled", title: "Enable AnimeUnity", type: "checkbox" },
-        { key: "animeunityDirect", title: "AnimeUnity Direct (solo installazione locale)", type: "checkbox" },
-        { key: "animeunityProxy", title: "AnimeUnity Proxy (richiede EasyProxy, consigliato)", type: "checkbox" },
         { key: "animesaturnEnabled", title: "Enable AnimeSaturn", type: "checkbox" },
         { key: "animeworldEnabled", title: "Enable AnimeWorld", type: "checkbox" },
     ],
