@@ -1389,8 +1389,9 @@ ${STYLESHEET}
                                 AnimeUnity · Proxy
                             </label>
                             <p class="hint">
-                                Direct e Proxy dipendono dall’installazione e dai flussi disponibili.
-                                La modalità proxy non verifica automaticamente l’accessibilità del servizio.
+                                Queste due spunte valgono solo per AnimeUnity. AnimeSaturn e AnimeWorld
+                                riproducono in diretta con i loro header e passano dal proxy solo se ne
+                                configuri uno. La modalità proxy non verifica l’accessibilità del servizio.
                             </p>
                         </details>
 
