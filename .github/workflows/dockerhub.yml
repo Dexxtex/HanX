@@ -45,6 +45,19 @@ jobs:
             exit 1
           fi
 
+      - name: Token shape
+        env:
+          TOKEN: ${{ secrets.DOCKERHUB }}
+        run: |
+          echo "lunghezza: ${#TOKEN}"
+          case "$TOKEN" in
+            dckr_pat_*) echo "prefisso: dckr_pat_ (sembra un PAT)";;
+            *) echo "prefisso: diverso da dckr_pat_ (sembra una password o un token di altro servizio)";;
+          esac
+          if printf '%s' "$TOKEN" | grep -q '[[:space:]]'; then
+            echo "ATTENZIONE: contiene spazi o newline"
+          fi
+
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
         with:
