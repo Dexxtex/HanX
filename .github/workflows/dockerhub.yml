@@ -11,13 +11,8 @@ on:
 
 permissions:
   contents: read
-  packages: write
-  attestations: write
-  id-token: write
 
 env:
-  GHCR: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
   DOCKERHUB_IMAGE: lextutor/hanx
 
 jobs:
@@ -65,19 +60,11 @@ jobs:
           username: lextutor
           password: ${{ secrets.DOCKERHUB }}
 
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.GHCR }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Extract metadata (tags, labels)
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: |
-            ${{ env.GHCR }}/${{ env.IMAGE_NAME }}
             ${{ env.DOCKERHUB_IMAGE }}
           tags: |
             type=semver,pattern={{version}}
@@ -96,13 +83,3 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           provenance: false
-
-      - name: Generate artifact attestation (GHCR)
-        # Non disponibile per i repo privati di un utente: si attiva da sola
-        # quando il repo diventa pubblico.
-        if: ${{ github.event.repository.private == false }}
-        uses: actions/attest-build-provenance@v3
-        with:
-          subject-name: ${{ env.GHCR }}/${{ env.IMAGE_NAME }}
-          subject-digest: ${{ steps.build-push.outputs.digest }}
-          push-to-registry: true
