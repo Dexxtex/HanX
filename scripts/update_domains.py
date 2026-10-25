@@ -39,12 +39,16 @@ KEY_HINTS = {
 # Domini che elencano i link ma non sono siti di streaming.
 SOURCE_ONLY_HOSTS = {'animesaturn.me', 'animeworlditalia.com'}
 
+# Host raggiungibili ma con un'altra struttura: il provider legge solo il markup
+# .co (archivio?title=, records=, info_api) e su animeunity.at non lo trova.
+BLOCKED_HOSTS = {'animeunity.at'}
+
 # Fallback usati solo se il pastebin non offre un host raggiungibile.
 # Verificati manualmente: animeunity.so è morto, animeunity.co è attivo e senza
-# rate-limit sull'IP di casa; animeunity.at resta come ripiego.
+# rate-limit sull'IP di casa.
 KNOWN_HOSTS = {
     'animesaturn': ['animesaturn.net', 'animemars.org', 'animesaturn.cx', 'animesaturn.cc', 'animesaturn.com'],
-    'animeunity': ['animeunity.co', 'animeunity.at', 'animeunity.io'],
+    'animeunity': ['animeunity.co', 'animeunity.io'],
     'animeworld': ['animeworld.ac', 'animeworld.so', 'animeworld.tv'],
 }
 
@@ -107,7 +111,7 @@ def candidate_hosts(key: str, paste_hosts, current, official_hosts=()):
     seen = set()
     for value in ordered:
         host = normalize_host(value)
-        if host and host not in SOURCE_ONLY_HOSTS and host not in seen:
+        if host and host not in SOURCE_ONLY_HOSTS and host not in BLOCKED_HOSTS and host not in seen:
             seen.add(host)
             result.append(host)
     return result
