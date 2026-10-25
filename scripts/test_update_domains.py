@@ -19,7 +19,8 @@ class UpdateDomainsTests(unittest.TestCase):
             ['animeunity.so'],
             {'animeunity': 'animeunity.at'},
         )
-        self.assertEqual(hosts, ['animeunity.so', 'animeunity.at', 'animeunity.co', 'animeunity.io'])
+        # Il dominio corrente resta il primo: i mirror arrivano solo se non risponde.
+        self.assertEqual(hosts, ['animeunity.at', 'animeunity.so', 'animeunity.co', 'animeunity.io'])
 
     def test_choose_host_skips_dead_domain(self):
         def fake_probe(host):

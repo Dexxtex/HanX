@@ -96,9 +96,11 @@ def extract_hosts(text: str):
 
 def candidate_hosts(key: str, paste_hosts, current, official_hosts=()):
     hint = KEY_HINTS[key]
-    ordered = [host for host in official_hosts if hint.search(host)]
+    # Il dominio in uso viene per primo: un mirror raggiungibile ma con un'altra
+    # struttura (es. animeunity.at) non deve scavalcare quello che funziona.
+    ordered = [current.get(key, '')]
+    ordered.extend(host for host in official_hosts if hint.search(host))
     ordered.extend(host for host in paste_hosts if hint.search(host))
-    ordered.append(current.get(key, ''))
     ordered.extend(KNOWN_HOSTS.get(key, []))
 
     result = []
