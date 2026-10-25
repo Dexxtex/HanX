@@ -39,6 +39,18 @@ export function normalizeBool(val: unknown): boolean | undefined {
     return undefined;
 }
 
+/**
+ * Proxy di riproduzione effettivo. La config del link vince: se il link non
+ * porta un EasyProxy (modalità Direct della landing) si resta diretti, altrimenti
+ * la scelta verrebbe annullata dall'env. EASYPROXY_URL vale solo per le richieste
+ * senza config, cioe' l'installazione locale che chiama l'addon in diretta.
+ */
+export function resolveEasyProxyUrl(configUrl: unknown, envUrl: string | undefined, isLocalApiCall: boolean): string {
+    const fromConfig = typeof configUrl === 'string' ? configUrl.trim() : '';
+    const chosen = fromConfig || (isLocalApiCall ? envUrl || '' : '');
+    return chosen.replace(/\/+$/, '');
+}
+
 // Normalizzazione: converte tutti i valori booleani/stringhe in booleani effettivi
 // e normalizza URL rimuovendo trailing slash.
 // Gestisce il caso problematico dove "false" come stringa diventa truthy.

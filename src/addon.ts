@@ -13,6 +13,7 @@ import {
     parseConfigFromArgs,
     providerCacheKey,
     providerConfigDigest,
+    resolveEasyProxyUrl,
 } from './config.js';
 import { AnimeUnityProvider } from './providers/animeunity-provider.js';
 import { providerLabel } from './utils/unifiedNames.js';
@@ -262,9 +263,17 @@ function createBuilder() {
                 // NOTE: Il middleware ora converte Base64→JSON prima che l'SDK processi la request,
                 // quindi requestConfig dovrebbe sempre contenere la config utente correttamente.
 
-                // EasyProxy: prima dalla config utente, poi da env vars (per installazioni locali)
-                // NORMALIZZA: rimuovi trailing slash per evitare doppi slash in URL tipo /proxy/...
-                const easyProxyUrl = String(config.easyProxyUrl || process.env.EASYPROXY_URL || '').trim().replace(/\/+$/, '');
+                // EasyProxy: la config dell'utente vince; le env vars valgono solo
+                // per le chiamate senza config (installazione locale, API diretta).
+                const hasAnyProviderSetting = (() => {
+                    const cfg = config as any;
+                    const providerKeys = [
+                        'animesaturnEnabled', 'animeworldEnabled', 'animeunityEnabled'
+                    ];
+                    return providerKeys.some(k => cfg[k] !== undefined);
+                })();
+                const isDirectAPICall = !hasAnyProviderSetting;
+                const easyProxyUrl = resolveEasyProxyUrl(config.easyProxyUrl, process.env.EASYPROXY_URL, isDirectAPICall);
                 // NOTA: uso ?? per preservare stringhe vuote esplicitamente fornite dall'utente;
                 // solo undefined/null attivano il fallback alle env var.
                 const easyProxyPassword = config.easyProxyPassword ?? process.env.EASYPROXY_PASSWORD ?? '';
@@ -275,18 +284,6 @@ function createBuilder() {
                 // === LOGICA ANIME/FILM (originale) ===
                 // Per tutto il resto, usa solo easyProxyUrl/easyProxyPassword
                 // Gestione AnimeUnity per ID Kitsu o MAL con fallback variabile ambiente
-
-                // API Mode detection: when config has NO explicit provider settings, assume direct API call
-                // Direct API call = curl to /stream/movie/xxx.json without any config
-                // User with config (even without EasyProxy) should NOT trigger API mode
-                const hasAnyProviderSetting = (() => {
-                    const cfg = config as any;
-                    const providerKeys = [
-                        'animesaturnEnabled', 'animeworldEnabled', 'animeunityEnabled'
-                    ];
-                    return providerKeys.some(k => cfg[k] !== undefined);
-                })();
-                const isDirectAPICall = !hasAnyProviderSetting;
 
                 const envFlag = (name: string) => normalizeBool(process.env[name]);
 
