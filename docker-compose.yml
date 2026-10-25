@@ -1,7 +1,9 @@
 services:
   hanx:
     container_name: HanX
-    build: .
+    # Immagine pubblicata dalla CI su Docker Hub (amd64 + arm64).
+    # Per una build locale: docker compose build.
+    image: lextutor/hanx:latest
     env_file:
       # .env is optional and usually absent in git stacks.
       - path: .env
@@ -19,21 +21,15 @@ services:
       - JIKAN_API_BASE=${JIKAN_API_BASE:-http://jikan_rest:8080/v4}
       - ANIME_MAPPING_FILE=/app/data/anime-seasons.json
       - ANIME_MAPPING_STATE=/app/data/jikan-progress.json
-      # Solo per --publish: asset della release "mapping".
-      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
-      - GITHUB_REPO=${GITHUB_REPO:-Dexxtex/HanX}
-      # Indice remoto su repo privato: token in sola lettura.
-      - ANIME_MAPPING_TOKEN=${ANIME_MAPPING_TOKEN:-}
-      # Explicit mappings also carry Dockhand secrets, which are injected
-      # into the compose process environment but not written to a file.
+      # Chiavi API e EasyProxy: Dockhand inietta i secret nel processo compose,
+      # in alternativa arrivano dal .env caricato sopra.
       - TMDB_API_KEY=${TMDB_API_KEY:-}
       - TVDB_API_KEY=${TVDB_API_KEY:-}
       - TVDB_PIN=${TVDB_PIN:-}
       - EASYPROXY_URL=${EASYPROXY_URL:-}
       - EASYPROXY_PASSWORD=${EASYPROXY_PASSWORD:-}
-      # Forward proxy for scraping, separate from EasyProxy playback.
-      # Disabled by default: set SEARCH_VIA_PROXY=true to use PROXY/*_PROXY.
-      - SEARCH_VIA_PROXY=${SEARCH_VIA_PROXY:-}
+      # Forward proxy per ricerca e pagine di riproduzione: si attivano appena
+      # impostati. Il proxy della piattaforma precede PROXY, poi il diretto.
       - PROXY=${PROXY:-}
       - AU_PROXY=${AU_PROXY:-}
       - AS_PROXY=${AS_PROXY:-}

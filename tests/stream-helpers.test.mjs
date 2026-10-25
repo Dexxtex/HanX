@@ -200,7 +200,7 @@ test('AnimeSaturn seleziona la variante HLS con risoluzione più alta', async (t
 });
 
 test('fetchResource usa AS_PROXY, poi PROXY, poi il diretto', async (t) => {
-  const saved = { PROXY: process.env.PROXY, AS_PROXY: process.env.AS_PROXY, SEARCH_VIA_PROXY: process.env.SEARCH_VIA_PROXY };
+  const saved = { PROXY: process.env.PROXY, AS_PROXY: process.env.AS_PROXY };
   t.after(() => {
     for (const [key, value] of Object.entries(saved)) {
       if (value === undefined) delete process.env[key];
@@ -266,7 +266,6 @@ test('fetchResource usa AS_PROXY, poi PROXY, poi il diretto', async (t) => {
 
   process.env.PROXY = `http://127.0.0.1:${globalProxy.address().port}`;
   process.env.AS_PROXY = `http://127.0.0.1:${platformProxy.address().port}`;
-  process.env.SEARCH_VIA_PROXY = 'true';
 
   assert.equal(
     await fetchResource(`${targetBase}/animesaturn`, createCaches(), { timeoutMs: 5000 }),
@@ -317,16 +316,12 @@ test('fetchResource usa AS_PROXY, poi PROXY, poi il diretto', async (t) => {
   assert.equal(platformHits + globalHits, 0);
 });
 
-test('senza SEARCH_VIA_PROXY lo scraping va diretto anche con PROXY impostato', async (t) => {
-  const savedFlag = process.env.SEARCH_VIA_PROXY;
+test('i proxy valgono appena sono impostati, senza interruttore', async (t) => {
   const savedProxy = process.env.PROXY;
   t.after(() => {
-    if (savedFlag === undefined) delete process.env.SEARCH_VIA_PROXY;
-    else process.env.SEARCH_VIA_PROXY = savedFlag;
     if (savedProxy === undefined) delete process.env.PROXY;
     else process.env.PROXY = savedProxy;
   });
-  delete process.env.SEARCH_VIA_PROXY;
 
   const target = http.createServer((_req, res) => {
     res.writeHead(200, { 'content-type': 'text/plain' });
@@ -350,8 +345,8 @@ test('senza SEARCH_VIA_PROXY lo scraping va diretto anche con PROXY impostato', 
   process.env.PROXY = `http://127.0.0.1:${proxy.address().port}`;
 
   const body = await fetchResource(`http://127.0.0.1:${target.address().port}/direct`, createCaches(), { timeoutMs: 5000 });
-  assert.equal(body, 'direct');
-  assert.equal(proxyHits, 0, 'PROXY va ignorato se SEARCH_VIA_PROXY non è attivo');
+  assert.equal(body, 'proxied');
+  assert.equal(proxyHits, 1, 'PROXY impostato deve essere usato senza altri flag');
 });
 
 test('fetchWithTimeout routes requests through a real forward proxy', async (t) => {

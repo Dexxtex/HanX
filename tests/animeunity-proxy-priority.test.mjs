@@ -32,7 +32,6 @@ test('AU_PROXY precede il proxy globale', async (t) => {
 
   process.env.PROXY = `http://127.0.0.1:${globalProxy.address().port}`;
   process.env.AU_PROXY = `http://127.0.0.1:${auProxy.address().port}`;
-  process.env.SEARCH_VIA_PROXY = 'true';
 
   const { auFetchResource } = await import('../dist/providers/animeunity-provider.js');
   const { createCaches } = await import('../dist/providers/anime-core/cache.js');

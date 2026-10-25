@@ -37,6 +37,8 @@ cp .env.example .env
 docker compose up -d
 ```
 
+Il `docker-compose.yml` usa l'immagine pubblicata su Docker Hub (`lextutor/hanx:latest`, amd64 e arm64): `docker compose pull` per aggiornarla, `docker compose build` per compilare in locale dal `Dockerfile`.
+
 Se l'IPv4 pubblico viene rifiutato dai siti (403) mentre l'IPv6 funziona, su host Linux
 aggiungi `network_mode: host` al servizio e togli la sezione `ports`.
 
@@ -83,9 +85,9 @@ La landing page costruisce il link del manifest usando l'origine pubblica rileva
 
 Nel campo **Additional env file (optional)** lascia vuoto, a meno che tu non abbia davvero un secondo file nel repository (es. `.env.production`). Il campo accetta un nome relativo alla directory dello stack e non crea il file mancante.
 
-Il `docker-compose.yml` rende `.env` opzionale e legge anche `.env.dockhand`, il file generato da Dockhand con le variabili non-secret dell'Environment tab. Le variabili secret vengono passate tramite le mappature `environment: ${VAR}` già presenti per chiavi API, EasyProxy e proxy di scraping. Non serve creare `.env` nel clone Git, ma puoi farlo se preferisci gestire tutto da file.
+Il `docker-compose.yml` rende `.env` opzionale e legge anche `.env.dockhand`, il file generato da Dockhand con le variabili non-secret dell'Environment tab. Le variabili secret vengono passate tramite le mappature `environment: ${VAR}` già presenti per chiavi API, EasyProxy e proxy di rete. Il token di GitHub che serve al mapping (`--publish`) non è in compose: si legge dal `.env`. Non serve creare `.env` nel clone Git, ma puoi farlo se preferisci gestire tutto da file.
 
-`EASYPROXY_URL` serve per la riproduzione degli stream, non per lo scraping: gli endpoint `/proxy/manifest.m3u8` e `/proxy/stream` non sono un forward proxy HTTP. Se AnimeUnity/AnimeSaturn/AnimeWorld rispondono `429` o `403`, configura un forward proxy HTTP/SOCKS in `PROXY` oppure nei proxy specifici `AU_PROXY`, `AS_PROXY`, `AW_PROXY`.
+`EASYPROXY_URL` serve per la riproduzione degli stream, non per lo scraping: gli endpoint `/proxy/manifest.m3u8` e `/proxy/stream` non sono un forward proxy HTTP. Se AnimeUnity/AnimeSaturn/AnimeWorld rispondono `429` o `403`, configura un forward proxy HTTP/SOCKS in `PROXY` oppure nei proxy specifici `AU_PROXY`, `AS_PROXY`, `AW_PROXY`: si attivano appena impostati, senza altri flag, e coprono ricerca e pagine di riproduzione (catena: proxy di piattaforma, poi `PROXY`, poi diretto).
 
 La modalità **Direct**/**Con proxy** della landing è una scelta unica per tutti e tre i provider, non più una variante di AnimeUnity. Per le variabili presenti sia nel link sia nell'env (`TMDB_API_KEY`, `TVDB_API_KEY`, `TVDB_PIN`, `EASYPROXY_URL`, `EASYPROXY_PASSWORD`) vale la stessa regola: vince il valore del link, l'env riempie solo i campi che il link non porta. La differenza è che Direct scrive `directPlayback: true` nel link: è una scelta esplicita, quindi spegne EasyProxy anche quando il server lo espone via env, e i tre provider restituiscono URL diretti (AnimeUnity diretta, AnimeSaturn e AnimeWorld con i loro header). Con proxy, EasyProxy entra nel link e ci passano tutti e tre. La scelta vale solo per la riproduzione: non abilita né spegne i provider, che restano quelli spuntati in **Sorgenti**.
 

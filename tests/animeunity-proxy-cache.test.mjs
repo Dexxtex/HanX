@@ -37,7 +37,6 @@ test('un fallback diretto in cache non evita il proxy al fetch successivo', asyn
   });
 
   process.env.AU_PROXY = `http://127.0.0.1:${proxy.address().port}`;
-  process.env.SEARCH_VIA_PROXY = 'true';
   const { auFetchResource } = await import('../dist/providers/animeunity-provider.js');
   const { createCaches } = await import('../dist/providers/anime-core/cache.js');
   const caches = createCaches();

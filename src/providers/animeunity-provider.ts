@@ -26,7 +26,6 @@ import {
   createCaches,
   fetchResource,
   getProviderUrl,
-  isSearchProxyEnabled,
   normalizeEpisodesList,
   normalizeRequestedEpisode,
   parseEpisodeNumber,
@@ -66,10 +65,10 @@ const TTL = {
 const caches = createCaches();
 
 const DIRECT_TIMEOUT = 3000; // timeout breve per tentativo diretto (senza proxy)
-const PROXY_CONFIGS = (isSearchProxyEnabled() ? [
+const PROXY_CONFIGS = [
   { label: 'AU_PROXY', url: String(process.env.AU_PROXY || '').trim() },
   { label: 'globale', url: String(process.env.PROXY || '').trim() },
-] : [])
+]
   .filter((entry, index, all) => entry.url && all.findIndex((other) => other.url === entry.url) === index)
   .flatMap((entry) => {
     try {
@@ -105,8 +104,8 @@ if (PROXY_CONFIGS.length) {
 }
 
 /**
- * fetchResource wrapper: con SEARCH_VIA_PROXY=true usa AU_PROXY, poi PROXY
- * globale, poi il diretto. Senza la variabile (default) va sempre diretto.
+ * fetchResource wrapper: usa AU_PROXY, poi il PROXY globale, poi il diretto.
+ * I proxy valgono appena sono impostati (ricerca e pagine di riproduzione).
  */
 export async function auFetchResource(url: string, providerCaches: any, options: any = {}): Promise<any> {
   const attempts = [
