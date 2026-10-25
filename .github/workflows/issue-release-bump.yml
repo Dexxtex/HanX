@@ -101,7 +101,7 @@ jobs:
           echo "Will bump version $CURR -> $NEW"
 
       - name: Comment invalid version
-        if: steps.compare.outputs.valid == 'false'
+        if: steps.compare.outputs.valid == 'false' && steps.compare.outputs.same != 'true'
         uses: actions/github-script@v7
         with:
           script: |

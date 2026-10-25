@@ -5,6 +5,10 @@ on:
     - cron: '0 22,8,12,18 * * *' # Four times a day
   workflow_dispatch: {}
 
+# Serve per il push del commit generato; il token di default di molti repo e' read-only.
+permissions:
+  contents: write
+
 jobs:
   update:
     runs-on: ubuntu-latest
@@ -22,15 +26,13 @@ jobs:
 
       - name: Run updater
         id: runupd
-        run: |
-          python3 scripts/update_domains.py || echo "script exited with rc $?"
+        run: python3 scripts/update_domains.py
 
       - name: Detect changes
         run: |
-          files="config/domains.json config/domains.jsonbk config/provider_urls.json"
-          if [ -f attenzione.check ]; then files="$files attenzione.check"; fi
-          # Use -- to terminate pathspecs safely
-          if git diff --quiet --exit-code -- $files; then
+          # git status vede anche i file nuovi (domains.jsonbk, attenzione.check),
+          # che git diff da solo non rileva.
+          if [ -z "$(git status --porcelain -- config attenzione.check)" ]; then
             echo "No changes to commit." >&2
             exit 0
           fi
@@ -41,7 +43,16 @@ jobs:
         run: |
           git config user.name "github-actions"
           git config user.email "actions@users.noreply.github.com"
-          git add config/domains.json config/domains.jsonbk config/provider_urls.json || true
-          if [ -f attenzione.check ]; then git add attenzione.check; fi
-          git commit -m "fix: domains update" || echo "Nothing to commit"
-          git push || echo "Push skipped"
+          files="config"
+          # attenzione.check e' alla root: entra se esiste o se era tracciato
+          # (nel secondo caso va committata la rimozione).
+          if [ -e attenzione.check ] || git ls-files --error-unmatch attenzione.check >/dev/null 2>&1; then
+            files="config attenzione.check"
+          fi
+          git add -A -- $files
+          if git diff --cached --quiet; then
+            echo "Nothing staged." >&2
+            exit 0
+          fi
+          git commit -m "fix: domains update"
+          git push
