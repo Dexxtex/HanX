@@ -1,6 +1,6 @@
 import { AnimeSaturnConfig, AnimeSaturnResult, StreamForStremio } from '../types/animeunity.js';
 import * as cheerio from 'cheerio';
-import { selectHighestHlsVariantInfo } from './animeunity-parsers.js';
+import { selectHighestHlsVariant } from './animeunity-parsers.js';
 import { getDomain } from '../utils/domains.js';
 import { debug, redactUrl } from '../utils/logger.js';
 import { checkIsAnimeById, applyUniversalAnimeTitleNormalization } from '../utils/animeGate.js';
@@ -24,7 +24,6 @@ import {
   BLOCKED_DOMAINS,
   getEnglishTitleFromAnyId,
   episodeTag,
-  qualityTag,
 } from './anime-core/index.js';
 import {
   resolveMappingRequest,
@@ -687,11 +686,8 @@ function normalizeUnicodeToAscii(str: string): string {
  * Se il fetch fallisce o non è un master, restituisce l'URL originale: il
  * proxy HLS può comunque applicare max_res=true come fallback.
  */
-export async function selectHighestSaturnHls(
-  mediaUrl: string,
-  referer: string
-): Promise<{ url: string; height: number | null }> {
-  if (!/\.m3u8(?:[?#]|$)/i.test(mediaUrl)) return { url: mediaUrl, height: null };
+export async function selectHighestSaturnHls(mediaUrl: string, referer: string): Promise<string> {
+  if (!/\.m3u8(?:[?#]|$)/i.test(mediaUrl)) return mediaUrl;
   try {
     const manifest = String(await fetchResource(mediaUrl, asCaches, {
       ttlMs: 5 * 60 * 1000,
@@ -703,15 +699,15 @@ export async function selectHighestSaturnHls(
         accept: '*/*',
       },
     }) || '');
-    const highest = selectHighestHlsVariantInfo(manifest, mediaUrl);
+    const highest = selectHighestHlsVariant(manifest, mediaUrl);
     if (highest) {
-      debug(4, 'AnimeSaturn', '[AnimeSaturn] Variante HLS massima selezionata:', redactUrl(highest.url));
+      debug(4, 'AnimeSaturn', '[AnimeSaturn] Variante HLS massima selezionata:', redactUrl(highest));
       return highest;
     }
   } catch (error: any) {
     console.warn('[AnimeSaturn] Selezione variante HLS fallita:', error?.message || error);
   }
-  return { url: mediaUrl, height: null };
+  return mediaUrl;
 }
 
 export class AnimeSaturnProvider {
@@ -892,13 +888,11 @@ export class AnimeSaturnProvider {
         // diretti della stessa watch page vengono comunque letti più sotto.
         if (mediaUrl && !seenMedia.has(mediaUrl)) {
           seenMedia.add(mediaUrl);
-          const { url: finalMediaUrl, height } = await selectHighestSaturnHls(mediaUrl, watchUrl);
+          const finalMediaUrl = await selectHighestSaturnHls(mediaUrl, watchUrl);
           const host = normalizeHostLabel(finalMediaUrl);
 
           const langLabel = parsedPage.sourceTag === 'ITA' ? 'ITA' : 'SUB';
           let streamTitle = `${capitalize(baseTitle)} ▪ ${langLabel}`;
-          const quality = qualityTag(height);
-          if (quality) streamTitle += ` ▪ ${quality}`;
           const epTag = episodeTag(seasonNumber, mediaType !== 'movie' ? requestedEpisode : null);
           if (epTag) streamTitle += ` ▪ ${epTag}`;
           if (host) {
@@ -924,7 +918,7 @@ export class AnimeSaturnProvider {
         const mediaUrl = normalizePlayableMediaUrl(link.href, getSaturnBaseUrl());
         if (!mediaUrl || seenMedia.has(mediaUrl)) continue;
 
-        const { url: finalMediaUrl, height } = await selectHighestSaturnHls(mediaUrl, watchUrl);
+        const finalMediaUrl = await selectHighestSaturnHls(mediaUrl, watchUrl);
         const lowerLink = finalMediaUrl.toLowerCase();
         if (lowerLink.endsWith('.mkv.mp4') || BLOCKED_DOMAINS.some((domain) => lowerLink.includes(domain))) {
           continue;
@@ -934,8 +928,6 @@ export class AnimeSaturnProvider {
 
         const langLabel = parsedPage.sourceTag === 'ITA' ? 'ITA' : 'SUB';
         let streamTitle = `${capitalize(baseTitle)} ▪ ${langLabel}`;
-        const quality = qualityTag(height);
-        if (quality) streamTitle += ` ▪ ${quality}`;
         const epTag = episodeTag(seasonNumber, mediaType !== 'movie' ? requestedEpisode : null);
         if (epTag) streamTitle += ` ▪ ${epTag}`;
         if (hostLabel) {

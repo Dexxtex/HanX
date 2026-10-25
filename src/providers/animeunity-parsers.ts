@@ -162,16 +162,10 @@ function resolvePlayerStreamUrl(raw: string, pageUrl: string): string | null {
   }
 }
 
-export interface HlsVariantInfo {
-  url: string;
-  /** Altezza in pixel della variante scelta, null se il master non la dichiara. */
-  height: number | null;
-}
-
-/** Variante HLS con la risoluzione più alta (poi il bandwidth), con la sua altezza. */
-export function selectHighestHlsVariantInfo(manifest: string, manifestUrl: string): HlsVariantInfo | null {
+/** Sceglie la variante con la risoluzione più alta (poi il bandwidth) dal master HLS. */
+export function selectHighestHlsVariant(manifest: string, manifestUrl: string): string | null {
   const lines = String(manifest || '').split(/\r?\n/);
-  let best: { url: string; score: number; height: number | null } | null = null;
+  let best: { url: string; score: number } | null = null;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
@@ -188,23 +182,14 @@ export function selectHighestHlsVariantInfo(manifest: string, manifestUrl: strin
 
     if (!best || score > best.score) {
       try {
-        best = {
-          url: new URL(next, manifestUrl).toString(),
-          score,
-          height: resolution ? Number(resolution[2]) : null,
-        };
+        best = { url: new URL(next, manifestUrl).toString(), score };
       } catch {
         // URL non valido: ignora questa variante.
       }
     }
   }
 
-  return best ? { url: best.url, height: best.height } : null;
-}
-
-/** Sceglie la variante con la risoluzione più alta (poi il bandwidth) dal master HLS. */
-export function selectHighestHlsVariant(manifest: string, manifestUrl: string): string | null {
-  return selectHighestHlsVariantInfo(manifest, manifestUrl)?.url ?? null;
+  return best?.url || null;
 }
 
 /**

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-const { isAbortOrTimeoutError, episodeTag, pickEpisodeEntry, qualityTag } = await import('../dist/providers/anime-core/helpers.js');
+const { isAbortOrTimeoutError, episodeTag, pickEpisodeEntry } = await import('../dist/providers/anime-core/helpers.js');
 
 test('isAbortOrTimeoutError riconosce abort e timeout, non un errore HTTP', () => {
   assert.equal(isAbortOrTimeoutError({ name: 'AbortError' }), true);
@@ -21,16 +21,6 @@ test('pickEpisodeEntry: nessun ripiego per indice su numerazioni non allineate',
   const globalNumbering = [52, 53, 54].map((n) => ({ num: n, token: `ep:${n}`, episodeId: n }));
   assert.equal(pickEpisodeEntry(globalNumbering, 4, 'tv'), null);
   assert.equal(pickEpisodeEntry(globalNumbering, 53, 'tv')?.episodeId, 53);
-});
-
-test('qualityTag: FHD solo da 1080p in su', () => {
-  assert.equal(qualityTag(1080), 'FHD');
-  assert.equal(qualityTag(2160), 'FHD');
-  // Su 1080 non c'è: la variante è stata scelta come la più alta, ma non è full HD.
-  assert.equal(qualityTag(720), null);
-  assert.equal(qualityTag(480), null);
-  assert.equal(qualityTag(null), null);
-  assert.equal(qualityTag(undefined), null);
 });
 
 test('episodeTag stampa la stagione solo quando è nota', () => {

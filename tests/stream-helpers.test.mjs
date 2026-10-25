@@ -171,9 +171,7 @@ test('AnimeSaturn seleziona la variante HLS con risoluzione più alta', async (t
 #EXT-X-STREAM-INF:BANDWIDTH=800000,RESOLUTION=640x360
 ./360p/playlist.m3u8
 #EXT-X-STREAM-INF:BANDWIDTH=2800000,RESOLUTION=1280x720
-./720p/playlist.m3u8
-#EXT-X-STREAM-INF:BANDWIDTH=6000000,RESOLUTION=1920x1080
-./1080p/playlist.m3u8`;
+./720p/playlist.m3u8`;
 
   const server = http.createServer((req, res) => {
     res.writeHead(200, { 'content-type': 'application/vnd.apple.mpegurl' });
@@ -185,18 +183,18 @@ test('AnimeSaturn seleziona la variante HLS con risoluzione più alta', async (t
   t.after(() => server.close());
 
   const base = `http://127.0.0.1:${server.address().port}`;
-  assert.deepEqual(
+  assert.equal(
     await selectHighestSaturnHls(`${base}/master.m3u8`, `${base}/episode`),
-    { url: `${base}/1080p/playlist.m3u8`, height: 1080 }
+    `${base}/720p/playlist.m3u8`
   );
-  assert.deepEqual(
+  assert.equal(
     await selectHighestSaturnHls(`${base}/media.m3u8`, `${base}/episode`),
-    { url: `${base}/media.m3u8`, height: null },
+    `${base}/media.m3u8`,
     'una playlist media senza varianti resta invariata'
   );
-  assert.deepEqual(
+  assert.equal(
     await selectHighestSaturnHls(`${base}/video.mp4`, `${base}/episode`),
-    { url: `${base}/video.mp4`, height: null },
+    `${base}/video.mp4`,
     'i file MP4 non vengono scaricati'
   );
 });
