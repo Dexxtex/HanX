@@ -257,8 +257,10 @@ export function normalizeEpisodesList(
 }
 
 /**
- * Pick the best episode entry matching the requested episode number.
- * Ported 1:1 from easystreams pickEpisodeEntry().
+ * Pick the episode entry whose number matches the requested one.
+ * Solo match esatto: la scheda ITA di AnimeUnity può avere un solo episodio
+ * (es. Black Clover 2 ITA = ep 1) e un ripiego per indice o "episodio unico"
+ * restituirebbe l'episodio sbagliato etichettato come quello richiesto.
  */
 export function pickEpisodeEntry(
   episodes: NormalizedEpisode[],
@@ -268,27 +270,11 @@ export function pickEpisodeEntry(
   const list = episodes;
   if (list.length === 0) return null;
 
-  const episodeNum = normalizeRequestedEpisode(requestedEpisode);
-
   // For movies, return the first episode
   if (mediaType === 'movie') return list[0];
 
-  // By episode number
-  const byNum = list.find((entry) => entry.num === episodeNum);
-  if (byNum) return byNum;
-
-  // By index (0-based → episode-1)
-  const byIndex = list[episodeNum - 1];
-  if (byIndex) return byIndex;
-
-  // Single episode → return it
-  if (list.length === 1) return list[0];
-
-  // Episode 1 fallback
-  const first = list.find((entry) => entry.num === 1);
-  if (episodeNum === 1 && first) return first;
-
-  return null;
+  const episodeNum = normalizeRequestedEpisode(requestedEpisode);
+  return list.find((entry) => entry.num === episodeNum) ?? null;
 }
 
 // ─── HTML/Media helpers ─────────────────────────────────────
