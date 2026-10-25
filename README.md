@@ -2,7 +2,7 @@
 
 **Addon Stremio/NUVIO dedicato agli anime** — aggrega stream da AnimeUnity, AnimeSaturn e AnimeWorld in un'unica interfaccia.
 
-![Version](https://img.shields.io/badge/version-12.5.0-blue)
+![Version](https://img.shields.io/badge/version-0.1.0--beta-blue)
 ![Node](https://img.shields.io/badge/node-%3E%3D24-green)
 ![Docker](https://img.shields.io/badge/docker-ready-blue)
 ![TypeScript](https://img.shields.io/badge/typescript-%3E5.0-blue)
