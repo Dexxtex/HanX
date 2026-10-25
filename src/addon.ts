@@ -13,7 +13,7 @@ import {
     parseConfigFromArgs,
     providerCacheKey,
     providerConfigDigest,
-    resolveEasyProxyUrl,
+    resolvePlaybackProxyUrl,
 } from './config.js';
 import { AnimeUnityProvider } from './providers/animeunity-provider.js';
 import { providerLabel } from './utils/unifiedNames.js';
@@ -261,8 +261,9 @@ function createBuilder() {
                 // NOTE: Il middleware ora converte Base64→JSON prima che l'SDK processi la request,
                 // quindi requestConfig dovrebbe sempre contenere la config utente correttamente.
 
-                // EasyProxy: la config dell'utente vince; le env vars valgono solo
-                // per le chiamate senza config (installazione locale, API diretta).
+                // API Mode detection: when config has NO explicit provider settings, assume direct API call
+                // Direct API call = curl to /stream/movie/xxx.json without any config
+                // User with config (even without EasyProxy) should NOT trigger API mode
                 const hasAnyProviderSetting = (() => {
                     const cfg = config as any;
                     const providerKeys = [
@@ -271,10 +272,18 @@ function createBuilder() {
                     return providerKeys.some(k => cfg[k] !== undefined);
                 })();
                 const isDirectAPICall = !hasAnyProviderSetting;
-                const easyProxyUrl = resolveEasyProxyUrl(config.easyProxyUrl, process.env.EASYPROXY_URL, isDirectAPICall);
-                // NOTA: uso ?? per preservare stringhe vuote esplicitamente fornite dall'utente;
-                // solo undefined/null attivano il fallback alle env var.
-                const easyProxyPassword = config.easyProxyPassword ?? process.env.EASYPROXY_PASSWORD ?? '';
+
+                // EasyProxy: stessa regola delle altre variabili condivise con l'env
+                // (chiave del link, altrimenti EASYPROXY_URL). La modalità Direct
+                // della landing la disattiva in modo esplicito, env compreso.
+                const easyProxyUrl = resolvePlaybackProxyUrl(
+                    config.directPlayback,
+                    config.easyProxyUrl,
+                    process.env.EASYPROXY_URL
+                );
+                const easyProxyPassword = easyProxyUrl
+                    ? String(config.easyProxyPassword || process.env.EASYPROXY_PASSWORD || '')
+                    : '';
 
                 const allStreams: Stream[] = [];
                 let _providerConfigSig = ''; // Dichiarato qui per essere in scope nel cache-set finale

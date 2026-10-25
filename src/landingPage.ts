@@ -821,6 +821,9 @@ const CLIENT_SCRIPT = String.raw`
         ['animeunityDirect', 'animeunityProxy'].forEach(function (key) {
             config[key] = key === 'animeunityDirect' ? mode === 'direct' : mode === 'proxy';
         });
+        // Direct esplicito: vale per tutti i provider e ignora EasyProxy anche
+        // quando il server lo espone via env.
+        config.directPlayback = mode === 'direct';
 
         ['tmdbApiKey', 'tvdbApiKey', 'tvdbPin'].forEach(function (key) {
             var value = getElement(key).value.trim();

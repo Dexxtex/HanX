@@ -14,8 +14,12 @@ export interface AddonConfig {
     easyProxyUrl?: string;
     easyProxyPassword?: string;
     animeunityEnabled?: boolean;
+    animeunityDirect?: boolean;
+    animeunityProxy?: boolean;
     animesaturnEnabled?: boolean;
     animeworldEnabled?: boolean;
+    /** Scelta Direct della landing: la riproduzione ignora EasyProxy, anche quello dell'env. */
+    directPlayback?: boolean;
 }
 
 // Validazione: verifica che un valore JSON sia un oggetto config valido (non null, non array)
@@ -40,15 +44,18 @@ export function normalizeBool(val: unknown): boolean | undefined {
 }
 
 /**
- * Proxy di riproduzione effettivo. La config del link vince: se il link non
- * porta un EasyProxy (modalità Direct della landing) si resta diretti, altrimenti
- * la scelta verrebbe annullata dall'env. EASYPROXY_URL vale solo per le richieste
- * senza config, cioe' l'installazione locale che chiama l'addon in diretta.
+ * Proxy di riproduzione effettivo. Stesso peso per link ed env: vince il valore
+ * del link, EASYPROXY_URL riempie solo quando il link non lo porta. La modalità
+ * Direct della landing (directPlayback) spegne tutto, env compreso.
  */
-export function resolveEasyProxyUrl(configUrl: unknown, envUrl: string | undefined, isLocalApiCall: boolean): string {
-    const fromConfig = typeof configUrl === 'string' ? configUrl.trim() : '';
-    const chosen = fromConfig || (isLocalApiCall ? envUrl || '' : '');
-    return chosen.replace(/\/+$/, '');
+export function resolvePlaybackProxyUrl(
+    directPlayback: unknown,
+    configUrl: unknown,
+    envUrl: string | undefined
+): string {
+    if (normalizeBool(directPlayback) === true) return '';
+    const fromLink = typeof configUrl === 'string' ? configUrl.trim() : '';
+    return (fromLink || envUrl || '').trim().replace(/\/+$/, '');
 }
 
 // Normalizzazione: converte tutti i valori booleani/stringhe in booleani effettivi
@@ -76,7 +83,7 @@ export function normalizeConfig(raw: Record<string, unknown>): AddonConfig {
             }
         } else if (key === 'animeunityEnabled' || key === 'animesaturnEnabled' ||
                    key === 'animeworldEnabled' || key === 'animeunityDirect' ||
-                   key === 'animeunityProxy') {
+                   key === 'animeunityProxy' || key === 'directPlayback') {
             // Normalizza booleani da qualsiasi formato (stringa, numero, bool)
             if (typeof value === 'boolean') {
                 (result as any)[key] = value;
