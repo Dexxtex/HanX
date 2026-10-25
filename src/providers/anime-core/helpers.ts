@@ -28,6 +28,11 @@ export function episodeTag(seasonNumber: number | null, episodeNumber: number | 
   return `${s}${e}`;
 }
 
+/** Etichetta qualità per lo stream: FHD da 1080p in su, niente per il resto. */
+export function qualityTag(height: number | null | undefined): string | null {
+  return Number(height) >= 1080 ? 'FHD' : null;
+}
+
 // ─── Numeric helpers ────────────────────────────────────────
 
 /**
