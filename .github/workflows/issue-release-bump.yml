@@ -8,6 +8,8 @@ permissions:
   contents: write
   issues: write
   pull-requests: read
+  # Serve per `gh workflow run` sul build Docker dopo il tag.
+  actions: write
 
 jobs:
   bump:
@@ -177,6 +179,22 @@ jobs:
       - name: Push changes
         if: steps.compare.outputs.valid == 'true' && steps.bump_files.outputs.commit_made == 'true'
         run: git push origin HEAD:${GITHUB_REF_NAME}
+
+      - name: Tag della release
+        if: steps.compare.outputs.valid == 'true' && steps.bump_files.outputs.commit_made == 'true'
+        env:
+          VERSION: ${{ steps.extract.outputs.version }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then
+            echo "Tag v$VERSION già presente, non lo ricreo."
+          else
+            git tag -a "v$VERSION" -m "release v$VERSION"
+            git push origin "v$VERSION"
+          fi
+          # Il push di un tag fatto con GITHUB_TOKEN non avvia altri workflow:
+          # il build sulla tag va lanciato a mano su quella ref.
+          gh workflow run dockerhub.yml --ref "v$VERSION"
 
       - name: Comment on issue
         if: steps.extract.outputs.found == 'true'

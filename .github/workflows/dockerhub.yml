@@ -5,6 +5,9 @@ on:
       - main
     tags:
       - 'v*.*.*'
+  # Lanciato dal bump di versione: il push del tag fatto con GITHUB_TOKEN
+  # non crea run, quindi il build sulla tag va invocato esplicitamente.
+  workflow_dispatch:
 
 permissions:
   contents: read
