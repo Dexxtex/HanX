@@ -1115,21 +1115,23 @@ export class AnimeSaturnProvider {
     debug(2, 'AnimeSaturn', `[AnimeSaturn] Titolo normalizzato per ricerca: ${normalizedTitle}`);
     debug(3, 'AnimeSaturn', '[AnimeSaturn] Query inviata allo scraper (post-normalize):', normalizedTitle);
     // L'alternativo (romaji MAL) entra solo se l'inglese non trova nulla: così
-    // non può scavalcare un match già buono. Serve solo al filtro, non alla
-    // query, e non costa richieste: si rifiltrano gli stessi risultati.
+    // non può scavalcare un match già buono. Prima si rifiltrano gli stessi
+    // risultati; se il sito non ha nemmeno risposto, si usa come query.
+    const altQuery = titleAlt && titleAlt !== normalizedTitle ? titleAlt : '';
     const titles = [normalizedTitle];
     const rawVersions = await this.searchAllVersions(normalizedTitle);
     let animeVersions = filterAnimeResults(rawVersions, titles);
-    if (!animeVersions.length && titleAlt && titleAlt !== normalizedTitle) {
-      titles.push(titleAlt);
+    if (!animeVersions.length && altQuery) {
+      titles.push(altQuery);
       animeVersions = filterAnimeResults(rawVersions, titles);
       if (animeVersions.length) {
-        debug(2, 'AnimeSaturn', `[AnimeSaturn] Match con titolo alternativo "${titleAlt}"`);
+        debug(2, 'AnimeSaturn', `[AnimeSaturn] Match con titolo alternativo "${altQuery}"`);
       }
     }
     if (!animeVersions.length) {
-      // Budget ricerca <=2 fetch: una sola query di ripiego.
-      const [fallbackQuery] = buildTitleFallbackQueries(normalizedTitle).filter(q => q && q !== normalizedTitle);
+      // Budget ricerca <=2 fetch: una sola query di ripiego. Il romaji batte la
+      // variante storica: i siti spesso indicizzano solo quello.
+      const [fallbackQuery] = [altQuery, ...buildTitleFallbackQueries(normalizedTitle)].filter(q => q && q !== normalizedTitle);
       if (fallbackQuery) {
         const fallbackVersions = filterAnimeResults(await this.searchAllVersions(fallbackQuery), titles);
         if (fallbackVersions.length) {

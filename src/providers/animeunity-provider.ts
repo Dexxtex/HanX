@@ -935,8 +935,9 @@ export class AnimeUnityProvider {
     }
     debug(2, 'AnimeUnity', `[AnimeUnity] Titolo normalizzato per ricerca: ${normalizedTitle}`);
     // Romaji MAL: alcuni record del sito non hanno name_eng e il titolo inglese
-    // non supera la soglia. Entra solo se l'inglese non trova nulla, e solo nel
-    // filtro: nessuna query in più.
+    // non supera la soglia. Entra solo se l'inglese non trova nulla: prima nel
+    // filtro, poi (se il sito non ha risposto) come query di ripiego.
+    const altQuery = titleAlt && titleAlt !== normalizedTitle ? titleAlt : '';
     const queryTitles = [normalizedTitle];
     // Se il titolo originale è una chiave dell'exactMap allora saltiamo qualsiasi filtro successivo:
     // l'intento dell'utente è: se la ricerca parte da una chiave exactMap, NON applicare filterAnimeResults
@@ -945,11 +946,12 @@ export class AnimeUnityProvider {
       debug(3, 'AnimeUnity', `[AnimeUnity][ExactMap] Skip filtro: titolo di input corrisponde a chiave exactMap -> "${title}"`);
     }
     let animeVersions = await this.searchAllVersions(normalizedTitle);
-    // Budget ricerca <=2 fetch: una sola ricerca di ripiego, scelta nell'ordine
-    // (senza apostrofi, senza parentesi, prime 3 parole).
+    // Budget ricerca <=2 fetch: una sola ricerca di ripiego, il romaji se c'è
+    // (molti record sono indicizzati solo così), altrimenti le varianti storiche.
     let usedFallbackSearch = false;
     if (!animeVersions.length) {
       const candidates = [
+        altQuery,
         normalizedTitle.includes("'") ? normalizedTitle.replace(/'/g, "") : '',
         normalizedTitle.includes("(") ? normalizedTitle.split("(")[0].trim() : '',
         normalizedTitle.split(" ").length > 3 ? normalizedTitle.split(" ").slice(0, 3).join(" ") : '',
@@ -962,11 +964,11 @@ export class AnimeUnityProvider {
     if (!skipFilter) {
       const rawVersions = animeVersions;
       animeVersions = filterAnimeResults(rawVersions, queryTitles);
-      if (!animeVersions.length && titleAlt && titleAlt !== normalizedTitle) {
-        queryTitles.push(titleAlt);
+      if (!animeVersions.length && altQuery) {
+        queryTitles.push(altQuery);
         animeVersions = filterAnimeResults(rawVersions, queryTitles);
         if (animeVersions.length) {
-          debug(2, 'AnimeUnity', `[AnimeUnity] Match con titolo alternativo "${titleAlt}"`);
+          debug(2, 'AnimeUnity', `[AnimeUnity] Match con titolo alternativo "${altQuery}"`);
         }
       }
     } else {
@@ -1009,8 +1011,9 @@ export class AnimeUnityProvider {
       }
     }
     if (!animeVersions.length && !skipFilter && !usedFallbackSearch) {
-      // Budget ricerca <=2 fetch: una sola query di ripiego.
-      const [fallbackQuery] = buildTitleFallbackQueries(normalizedTitle).filter(q => q && q !== normalizedTitle);
+      // Budget ricerca <=2 fetch: una sola query di ripiego. Il romaji batte
+      // le varianti storiche: i siti spesso indicizzano solo quello.
+      const [fallbackQuery] = [altQuery, ...buildTitleFallbackQueries(normalizedTitle)].filter(q => q && q !== normalizedTitle);
       if (fallbackQuery) {
         const fallbackVersions = filterAnimeResults(await this.searchAllVersions(fallbackQuery), queryTitles);
         if (fallbackVersions.length) {

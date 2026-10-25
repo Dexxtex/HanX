@@ -879,6 +879,7 @@ export class AnimeWorldProvider {
     // Romaji MAL: molti slug AnimeWorld sono il titolo MAL, non quello inglese.
     const slugKeys = [normSlugKey];
     const titleKeys = [normalized];
+    const altQuery = titleAlt && titleAlt !== normalized ? titleAlt : '';
     const wantsRewrite = /rewrite/i.test(normalized);
     const strictFilterActive = !skipExtraNormalization && !wantsRewrite;
     const allowedSuffixes = ['-ita', '-subita', '-sub-ita', '-cr-ita', '-ita-cr'];
@@ -906,7 +907,8 @@ export class AnimeWorldProvider {
     if (!skipExtraNormalization && !versions.length) {
       // Budget ricerca = 2 fetch: UNA sola query di ripiego e senza probe lingua
       // (i risultati senza marcatore restano SUB, default verificato sul vivo).
-      const [fallbackQuery] = buildTitleFallbackQueries(normalized).filter(q => q && q !== normalized);
+      // Il romaji batte le varianti storiche: molti slug sono il titolo MAL.
+      const [fallbackQuery] = [altQuery, ...buildTitleFallbackQueries(normalized)].filter(q => q && q !== normalized);
       if (fallbackQuery) {
         const res = await this.searchAllVersions(fallbackQuery, () => false);
         debug(2, 'AnimeWorld', `[AnimeWorld] Search fallback "${fallbackQuery}" -> ${res.length}`);
