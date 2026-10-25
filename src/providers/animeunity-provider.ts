@@ -586,7 +586,6 @@ const animeUnityTitleNormalization: TitleNormalizationOptions = {
     ['Ore dake Level Up na Ken', 'Solo Leveling'],
   ],
   stripColonAfter: 'Naruto:',
-  collapseSpaces: false,
 };
 
 function normalizeTitleForSearch(title: string): string {
@@ -595,6 +594,9 @@ function normalizeTitleForSearch(title: string): string {
   }
   return normalizeAnimeTitleForSearch(title, animeUnityTitleNormalization);
 }
+
+/** Esportata per i test: la query deve arrivare al sito senza spazi doppi. */
+export { normalizeTitleForSearch };
 
 export class AnimeUnityProvider {
   constructor(private config: AnimeUnityConfig) { }

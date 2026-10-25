@@ -66,7 +66,13 @@ globalThis.fetch = async (input) => {
   return new Response('not found', { status: 404 });
 };
 
-const { AnimeUnityProvider } = await import('../dist/providers/animeunity-provider.js');
+const { AnimeUnityProvider, normalizeTitleForSearch } = await import('../dist/providers/animeunity-provider.js');
+
+test('la query di ricerca non contiene spazi doppi (Season rimosso)', () => {
+  // Misurato il 25/10/2026: "Black Clover  2" -> 0 record, "Black Clover 2" -> 2.
+  assert.equal(normalizeTitleForSearch('Black Clover Season 2'), 'Black Clover 2');
+  assert.equal(normalizeTitleForSearch('Black Clover'), 'Black Clover');
+});
 
 test('handleTitleRequest risolve SUB e ITA dalle schede separate di .co', async () => {
   const provider = new AnimeUnityProvider({ enabled: true, proxyUrl: '', proxyPassword: '', tmdbApiKey: '' });
