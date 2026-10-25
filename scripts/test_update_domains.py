@@ -20,16 +20,17 @@ class UpdateDomainsTests(unittest.TestCase):
             {'animeunity': 'animeunity.co'},
         )
         # Il dominio corrente resta il primo: i mirror arrivano solo se non risponde.
-        self.assertEqual(hosts, ['animeunity.co', 'animeunity.so', 'animeunity.io'])
+        self.assertEqual(hosts, ['animeunity.co', 'animeunity.so'])
 
     def test_animeunity_at_non_e_mai_candidato(self):
-        # Raggiungibile ma con markup diverso da quello che il provider legge.
+        # .at e .io rispondono ma con un markup diverso da quello che il provider legge.
         hosts = u.candidate_hosts(
             'animeunity',
-            ['animeunity.at', 'animeunity.co'],
+            ['animeunity.at', 'animeunity.io', 'animeunity.co'],
             {'animeunity': 'animeunity.at'},
         )
         self.assertNotIn('animeunity.at', hosts)
+        self.assertNotIn('animeunity.io', hosts)
         self.assertEqual(hosts[0], 'animeunity.co')
 
     def test_choose_host_skips_dead_domain(self):

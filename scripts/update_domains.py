@@ -39,16 +39,16 @@ KEY_HINTS = {
 # Domini che elencano i link ma non sono siti di streaming.
 SOURCE_ONLY_HOSTS = {'animesaturn.me', 'animeworlditalia.com'}
 
-# Host raggiungibili ma con un'altra struttura: il provider legge solo il markup
-# .co (archivio?title=, records=, info_api) e su animeunity.at non lo trova.
-BLOCKED_HOSTS = {'animeunity.at'}
+# Host raggiungibili ma con un'altra struttura (o non ufficiali): il provider
+# legge solo il markup .co (archivio?title=, records=, info_api) e lì non c'è.
+BLOCKED_HOSTS = {'animeunity.at', 'animeunity.io'}
 
 # Fallback usati solo se il pastebin non offre un host raggiungibile.
 # Verificati manualmente: animeunity.so è morto, animeunity.co è attivo e senza
 # rate-limit sull'IP di casa.
 KNOWN_HOSTS = {
     'animesaturn': ['animesaturn.net', 'animemars.org', 'animesaturn.cx', 'animesaturn.cc', 'animesaturn.com'],
-    'animeunity': ['animeunity.co', 'animeunity.io'],
+    'animeunity': ['animeunity.co'],
     'animeworld': ['animeworld.ac', 'animeworld.so', 'animeworld.tv'],
 }
 
