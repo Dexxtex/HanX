@@ -30,6 +30,20 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Check Docker Hub credentials
+        env:
+          HAS_USER: ${{ secrets.DOCKERHUB_USERNAME != '' }}
+          HAS_TOKEN: ${{ secrets.DOCKERHUB_TOKEN != '' }}
+          HAS_VAR: ${{ vars.DOCKERHUB_USERNAME != '' }}
+        run: |
+          echo "secret DOCKERHUB_USERNAME: $HAS_USER"
+          echo "secret DOCKERHUB_TOKEN: $HAS_TOKEN"
+          echo "variable DOCKERHUB_USERNAME (posto sbagliato): $HAS_VAR"
+          if [ "$HAS_USER" != "true" ] || [ "$HAS_TOKEN" != "true" ]; then
+            echo "::error::I secret Docker Hub non arrivano al job. Devono stare in Settings > Secrets and variables > Actions > Repository secrets (non 'Variables': quelle sono in chiaro e si leggono con vars.*). Se li hai messi in un environment, il job deve dichiarare environment: Keys."
+            exit 1
+          fi
+
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
         with:
