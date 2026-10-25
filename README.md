@@ -149,6 +149,8 @@ Per le entry senza mapping MAL ufficiale il converter prova anche un match per m
 
 L'indice locale `src/mapping/data/anime-seasons.json` (o il percorso in `ANIME_MAPPING_FILE`) viene caricato una volta e usato senza rete; ogni range contiene il titolo della entry Kitsu, il romaji MAL (`titleAlt`, il titolo con cui i siti italiani listano spesso l'opera) e il conteggio episodi, così split cour e richieste fuori range non finiscono sull'episodio sbagliato. In caso di miss, il resolver può interrogare le API ufficiali (con cache in memoria e retry su 429/5xx). I provider non usano più un resolver di path esterni: risolvono `{ titolo, stagione, episodio Kitsu }` e cercano per titolo.
 
+> **Perché `titleAlt`.** I siti italiani listano spesso il romaji MAL, o aggiungono `(TV)`/`(Movie)`: con il solo titolo inglese il filtro dei provider dà 0 e scarta il risultato giusto. Il romaji entra solo quando l'inglese non trova nulla (prima rifiltrando i risultati già scaricati, poi come query di ripiego). Misura su 44 titoli dell'indice (ottobre 2026, AnimeSaturn/AnimeWorld/AnimeUnity): 3 recuperati, tutti in casi in cui il sito aveva davvero l'opera; il resto erano titoli assenti dal sito. AnimeUnity ne ha meno bisogno (i suoi record portano già il romaji). Il ripiego-query non ha recuperato nulla nel campione, ma riusa lo slot di ricerca previsto dal budget, quindi non aggiunge richieste nel caso normale.
+
 > **L'indice spedito è vuoto.** Il mapping multi-stagione/split-cour richiede l'indice incrementale qui sopra oppure entrambe le chiavi `TMDB_API_KEY` e `TVDB_API_KEY` per il fallback live.
 
 #### Dove gira
