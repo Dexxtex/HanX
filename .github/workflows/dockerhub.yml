@@ -98,6 +98,9 @@ jobs:
           provenance: false
 
       - name: Generate artifact attestation (GHCR)
+        # Non disponibile per i repo privati di un utente: si attiva da sola
+        # quando il repo diventa pubblico.
+        if: ${{ github.event.repository.private == false }}
         uses: actions/attest-build-provenance@v3
         with:
           subject-name: ${{ env.GHCR }}/${{ env.IMAGE_NAME }}
