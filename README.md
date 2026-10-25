@@ -37,7 +37,7 @@ cp .env.example .env
 docker compose up -d
 ```
 
-Il `docker-compose.yml` usa l'immagine pubblicata su Docker Hub (`lextutor/hanx:latest`, amd64 e arm64): `docker compose pull` per aggiornarla, `docker compose build` per compilare in locale dal `Dockerfile`.
+Il `docker-compose.yml` usa l'immagine pubblicata su Docker Hub (`lextutor/hanx:latest`, amd64 e arm64): `docker compose pull` per aggiornarla, `docker compose build` per compilare in locale dal `Dockerfile`. L'immagine si ricostruisce solo sulle tag di release (`vX.Y.Z`) o a mano, non a ogni commit: un fix su `main` arriva nell'immagine con la release successiva.
 
 Se l'IPv4 pubblico viene rifiutato dai siti (403) mentre l'IPv6 funziona, su host Linux
 aggiungi `network_mode: host` al servizio e togli la sezione `ports`.
