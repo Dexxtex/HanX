@@ -8,7 +8,7 @@ import {
   parseSearchResultsHtml,
   parseUnityCoEpisodes,
   parseVixcloudHls,
-  selectHighestHlsVariant,
+  selectHighestHlsVariantInfo,
 } from './animeunity-parsers.js';
 import type { AnimeUnityPageEpisode } from './animeunity-parsers.js';
 import { AnimeUnityConfig, StreamForStremio } from '../types/animeunity.js';
@@ -36,6 +36,7 @@ import {
   sanitizeAnimeTitle,
   getEnglishTitleFromAnyId,
   episodeTag,
+  qualityTag,
 } from './anime-core/index.js';
 import {
   resolveMappingRequest,
@@ -156,6 +157,8 @@ interface AnimeUnityStreamData {
   embed_url: string | null;
   hls_url: string | null;
   mp4_url: string | null;
+  /** Altezza della variante HLS scelta, null se non dichiarata. */
+  height: number | null;
 }
 
 function getUnityBaseUrl(): string {
@@ -381,9 +384,10 @@ async function resolveServerEmbedUrl(linkId: string, referer: string): Promise<s
 async function resolveEmbedMedia(
   embedUrl: string,
   episodePage: string
-): Promise<{ hls_url: string | null; mp4_url: string | null }> {
+): Promise<{ hls_url: string | null; mp4_url: string | null; height: number | null }> {
   let hlsUrl: string | null = null;
   let mp4Url: string | null = null;
+  let hlsHeight: number | null = null;
 
   const fetchPage = (url: string) => auFetchResource(url, caches, {
     ttlMs: TTL.streamPage,
@@ -424,9 +428,10 @@ async function resolveEmbedMedia(
     if (hlsUrl) {
       try {
         const manifest = String(await fetchPage(hlsUrl) || '');
-        const highest = selectHighestHlsVariant(manifest, hlsUrl);
+        const highest = selectHighestHlsVariantInfo(manifest, hlsUrl);
         if (highest) {
-          hlsUrl = highest;
+          hlsUrl = highest.url;
+          hlsHeight = highest.height;
           debug(4, 'AnimeUnity', '[AnimeUnity] Variante HLS massima selezionata');
         }
       } catch (error: any) {
@@ -437,7 +442,7 @@ async function resolveEmbedMedia(
     console.warn('[AnimeUnity] embed media failed:', error?.message || error);
   }
 
-  return { hls_url: hlsUrl, mp4_url: mp4Url };
+  return { hls_url: hlsUrl, mp4_url: mp4Url, height: hlsHeight };
 }
 
 async function getStreamData(
@@ -448,7 +453,7 @@ async function getStreamData(
 ): Promise<AnimeUnityStreamData> {
   if (isUnityCoBase()) return getUnityCoStreamData(animeId, animeSlug, episodeId);
   const episodePage = `${getUnityBaseUrl()}/anime/${animeId}-${animeSlug}/ep-${episodeId}`;
-  const empty: AnimeUnityStreamData = { episode_page: episodePage, embed_url: null, hls_url: null, mp4_url: null };
+  const empty: AnimeUnityStreamData = { episode_page: episodePage, embed_url: null, hls_url: null, mp4_url: null, height: null };
 
   try {
     const html = await auFetchResource(episodePage, caches, {
@@ -479,7 +484,7 @@ async function getUnityCoStreamData(
   episodeId: number
 ): Promise<AnimeUnityStreamData> {
   const episodePage = `${getUnityBaseUrl()}/anime/${animeId}-${animeSlug}/${episodeId}`;
-  const empty: AnimeUnityStreamData = { episode_page: episodePage, embed_url: null, hls_url: null, mp4_url: null };
+  const empty: AnimeUnityStreamData = { episode_page: episodePage, embed_url: null, hls_url: null, mp4_url: null, height: null };
 
   try {
     const html = String(await auFetchResource(episodePage, caches, {
@@ -686,7 +691,9 @@ export class AnimeUnityProvider {
       if (!streamResult.hls_url && !streamResult.mp4_url && !streamResult.embed_url) continue;
 
       const langLabel = language === 'dub' ? 'ITA' : 'SUB';
-      let baseTitle = `${capitalize(displayTitle)} ▪ ${langLabel} ▪ ${episodeTag(seasonNumber, resolvedEpisodeNum)}`;
+      // FHD solo quando la variante HLS scelta dichiara 1080p o più.
+      const quality = qualityTag(streamResult.height);
+      let baseTitle = `${capitalize(displayTitle)} ▪ ${langLabel}${quality ? ` ▪ ${quality}` : ''} ▪ ${episodeTag(seasonNumber, resolvedEpisodeNum)}`;
 
       if (directWanted) {
         if (streamResult.hls_url) pushStream(streamResult.hls_url, baseTitle + ' (HLS)');

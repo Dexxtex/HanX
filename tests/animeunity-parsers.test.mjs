@@ -6,6 +6,7 @@ import {
   parseSearchResultsHtml,
   parseVixcloudHls,
   selectHighestHlsVariant,
+  selectHighestHlsVariantInfo,
 } from '../dist/providers/animeunity-parsers.js';
 
 // Fixture ridotte dalle pagine reali di www.animeunity.at (ottobre 2026).
@@ -150,4 +151,28 @@ https://cdn.example/high.m3u8`;
     'https://cdn.example/high.m3u8'
   );
   assert.equal(selectHighestHlsVariant('#EXTM3U\n#EXTINF:6,\nsegment.ts', 'https://cdn.example/media.m3u8'), null);
+});
+
+test('selectHighestHlsVariantInfo riporta l altezza della variante scelta', () => {
+  const master = `#EXTM3U
+#EXT-X-STREAM-INF:BANDWIDTH=1200000,RESOLUTION=854x480
+https://cdn.example/480.m3u8
+#EXT-X-STREAM-INF:BANDWIDTH=2150000,RESOLUTION=1280x720
+https://cdn.example/720.m3u8
+#EXT-X-STREAM-INF:BANDWIDTH=4500000,RESOLUTION=1920x1080
+https://cdn.example/1080.m3u8`;
+  assert.deepEqual(selectHighestHlsVariantInfo(master, 'https://cdn.example/master.m3u8'), {
+    url: 'https://cdn.example/1080.m3u8',
+    height: 1080,
+  });
+
+  // Senza RESOLUTION l'altezza è sconosciuta: niente badge FHD inventato.
+  const noResolution = `#EXTM3U
+#EXT-X-STREAM-INF:BANDWIDTH=3000000
+https://cdn.example/high.m3u8`;
+  assert.deepEqual(selectHighestHlsVariantInfo(noResolution, 'https://cdn.example/master.m3u8'), {
+    url: 'https://cdn.example/high.m3u8',
+    height: null,
+  });
+  assert.equal(selectHighestHlsVariantInfo('#EXTM3U\n#EXTINF:6,\nsegment.ts', 'https://cdn.example/media.m3u8'), null);
 });
