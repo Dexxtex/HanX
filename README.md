@@ -39,7 +39,7 @@ docker compose up -d
 
 Il `docker-compose.yml` usa l'immagine pubblicata su Docker Hub (`lextutor/hanx:latest`, amd64 e arm64): `docker compose pull` per aggiornarla, `docker compose build` per compilare in locale dal `Dockerfile`. L'immagine si ricostruisce solo sulle tag di release (`vX.Y.Z`) o a mano, non a ogni commit: un fix su `main` arriva nell'immagine con la release successiva.
 
-Il repository Docker Hub `lextutor/hanx` è privato: se il pull risponde `unauthorized`, o rendi pubblico il repository (Docker Hub → Settings → Visibility) o fai `docker login -u lextutor` sulla macchina con un token Read-only. `ghcr.io/dexxtex/hanx` non è usato dal compose ed è privato: richiede `docker login ghcr.io` con un PAT che abbia `read:packages`.
+Il repository Docker Hub `lextutor/hanx` è privato: se il pull risponde `unauthorized`, o rendi pubblico il repository (Docker Hub → Settings → Visibility) o fai `docker login -u lextutor` sulla macchina con un token Read-only. In Dockhand il registry va configurato con URL `https://registry-1.docker.io` (non `https://hub.docker.com`, che è il sito e risponde 404 su `/v2/`) e username `lextutor`, non l'email. `ghcr.io/dexxtex/hanx` non è usato dal compose ed è privato: richiede `docker login ghcr.io` con un PAT che abbia `read:packages`.
 
 Se l'IPv4 pubblico viene rifiutato dai siti (403) mentre l'IPv6 funziona, su host Linux
 aggiungi `network_mode: host` al servizio e togli la sezione `ports`.
