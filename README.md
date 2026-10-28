@@ -5,9 +5,13 @@
 **Addon Stremio per anime.** Cerca e aggrega stream da AnimeUnity, AnimeSaturn e
 AnimeWorld in un'unica interfaccia.
 
+<p align="center">
+  <img src="public/providers.jpg" alt="AnimeUnity, AnimeSaturn e AnimeWorld" width="100%">
+</p>
+
 > **Progetto vibecoded.** HanX è un derivato di
-> [StreamViX](https://github.com/qwertyuiop8899/StreamViX) ed è scritto con agenti
-> AI: nessuna garanzia di stabilità, sicurezza o supporto. Dettagli in
+> [StreamViX](https://github.com/qwertyuiop8899/StreamViX) ed è scritto con
+> agenti AI: nessuna garanzia di stabilità, sicurezza o supporto. Dettagli in
 > [Crediti](#crediti).
 
 ![Node](https://img.shields.io/badge/node-%3E%3D24-green)
@@ -34,12 +38,12 @@ AnimeWorld in un'unica interfaccia.
 - Cerca in parallelo sui tre provider, con fallback automatico quando uno non
   risponde.
 - Accetta ID **MyAnimeList** (MAL), **Kitsu**, **IMDb**, **TMDB** e **TVDB**.
-- Riproduce in **diretta** o tramite **EasyProxy** (HLS), con gli header corretti
-  per ogni sito.
+- Riproduce in **diretta** o tramite **EasyProxy** (HLS), con gli header
+  corretti per ogni sito.
 - Offre una configurazione web integrata: apri `/`, scegli le sorgenti e ottieni
   il link da incollare in Stremio.
-- Rispetta i limiti dei siti: pacing per host, cache delle ricerche, stop dopo un
-  `403` o un `429`.
+- Rispetta i limiti dei siti: pacing per host, cache delle ricerche, stop dopo
+  un `403` o un `429`.
 
 ## Installazione
 
@@ -69,9 +73,9 @@ git pull && docker compose up -d --build   # aggiornamento dal sorgente
 
 ### Immagine pubblicata
 
-L'immagine `lextutor/hanx` è pubblicata su Docker Hub e nella sezione **Packages**
-di GitHub (GHCR, `ghcr.io/dexxtex/hanx`). Ogni tag `vX.Y.Z` ha una **Release** con
-le note generate dai commit.
+L'immagine `lextutor/hanx` è pubblicata su Docker Hub e nella sezione
+**Packages** di GitHub (GHCR, `ghcr.io/dexxtex/hanx`). Ogni tag `vX.Y.Z` ha una
+**Release** con le note generate dai commit.
 
 Per usare l'immagine pubblicata senza compilare:
 
@@ -89,7 +93,7 @@ registry privati.
 Tutte le variabili sono in [`.env.example`](.env.example). Le principali:
 
 | Variabile | Significato | Default |
-|---|---|---|
+| --- | --- | --- |
 | `PORT` | Porta del server | `7000` |
 | `TMDB_API_KEY` | TMDB, per metadati e mapping | — |
 | `TVDB_API_KEY` / `TVDB_PIN` | TVDB v4, per ordine episodi e fallback | — |
@@ -100,13 +104,13 @@ Tutte le variabili sono in [`.env.example`](.env.example). Le principali:
 | `ANIME_HOST_MIN_INTERVAL_MS` | Distanza minima tra richieste allo stesso host | `2000` |
 | `DEBUG_LEVEL` | `0`–`4`, da spento a trace | `0` |
 
-Le chiavi restano nel `.env` locale: non committare il file. Se esponi la landing
-su Internet, proteggila con autenticazione davanti.
+Le chiavi restano nel `.env` locale: non committare il file. Se esponi la
+landing su Internet, proteggila con autenticazione davanti.
 
 ### Dietro un reverse proxy
 
-La landing costruisce il link del manifest da `X-Forwarded-Host`/`-Proto`, quindi
-non serve configurare host o porta. Con Caddy basta:
+La landing costruisce il link del manifest da `X-Forwarded-Host`/`-Proto`,
+quindi non serve configurare host o porta. Con Caddy basta:
 
 ```caddyfile
 hanx.example.com {
@@ -114,9 +118,9 @@ hanx.example.com {
 }
 ```
 
-Il link `stremio://` richiede HTTPS (o `127.0.0.1`). Se il pulsante **Installa in
-Stremio** non parte, usa **Installa da Stremio Web** oppure incolla il manifest a
-mano in Stremio → Addons.
+Il link `stremio://` richiede HTTPS (o `127.0.0.1`). Se il pulsante **Installa
+in Stremio** non parte, usa **Installa da Stremio Web** oppure incolla il
+manifest a mano in Stremio → Addons.
 
 ## Riproduzione: diretta o con proxy
 
@@ -128,8 +132,8 @@ La landing offre due modalità, valide per tutti e tre i provider:
   suo IP.
 
 EasyProxy è un servizio separato
-([realbestia1/EasyProxy](https://github.com/realbestia1/EasyProxy)): avvialo, poi
-inserisci URL e password nella landing o nel `.env`.
+([realbestia1/EasyProxy](https://github.com/realbestia1/EasyProxy)): avvialo,
+poi inserisci URL e password nella landing o nel `.env`.
 
 EasyProxy ha bisogno di `brotli` per decodificare le risposte HTTP compresse. Se
 l'immagine non lo include, sovrascrivi l'entrypoint nel suo servizio Compose:
@@ -148,12 +152,12 @@ services:
         exec /bin/bash /app/entrypoint.sh
 ```
 
-I proxy `PROXY`/`AU_PROXY`/`AS_PROXY`/`AW_PROXY` sono un'altra cosa: servono allo
-**scraping**, non alla riproduzione, e si attivano appena impostati.
+I proxy `PROXY`/`AU_PROXY`/`AS_PROXY`/`AW_PROXY` sono un'altra cosa: servono
+allo **scraping**, non alla riproduzione, e si attivano appena impostati.
 
 > **Perché il pacing.** Cloudflare risponde con una challenge quando l'uscita fa
-> raffica. Un titolo può costare fino a 15 richieste: senza limite l'IP si brucia
-> in una sera, e un `403` non si recupera insistendo.
+> raffica. Un titolo può costare fino a 15 richieste: senza limite l'IP si
+> brucia in una sera, e un `403` non si recupera insistendo.
 
 ## Mapping anime
 
@@ -161,7 +165,7 @@ Stremio manda ID e stagione; i siti italiani vogliono un titolo. Il livello
 `src/mapping/` fa da ponte e usa solo API ufficiali:
 
 | Fonte | A cosa serve |
-|---|---|
+| --- | --- |
 | **Kitsu** | collegamento MAL → Kitsu e relazioni `sequel`/`prequel` |
 | **TMDB** | entry TMDB da titolo + anno, e da lì IMDb/TVDB; titolo italiano |
 | **TVDB v4** | ordine episodi (`aired order`) |
@@ -169,10 +173,10 @@ Stremio manda ID e stagione; i siti italiani vogliono un titolo. Il livello
 
 L'indice (`anime-seasons.json`) viene costruito dalla workflow
 [`anime-mapping.yml`](.github/workflows/anime-mapping.yml): ogni notte converte
-le nuove entry del catalogo MAL e pubblica indice **e cursore** sul branch orfano
-`mapping` (un commit solo, senza storia: il repository non cresce). L'addon lo
-scarica da `ANIME_MAPPING_URL` e lo ricontrolla ogni 24 ore; se il download
-fallisce, continua con la copia locale.
+le nuove entry del catalogo MAL e pubblica indice **e cursore** sul branch
+orfano `mapping` (un commit solo, senza storia: il repository non cresce).
+L'addon lo scarica da `ANIME_MAPPING_URL` e lo ricontrolla ogni 24 ore; se il
+download fallisce, continua con la copia locale.
 
 **L'indice incluso nell'immagine è vuoto**: senza `ANIME_MAPPING_URL` servono
 `TMDB_API_KEY` e `TVDB_API_KEY` per il fallback live, che copre meno casi.
@@ -180,7 +184,7 @@ fallisce, continua con la copia locale.
 ## API
 
 | Endpoint | Descrizione |
-|---|---|
+| --- | --- |
 | `/stream/anime/{id}.json` | Stream per anime |
 | `/stream/film/{id}.json` | Stream per film |
 | `/stream/serie/{id}.json` | Stream per serie |
@@ -224,11 +228,11 @@ tests/                test (node:test)
 
 ### Copertura e limiti del mapping
 
-Catalogo MAL: 13.799 entry tra serie TV e film, **8.435 mappate (61,1%)** — passata
-completa e retry finale al 24/10/2026.
+Catalogo MAL: 13.799 entry tra serie TV e film, **8.435 mappate (61,1%)** —
+passata completa e retry finale al 24/10/2026.
 
 | Esito | Significato |
-|---|---|
+| --- | --- |
 | `ok` | allineata su TVDB (o TMDB se TVDB manca) |
 | `already` | split cour già coperto |
 | `no-kitsu` | Kitsu non ha il mapping MAL né un titolo corrispondente |
@@ -236,13 +240,13 @@ completa e retry finale al 24/10/2026.
 | `no-align` | TVDB esiste ma senza episodi datati compatibili |
 
 I tre residui (`no-kitsu`, `no-tmdb`, `no-align`) sono buchi di catalogo, non
-errori di match. Ponti alternativi (AniList, AniDB, TsukiHime) sono stati misurati
-e scartati: non aggiungono ID.
+errori di match. Ponti alternativi (AniList, AniDB, TsukiHime) sono stati
+misurati e scartati: non aggiungono ID.
 
 Ogni range dell'indice porta `titleAlt` (romaji MAL) e l'entry porta `titleIt`
 (titolo italiano TMDB): i siti listano spesso l'uno o l'altro, e con il solo
-titolo inglese la ricerca dà 0 risultati. Entrambi entrano solo dopo che l'inglese
-ha fallito.
+titolo inglese la ricerca dà 0 risultati. Entrambi entrano solo dopo che
+l'inglese ha fallito.
 
 Caso non coperto: una scheda del sito che contiene l'intera serie (episodi 1..N)
 etichettata come stagione può far prendere l'episodio di un'altra stagione.
