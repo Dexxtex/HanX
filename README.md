@@ -2,12 +2,15 @@
   <img src="public/banner.jpg" alt="HanX" width="100%">
 </p>
 
-**Addon Stremio per anime.** Cerca e aggrega stream da AnimeUnity, AnimeSaturn e
-AnimeWorld in un'unica interfaccia.
+<h2 align="center">Addon Stremio per anime</h2>
 
 <p align="center">
-  <img src="public/providers.jpg" alt="AnimeUnity, AnimeSaturn e AnimeWorld" width="100%">
+  Cerca e aggrega stream da AnimeUnity, AnimeSaturn e AnimeWorld in un'unica interfaccia.
 </p>
+
+| AnimeUnity | AnimeSaturn | AnimeWorld |
+|:---:|:---:|:---:|
+| <img src="public/provider-animeunity.jpg" alt="AnimeUnity" width="250"> | <img src="public/provider-animesaturn.jpg" alt="AnimeSaturn" width="250"> | <img src="public/provider-animeworld.jpg" alt="AnimeWorld" width="250"> |
 
 > **Progetto vibecoded.** HanX è un derivato di
 > [StreamViX](https://github.com/qwertyuiop8899/StreamViX) ed è scritto con
@@ -47,46 +50,80 @@ AnimeWorld in un'unica interfaccia.
 
 ## Installazione
 
-**Docker Compose è il metodo consigliato:** non devi installare Node, pnpm o le
-dipendenze, e aggiornare è un comando.
+HanX si installa come **stack Docker Compose**: un servizio, un volume per i
+dati, nessuna dipendenza da installare. Lo stesso YAML funziona da CLI con
+`docker compose` e nei gestori di stack (Portainer, Dockhand) incollato in
+**Stacks → Add stack**.
 
 Requisiti: Docker con Compose v2 (`docker compose version`).
 
-### Avvio rapido
+### La stack
+
+```yaml
+services:
+  hanx:
+    image: lextutor/hanx:latest
+    container_name: HanX
+    ports:
+      - "7000:7000"
+    volumes:
+      - hanx-data:/app/data
+    environment:
+      - PORT=7000
+      - ANIME_MAPPING_URL=https://raw.githubusercontent.com/Dexxtex/HanX/mapping/anime-seasons.json
+      - ANIME_MAPPING_FILE=/app/data/anime-seasons.json
+      - TMDB_API_KEY=${TMDB_API_KEY:-}
+      - TVDB_API_KEY=${TVDB_API_KEY:-}
+      - TVDB_PIN=${TVDB_PIN:-}
+      - EASYPROXY_URL=${EASYPROXY_URL:-}
+      - EASYPROXY_PASSWORD=${EASYPROXY_PASSWORD:-}
+      - PROXY=${PROXY:-}
+      - AU_PROXY=${AU_PROXY:-}
+      - AS_PROXY=${AS_PROXY:-}
+      - AW_PROXY=${AW_PROXY:-}
+    restart: unless-stopped
+
+volumes:
+  hanx-data:
+```
+
+Salva il file come `compose.yaml`, oppure incollalo nello stack manager. I
+valori `${...}` si impostano in un `.env` accanto al file oppure nel pannello
+**Environment** dello stack; tutte le variabili sono in
+[`.env.example`](.env.example).
 
 ```bash
-git clone https://github.com/Dexxtex/HanX.git
-cd HanX
-cp .env.example .env      # facoltativo: puoi configurare tutto dalla landing
-docker compose up -d --build
+docker compose up -d
 ```
 
 Apri <http://localhost:7000>, scegli le sorgenti e installa l'addon in Stremio.
 
-### Comandi e aggiornamento
-
-```bash
-docker compose logs -f hanx                # log
-docker compose down                        # stop (i dati restano in hanx-data)
-git pull && docker compose up -d --build   # aggiornamento dal sorgente
-```
-
-### Immagine pubblicata
-
-L'immagine `lextutor/hanx` è pubblicata su Docker Hub e nella sezione
-**Packages** di GitHub (GHCR, `ghcr.io/dexxtex/hanx`). Ogni tag `vX.Y.Z` ha una
-**Release** con le note generate dai commit.
-
-Per usare l'immagine pubblicata senza compilare:
+### Aggiornamento
 
 ```bash
 docker compose pull
 docker compose up -d
 ```
 
-`--build` compila in locale dal `Dockerfile`; dopo un `docker compose pull`,
-`up -d` usa l'immagine pubblicata. In entrambi i casi non serve autenticarsi a
-registry privati.
+Dalla UI dello stack è **Update the stack** / **Recreate**. Il volume
+`hanx-data` conserva indice, cache e configurazione: non si perde.
+
+### Immagine e build
+
+| Registry | Immagine |
+| --- | --- |
+| Docker Hub | `lextutor/hanx:latest` |
+| GitHub Packages | `ghcr.io/dexxtex/hanx:latest` |
+
+Ogni tag `vX.Y.Z` pubblica i tag `X.Y.Z`, `X.Y`, `X`, `latest` e una **Release**
+con le note generate dai commit. Non serve autenticarsi ai registry.
+
+Per compilare l'immagine dal sorgente (solo se modifichi il codice):
+
+```bash
+docker build -t lextutor/hanx:latest .
+docker compose up -d
+```
 
 ## Configurazione
 
