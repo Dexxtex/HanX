@@ -3,6 +3,13 @@ import { test } from 'node:test';
 
 const { landingTemplate } = await import('../../dist/landingPage.js');
 
+test('landing page: icona da public con versione per la cache', () => {
+  const html = landingTemplate({ name: 'HanX', version: '1.0.0', config: [] });
+  // Il ?v= cambia quando cambia public/icon.png: senza, il browser tiene
+  // l'icona vecchia anche dopo un aggiornamento dell'immagine.
+  assert.equal((html.match(/\/public\/icon\.png\?v=[a-z0-9]+/g) || []).length, 3);
+});
+
 test('landing page exposes API key fields and four configuration steps', () => {
   const html = landingTemplate({ name: 'HanX', version: '1.0.0', config: [] });
 

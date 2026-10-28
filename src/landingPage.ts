@@ -7,7 +7,15 @@ import { fileURLToPath } from 'node:url';
  * Asset previsto: public/icon.png alla radice del repository.
  * URL pubblico previsto: /public/icon.png.
  */
-export const HANX_ICON_URL = '/public/icon.png';
+const ICON_VERSION = (() => {
+    try {
+        const icon = statSync(fileURLToPath(new URL('../public/icon.png', import.meta.url)));
+        return Math.trunc(icon.mtimeMs).toString(36);
+    } catch {
+        return '';
+    }
+})();
+export const HANX_ICON_URL = `/public/icon.png${ICON_VERSION ? `?v=${ICON_VERSION}` : ''}`;
 
 // Data di compilazione di questo file: dice subito se l'istanza sta servendo
 // una build vecchia (il footer mostra il valore).
@@ -97,13 +105,6 @@ header {
     height: 64px;
     object-fit: contain;
     filter: drop-shadow(0 0 13px #14a2dd44);
-}
-
-.stamp {
-    font: 10px/1.6 monospace;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    color: #b8c2d5;
 }
 
 .badge {
@@ -627,7 +628,7 @@ details input[type=checkbox] {
 
 footer {
     display: flex;
-    justify-content: space-between;
+    justify-content: flex-end;
     gap: 15px;
     border-top: 1px solid #ffffff35;
     padding: 22px 0 30px;
@@ -679,9 +680,6 @@ footer {
     .head-logo {
         width: 105px;
         height: 48px;
-    }
-    .stamp {
-        display: none;
     }
     .hero {
         grid-template-columns: 1fr;
@@ -775,9 +773,6 @@ footer {
     .pass-header {
         gap: 12px;
         flex-wrap: wrap;
-    }
-    footer {
-        flex-direction: column;
     }
     .meta {
         white-space: normal;
@@ -1203,10 +1198,6 @@ ${STYLESHEET}
     <body>
         <header>
             <img class="head-logo" src="${iconUrl}" alt="HanX">
-            <div class="stamp">
-                Anime configuration studio<br>
-                The cosmic edition
-            </div>
             <span class="badge">${escapeHtml(manifest.version || '')}</span>
         </header>
 
@@ -1478,8 +1469,7 @@ ${STYLESHEET}
             </div>
 
             <footer>
-                <span>${escapeHtml(manifest.name || 'HanX')} — Anime configuration studio.</span>
-                <span>Cosmic edition / Solo anime · build ${escapeHtml(BUILD_STAMP)}</span>
+                <span>build ${escapeHtml(BUILD_STAMP)}</span>
             </footer>
         </div>
 
