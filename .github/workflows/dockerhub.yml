@@ -56,8 +56,22 @@ jobs:
             *) echo "prefisso: diverso da dckr_pat_ (sembra una password o un token di altro servizio)";;
           esac
           if printf '%s' "$TOKEN" | grep -q '[[:space:]]'; then
-            echo "ATTENZIONE: contiene spazi o newline"
+            echo "::error::Il token DOCKERHUB contiene spazi o newline."
+            exit 1
           fi
+
+      - name: Check Docker Hub push access
+        env:
+          TOKEN: ${{ secrets.DOCKERHUB }}
+        run: |
+          code=$(curl -sS -o /dev/null -w '%{http_code}' \
+            -u "lextutor:$TOKEN" \
+            "https://auth.docker.io/token?service=registry.docker.io&scope=repository:lextutor/hanx:pull,push")
+          if [ "$code" != "200" ]; then
+            echo "::error::Docker Hub rifiuta il token per lextutor/hanx (HTTP $code). Il token deve appartenere a lextutor e avere Write, non solo Read/Delete."
+            exit 1
+          fi
+          echo "Token Docker Hub: pull/push su lextutor/hanx OK."
 
       - name: Log in to Docker Hub
         uses: docker/login-action@v4
