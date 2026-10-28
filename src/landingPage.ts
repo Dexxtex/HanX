@@ -92,21 +92,6 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
     outline-offset: 4px;
 }
 
-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 18px 5vw;
-    border-bottom: 1px solid #ffffff32;
-}
-
-.head-logo {
-    width: 140px;
-    height: 64px;
-    object-fit: contain;
-    filter: drop-shadow(0 0 13px #14a2dd44);
-}
-
 .badge {
     font: 10px monospace;
     background: #ffffff0b;
@@ -132,19 +117,6 @@ header {
 
 .hero-copy {
     padding: 45px 0;
-}
-
-.kicker {
-    font: 11px monospace;
-    letter-spacing: 1.2px;
-    text-transform: uppercase;
-    color: #a0dff1;
-}
-
-.kicker::before {
-    content: '✦';
-    color: var(--coral);
-    margin-right: 10px;
 }
 
 .hero h1 {
@@ -200,15 +172,6 @@ header {
     position: relative;
     filter: drop-shadow(0 15px 30px #020414) drop-shadow(0 0 24px #00bce733);
     z-index: 1;
-}
-
-.orbit-label {
-    position: absolute;
-    bottom: 5px;
-    right: 0;
-    font: 10px monospace;
-    color: #b4c5dd;
-    letter-spacing: 2px;
 }
 
 .strip {
@@ -628,8 +591,9 @@ details input[type=checkbox] {
 
 footer {
     display: flex;
-    justify-content: flex-end;
-    gap: 15px;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 8px;
     border-top: 1px solid #ffffff35;
     padding: 22px 0 30px;
     font: 10px monospace;
@@ -674,13 +638,6 @@ footer {
 }
 
 @media (max-width: 650px) {
-    header {
-        padding: 13px 5vw;
-    }
-    .head-logo {
-        width: 105px;
-        height: 48px;
-    }
     .hero {
         grid-template-columns: 1fr;
         gap: 0;
@@ -704,9 +661,6 @@ footer {
     .hero-art::before, .hero-art::after {
         height: 190px;
         width: 190px;
-    }
-    .orbit-label {
-        font-size: 8px;
     }
     .strip {
         font-size: 9px;
@@ -1196,15 +1150,9 @@ ${STYLESHEET}
         </style>
     </head>
     <body>
-        <header>
-            <img class="head-logo" src="${iconUrl}" alt="HanX">
-            <span class="badge">${escapeHtml(manifest.version || '')}</span>
-        </header>
-
         <div class="wrap">
             <section class="hero">
                 <div class="hero-copy">
-                    <div class="kicker">Un addon. Infiniti nuovi mondi.</div>
                     <h1>YOUR NEXT<br><em>UNIVERSE.</em></h1>
                     <p>
                         Scegli le tue sorgenti anime, collega le chiavi ufficiali TMDB e TVDB
@@ -1214,7 +1162,6 @@ ${STYLESHEET}
                 </div>
                 <div class="hero-art">
                     <img class="hero-logo" src="${iconUrl}" alt="Logo HanX">
-                    <span class="orbit-label">WATCH / DISCOVER / REPEAT</span>
                 </div>
             </section>
 
@@ -1242,8 +1189,6 @@ ${STYLESHEET}
                         </button>
                     </nav>
                     <p class="rail-note">
-                        ESPLORA NUOVI MONDI.<br>
-                        TIENI IL CONTROLLO.<br>
                         La configurazione rimane nel tuo link personale.
                     </p>
                 </aside>
@@ -1460,7 +1405,6 @@ ${STYLESHEET}
 
                         <div class="actions">
                             <button class="btn" type="button" data-next="3">← Modifica connessione</button>
-                            <span class="meta">Made for your next arc.</span>
                         </div>
                     </section>
 
@@ -1470,6 +1414,7 @@ ${STYLESHEET}
 
             <footer>
                 <span>build ${escapeHtml(BUILD_STAMP)}</span>
+                <span class="badge">${escapeHtml(manifest.version || '')}</span>
             </footer>
         </div>
 

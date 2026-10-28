@@ -7,7 +7,24 @@ test('landing page: icona da public con versione per la cache', () => {
   const html = landingTemplate({ name: 'HanX', version: '1.0.0', config: [] });
   // Il ?v= cambia quando cambia public/icon.png: senza, il browser tiene
   // l'icona vecchia anche dopo un aggiornamento dell'immagine.
-  assert.equal((html.match(/\/public\/icon\.png\?v=[a-z0-9]+/g) || []).length, 3);
+  assert.equal((html.match(/\/public\/icon\.png\?v=[a-z0-9]+/g) || []).length, 2);
+});
+
+test('landing page: niente icona header, testi decorativi rimossi e build nel footer', () => {
+  const html = landingTemplate({ name: 'HanX', version: '1.0.0', config: [] });
+
+  assert.doesNotMatch(html, /<header>/);
+  assert.doesNotMatch(html, /class="head-logo"/);
+  for (const text of [
+    'Un addon. Infiniti nuovi mondi.',
+    'WATCH / DISCOVER / REPEAT',
+    'Made for your next arc.',
+    'ESPLORA NUOVI MONDI.',
+    'TIENI IL CONTROLLO.',
+  ]) {
+    assert.ok(!html.includes(text), `testo rimosso: ${text}`);
+  }
+  assert.match(html, /<footer>[\s\S]*?build[\s\S]*?<span class="badge">1\.0\.0<\/span>/);
 });
 
 test('landing page exposes API key fields and four configuration steps', () => {
