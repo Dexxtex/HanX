@@ -1,0 +1,140 @@
+name: Build and Publish Docker image
+
+# Solo sulle tag di release (vX.Y.Z) e a mano: nessuna immagine nuova a ogni
+# commit su main. Il bump di versione lancia la build sulla tag appena creata.
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  # Lanciato dal bump di versione: il push del tag fatto con GITHUB_TOKEN
+  # non crea run, quindi il build sulla tag va invocato esplicitamente.
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+  attestations: write
+  id-token: write
+
+env:
+  GHCR: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  DOCKERHUB_IMAGE: lextutor/hanx
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Check Docker Hub credentials
+        env:
+          HAS_TOKEN: ${{ secrets.DOCKERHUB != '' }}
+          HAS_VAR: ${{ vars.DOCKERHUB != '' }}
+        run: |
+          echo "secret DOCKERHUB: $HAS_TOKEN"
+          echo "variable DOCKERHUB (posto sbagliato): $HAS_VAR"
+          if [ "$HAS_TOKEN" != "true" ]; then
+            echo "::error::Manca il secret DOCKERHUB col token Docker Hub (Read & Write). Settings > Secrets and variables > Actions > Repository secrets, non 'Variables'."
+            exit 1
+          fi
+
+      - name: Token shape
+        env:
+          TOKEN: ${{ secrets.DOCKERHUB }}
+        run: |
+          echo "lunghezza: ${#TOKEN}"
+          case "$TOKEN" in
+            dckr_pat_*) echo "prefisso: dckr_pat_ (sembra un PAT)";;
+            *) echo "prefisso: diverso da dckr_pat_ (sembra una password o un token di altro servizio)";;
+          esac
+          if printf '%s' "$TOKEN" | grep -q '[[:space:]]'; then
+            echo "ATTENZIONE: contiene spazi o newline"
+          fi
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          # Username pubblico (stesso namespace dell'immagine): il secret e' solo il token.
+          username: lextutor
+          password: ${{ secrets.DOCKERHUB }}
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.GHCR }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels)
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: |
+            ${{ env.GHCR }}/${{ env.IMAGE_NAME }}
+            ${{ env.DOCKERHUB_IMAGE }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            # Non c'è più la build su main: latest si muove con la release
+            # oppure con un run manuale esplicito.
+            type=raw,value=latest,enable=${{ github.ref_type == 'tag' || github.event_name == 'workflow_dispatch' }}
+            type=sha,format=short
+
+      - name: Build and push Docker image
+        id: build-push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: false
+
+      - name: Generate artifact attestation (GHCR)
+        # Non disponibile per i repo privati di un utente: si attiva da sola
+        # quando il repo diventa pubblico.
+        if: ${{ github.event.repository.private == false }}
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-name: ${{ env.GHCR }}/${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.build-push.outputs.digest }}
+          push-to-registry: true
+
+      # Releases = versioni del software, con le note generate dai commit.
+      # L'immagine resta in Packages: qui si cita solo il tag pubblicato.
+      - name: GitHub Release
+        if: github.ref_type == 'tag'
+        uses: actions/github-script@v9
+        env:
+          TAG: ${{ github.ref_name }}
+        with:
+          script: |
+            const tag = process.env.TAG;
+            try {
+              await github.rest.repos.getReleaseByTag({ ...context.repo, tag });
+              core.info(`Release ${tag} già presente.`);
+              return;
+            } catch (error) {
+              if (error.status !== 404) throw error;
+            }
+            const version = tag.replace(/^v/, '');
+            const ghcr = `ghcr.io/${context.repo.owner}/${context.repo.repo}`.toLowerCase();
+            await github.rest.repos.createRelease({
+              ...context.repo,
+              tag_name: tag,
+              name: tag,
+              body: `Immagine Docker: \`lextutor/hanx:${version}\` / \`${ghcr}:${version}\``,
+              generate_release_notes: true,
+              draft: false,
+              prerelease: version.includes('-'),
+            });

@@ -1,0 +1,68 @@
+# --- Dipendenze e build ---
+node_modules
+dist
+data
+*.tsbuildinfo
+package-lock.json
+
+# --- Segreti e ambiente ---
+.env
+.env.*
+
+# --- Git, GitHub e documentazione ---
+.git
+.github
+.gitignore
+.dockerignore
+README.md
+AGENTS.md
+DECISIONS.md
+PENDING_COMMITS.md
+docs
+
+# --- Test e file che non servono al runtime ---
+tests
+test-provider*.ps1
+docker-compose.yml
+graphify-out
+.graphifyignore
+.devloop
+
+# --- Script: nel container servono solo build e converter del mapping ---
+scripts/*
+!scripts/build-copy.js
+!scripts/build-anime-mapping.mjs
+
+# --- Backup generati a runtime ---
+config/*.jsonbk
+
+# --- Cache e artefatti ---
+coverage
+.nyc_output
+.cache
+__pycache__
+*.py[cod]
+*.log
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.sqlite3
+*.sqlite3-shm
+*.sqlite3-wal
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
+*.pid
+*.tmp
+*.bak
+
+# --- IDE e sistema ---
+.vscode
+.idea
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini

@@ -1,0 +1,52 @@
+name: Update Domains
+
+on:
+  schedule:
+    - cron: '0 22,8,12,18 * * *' # Four times a day
+  workflow_dispatch: {}
+
+# Serve per il push del commit generato; il token di default di molti repo e' read-only.
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.x'
+
+      - name: Test updater
+        run: python3 scripts/test_update_domains.py
+
+      - name: Run updater
+        id: runupd
+        run: python3 scripts/update_domains.py
+
+      - name: Detect changes
+        run: |
+          # git status vede anche le rimozioni, che git diff da solo non rileva.
+          # domains.jsonbk è ignorato: è un backup.
+          if [ -z "$(git status --porcelain -- config)" ]; then
+            echo "No changes to commit." >&2
+            exit 0
+          fi
+          echo "changes=yes" >> $GITHUB_ENV
+
+      - name: Commit changes
+        if: env.changes == 'yes'
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A -- config
+          if git diff --cached --quiet; then
+            echo "Nothing staged." >&2
+            exit 0
+          fi
+          git commit -m "fix: domains update"
+          git push

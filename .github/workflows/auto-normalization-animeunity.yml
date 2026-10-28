@@ -1,0 +1,59 @@
+name: Crea PR da Issue di normalizzazione (AnimeUnity)
+
+on:
+  issues:
+    types: [opened, edited]
+
+jobs:
+  generate-pr-animeunity:
+    if: |
+      contains(github.event.issue.labels.*.name, 'normalizzazione-animeunity') ||
+      contains(github.event.issue.labels.*.name, 'richiesta-animeunity')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - id: parse
+        env:
+          ISSUE_BODY: ${{ github.event.issue.body }}
+        run: |
+          MAL_NAME=$(printf '%s\n' "$ISSUE_BODY" | awk '/^### MAL English name/{getline; while($0 ~ /^ *$/){getline}; print $0}')
+          AU_NAME=$(printf '%s\n' "$ISSUE_BODY" | awk '/^### AnimeUnity name/{getline; while($0 ~ /^ *$/){getline}; print $0}')
+          if [ -z "$MAL_NAME" ] || [ -z "$AU_NAME" ]; then
+            echo "Campi MAL/AnimeUnity mancanti nella issue." >&2
+            exit 1
+          fi
+          echo "mal_name=$MAL_NAME" >> "$GITHUB_OUTPUT"
+          echo "au_name=$AU_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Aggiungi riga di normalizzazione AnimeUnity
+        env:
+          MAL_NAME: ${{ steps.parse.outputs.mal_name }}
+          AU_NAME: ${{ steps.parse.outputs.au_name }}
+        run: python3 scripts/auto_normalize_animeunity.py
+
+      - name: Crea PR
+        uses: peter-evans/create-pull-request@v8
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "feat(normalize-au): add \"${{ steps.parse.outputs.mal_name }}\""
+          branch: "normalizza-au-${{ github.event.issue.number }}"
+          title: "Normalizzazione AnimeUnity: ${{ steps.parse.outputs.mal_name }}"
+          body: |
+            ## 🔗 Nuova normalizzazione AnimeUnity
+
+            | Campo | Valore |
+            |-------|--------|
+            | **MAL English name** | ${{ steps.parse.outputs.mal_name }} |
+            | **AnimeUnity name** | ${{ steps.parse.outputs.au_name }} |
+
+            ### Checklist
+            - [ ] Compilazione corretta secondo Issue
+            - [ ] I test esistenti passano
+            - [ ] Non rompe altre normalizzazioni
+
+            _Questa PR è stata generata automaticamente dalla Issue #${{ github.event.issue.number }}._

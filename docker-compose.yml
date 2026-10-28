@@ -1,0 +1,33 @@
+services:
+  hanx:
+    container_name: HanX
+    # Immagine pubblicata dalla CI su Docker Hub (amd64 + arm64).
+    # Per una build locale: docker compose build (o up -d --build).
+    image: lextutor/hanx:latest
+    ports:
+      - "7000:7000"
+    volumes:
+      - hanx-data:/app/data
+    environment:
+      - PORT=7000
+      # Indice mapping: branch "mapping", riscaricato ogni 24 h.
+      # Nessun Jikan da gestire; ANIME_MAPPING_FILE è la cache su disco.
+      - ANIME_MAPPING_URL=${ANIME_MAPPING_URL:-https://raw.githubusercontent.com/Dexxtex/HanX/mapping/anime-seasons.json}
+      - ANIME_MAPPING_FILE=/app/data/anime-seasons.json
+      # Chiavi API e EasyProxy: Dockhand inietta i secret nel processo compose,
+      # in alternativa arrivano dal .env caricato sopra.
+      - TMDB_API_KEY=${TMDB_API_KEY:-}
+      - TVDB_API_KEY=${TVDB_API_KEY:-}
+      - TVDB_PIN=${TVDB_PIN:-}
+      - EASYPROXY_URL=${EASYPROXY_URL:-}
+      - EASYPROXY_PASSWORD=${EASYPROXY_PASSWORD:-}
+      # Forward proxy per ricerca e pagine di riproduzione: si attivano appena
+      # impostati. Il proxy della piattaforma precede PROXY, poi il diretto.
+      - PROXY=${PROXY:-}
+      - AU_PROXY=${AU_PROXY:-}
+      - AS_PROXY=${AS_PROXY:-}
+      - AW_PROXY=${AW_PROXY:-}
+    restart: unless-stopped
+
+volumes:
+  hanx-data:

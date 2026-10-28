@@ -1,0 +1,58 @@
+# --- Dipendenze ---
+node_modules/
+pnpm-store/
+
+# --- Build e artefatti ---
+dist/
+*.tsbuildinfo
+coverage/
+.nyc_output/
+.cache/
+*.log
+server.log
+
+# --- Segreti e dati locali ---
+.env
+.env.*
+!.env.example
+/data/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.sqlite3
+*.sqlite3-shm
+*.sqlite3-wal
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
+*.pid
+*.tmp
+
+# --- Backup generati a runtime (update_domains.py) ---
+*.bak
+*.jsonbk
+
+# --- Test e script locali ---
+test-provider*.ps1
+
+# --- IDE e sistema ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# --- Strumenti locali ---
+graphify-out/
+.graphifyignore
+.devloop
+PENDING_COMMITS.md

@@ -1,0 +1,89 @@
+name: Anime Mapping
+
+# Costruisce l'indice mapping senza servizi da gestire: sorgente pubblico
+# Jikan-compatibile (Tenrai), indice e cursore sul branch orfano "mapping".
+# L'addon lo consuma con ANIME_MAPPING_URL: nessun Jikan self-hosted richiesto.
+
+on:
+  schedule:
+    - cron: '30 3 * * *' # ogni notte
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: 'Entry nuove da convertire in questa run'
+        default: '100'
+
+# Il branch lo scrive la run, non un push: il token di default è read-only.
+permissions:
+  contents: write
+
+# Due run sullo stesso cursore si sovrascriverebbero.
+concurrency:
+  group: anime-mapping
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      JIKAN_API_BASE: https://api.tenrai.org/v1
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GITHUB_REPO: ${{ github.repository }}
+      GITHUB_MAPPING_BRANCH: mapping
+      TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
+      TVDB_API_KEY: ${{ secrets.TVDB_API_KEY }}
+      TVDB_PIN: ${{ secrets.TVDB_PIN }}
+      ANIME_MAPPING_FILE: data/anime-seasons.json
+      ANIME_MAPPING_STATE: data/jikan-progress.json
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 26
+
+      # Il cursore vive sul branch, non nel repo: al primo giro non esiste
+      # e la build parte da zero (o dall'indice già pubblicato dal server).
+      # La vecchia release "mapping" resta come fallback finché il branch non c'è.
+      # Se il branch esiste ma non si riesce a leggerlo, la run si ferma: meglio
+      # nessun aggiornamento che pubblicare un indice parziale al suo posto.
+      - name: Ripristina indice e cursore
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p data
+          branch_status=0
+          git ls-remote --exit-code --heads origin "$GITHUB_MAPPING_BRANCH" >/dev/null 2>&1 \
+            || branch_status=$?
+          if [ "$branch_status" -eq 0 ]; then
+            git fetch --depth=1 origin \
+              "refs/heads/$GITHUB_MAPPING_BRANCH:refs/remotes/origin/$GITHUB_MAPPING_BRANCH"
+            for file in anime-seasons.json jikan-progress.json; do
+              git cat-file -e "origin/$GITHUB_MAPPING_BRANCH:$file"
+              git show "origin/$GITHUB_MAPPING_BRANCH:$file" > "data/$file"
+            done
+          elif [ "$branch_status" -eq 2 ]; then
+            echo "branch $GITHUB_MAPPING_BRANCH assente: provo la vecchia release"
+            gh release download mapping --pattern 'anime-seasons.json' --dir data --clobber \
+              || echo "nessun indice pubblicato: prima build"
+            gh release download mapping --pattern 'jikan-progress.json' --dir data --clobber \
+              || echo "nessun cursore pubblicato: riparte dal catalogo"
+          else
+            echo "git ls-remote fallito (exit $branch_status): non pubblico un indice parziale" >&2
+            exit 1
+          fi
+
+      - name: Converti e pubblica
+        run: node scripts/build-anime-mapping.mjs --limit=${{ inputs.limit || 100 }} --publish
+
+      # La release conteneva solo gli asset: ora vivono sul branch.
+      - name: Ritira la vecchia release mapping
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if git ls-remote --exit-code --heads origin "$GITHUB_MAPPING_BRANCH" >/dev/null 2>&1; then
+            gh release delete mapping --yes --cleanup-tag || true
+          fi

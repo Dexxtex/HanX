@@ -1,0 +1,79 @@
+name: Prune Docker Hub tags
+
+# Cancella i tag di lextutor/hanx tranne quelli indicati (default: latest).
+# Azione manuale e irreversibile: si lancia da Actions > Run workflow.
+on:
+  workflow_dispatch:
+    inputs:
+      keep:
+        description: Tag da conservare, separati da virgola
+        default: latest
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  prune:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete tags
+        env:
+          DOCKERHUB: ${{ secrets.DOCKERHUB }}
+          KEEP: ${{ inputs.keep }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DOCKERHUB:-}" ]; then
+            echo "::error::Manca il secret DOCKERHUB (Read, Write e Delete)."
+            exit 1
+          fi
+          python3 - <<'PY'
+          import json, os, urllib.error, urllib.request
+
+          REPO = os.environ.get('REPO', 'lextutor/hanx')
+          USER = 'lextutor'
+          BASE = 'https://hub.docker.com/v2'
+
+          keep = {t.strip() for t in os.environ['KEEP'].split(',') if t.strip()}
+
+          def call(url, method='GET', payload=None, token=None):
+              data = json.dumps(payload).encode() if payload is not None else None
+              req = urllib.request.Request(url, method=method, data=data)
+              if token:
+                  req.add_header('Authorization', f'JWT {token}')
+              if data:
+                  req.add_header('Content-Type', 'application/json')
+              return urllib.request.urlopen(req, timeout=30)
+
+          login = call(f'{BASE}/users/login', 'POST',
+                       {'username': USER, 'password': os.environ['DOCKERHUB']})
+          token = json.load(login)['token']
+
+          tags, page = [], 1
+          while True:
+              body = json.load(call(f'{BASE}/repositories/{REPO}/tags?page_size=100&page={page}', token=token))
+              tags += [t['name'] for t in body.get('results') or []]
+              if not body.get('next'):
+                  break
+              page += 1
+
+          print(f'{len(tags)} tag presenti: {", ".join(sorted(tags))}')
+          missing = keep - set(tags)
+          if missing:
+              # Meglio fermarsi che cancellare tutto per un nome sbagliato.
+              raise SystemExit(f"Tag da conservare inesistenti: {', '.join(sorted(missing))}. Nessuna cancellazione.")
+
+          doomed = sorted(t for t in tags if t not in keep)
+          if not doomed:
+              print('Niente da cancellare.')
+              raise SystemExit(0)
+
+          for tag in doomed:
+              try:
+                  call(f'{BASE}/repositories/{REPO}/tags/{tag}/', 'DELETE', token=token)
+              except urllib.error.HTTPError as e:
+                  raise SystemExit(f'Cancellazione di {tag} fallita: HTTP {e.code} {e.read()[:200]}')
+              print(f'cancellato: {tag}')
+
+          print(f'{len(doomed)} tag cancellati, restano: {", ".join(sorted(keep))}')
+          PY
