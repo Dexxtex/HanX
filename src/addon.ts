@@ -53,7 +53,7 @@ function sortStreamsByPriority(streams: { url?: string; title?: string }[]): voi
 // ================= MANIFEST BASE (restored) =================
 const baseManifest: Manifest = {
     id: "org.stremio.hanx",
-    version: "1.0.1",
+    version: "1.0.2",
     name: "HanX",
     description: "HanX addon dedicato ad AnimeUnity, AnimeSaturn e AnimeWorld",
     types: ["movie", "series", "anime"],
@@ -114,7 +114,7 @@ let globalRouter: any;
 
 try {
     // ✅ INIZIALIZZA IL ROUTER GLOBALE
-    console.log('🔧 Initializing global router after loading TV channels...');
+    console.log('🔧 Initializing global router...');
     globalBuilder = createBuilder();
     globalAddonInterface = globalBuilder.getInterface();
     globalRouter = getRouter(globalAddonInterface);
