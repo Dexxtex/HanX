@@ -8,6 +8,7 @@ import { buildEasyProxyHlsUrl, buildEasyProxyStreamUrl } from '../utils/easyprox
 import {
   buildTitleFallbackQueries,
   normalizeTitleForSearch,
+  sameQuery,
   titleMatchScoreAny,
   type TitleNormalizationOptions,
 } from '../utils/anime-title-normalization.js';
@@ -25,7 +26,6 @@ import {
   getEnglishTitleFromAnyId,
   episodeTag,
   italianSeasonQuery,
-  sameTitle,
 } from './anime-core/index.js';
 import {
   resolveMappingRequest,
@@ -1087,7 +1087,7 @@ export class AnimeSaturnProvider {
     const altQuery = titleAlt && titleAlt !== normalizedTitle ? titleAlt : '';
     // Saturn indicizza i titoli italiani: senza sottotitolo è il primo ripiego.
     const itQueryRaw = italianSeasonQuery(titleIt, titleItSeason ?? seasonNumber, normalizedTitle);
-    const itQuery = sameTitle(itQueryRaw, normalizedTitle) ? '' : itQueryRaw;
+    const itQuery = sameQuery(itQueryRaw, normalizedTitle) ? '' : itQueryRaw;
     const titles = [normalizedTitle];
     if (itQuery) titles.push(itQuery);
     const rawVersions = await this.searchAllVersions(normalizedTitle);
@@ -1106,9 +1106,10 @@ export class AnimeSaturnProvider {
       // indicizzano in italiano restavano senza seconda possibilità.
       const hasSubtitle = /:|\s+-\s+/.test(normalizedTitle);
       const candidates = hasSubtitle
-        ? [altQuery, ...buildTitleFallbackQueries(normalizedTitle)]
-        : [itQuery, altQuery, ...buildTitleFallbackQueries(normalizedTitle)];
-      for (const fallbackQuery of candidates.filter(q => q && !sameTitle(q, normalizedTitle)).slice(0, 2)) {
+        ? [altQuery, ...buildTitleFallbackQueries(normalizedTitle, seasonNumber)]
+        : [itQuery, altQuery, ...buildTitleFallbackQueries(normalizedTitle, seasonNumber)];
+      for (const fallbackQuery of candidates.filter(q => q && !sameQuery(q, normalizedTitle)).slice(0, 2)) {
+        titles.push(fallbackQuery);
         const fallbackVersions = filterAnimeResults(await this.searchAllVersions(fallbackQuery), titles);
         if (fallbackVersions.length) {
           debug(2, 'AnimeSaturn', `[AnimeSaturn] Trovato con query di ripiego: ${fallbackQuery}`);

@@ -6,6 +6,7 @@ import {
   normalizeSearchTitleKey,
   normalizeTitleForSearch,
   resolveExactMapKey,
+  sameQuery,
   titleMatchScore,
   titleMatchScoreAny,
 } from '../../dist/utils/anime-title-normalization.js';
@@ -131,6 +132,20 @@ test('buildTitleFallbackQueries conserva ordine e varianti', () => {
     ]
   );
   assert.deepEqual(buildTitleFallbackQueries('Death Note'), ['Death+Note']);
+});
+
+test('buildTitleFallbackQueries mette per prima la scheda di stagione senza sottotitolo', () => {
+  // "Tower of God 2: Workshop Battle" sta nella pagina "Tower of God 2":
+  // il sottotitolo dell'arco non è indicizzato e brucerebbe i due ripieghi.
+  assert.equal(buildTitleFallbackQueries('Tower of God 2: Workshop Battle', 2)[0], 'Tower of God 2');
+  // Senza stagione l'ordine storico resta: prima la coda.
+  assert.equal(buildTitleFallbackQueries('Tower of God 2: Workshop Battle')[0], 'Workshop Battle');
+});
+
+test('sameQuery distingue le query che differiscono solo per punteggiatura', () => {
+  // Evidenza su AnimeSaturn: "Kaiju No.8 2" -> 0 risultati, "Kaiju No. 8 2" -> 2.
+  assert.equal(sameQuery('Kaiju No. 8 2', 'Kaiju No.8 2'), false);
+  assert.equal(sameQuery('BOFURI 2', 'bofuri  2'), true);
 });
 
 test('buildTitleFallbackQueries prova la metà italiana dei titoli ibridi', () => {

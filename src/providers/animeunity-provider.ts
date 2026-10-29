@@ -22,6 +22,7 @@ import { providerLabel } from '../utils/unifiedNames.js';
 import {
   buildTitleFallbackQueries,
   normalizeTitleForSearch as normalizeAnimeTitleForSearch,
+  sameQuery,
   titleMatchScoreAny,
   type TitleNormalizationOptions,
 } from '../utils/anime-title-normalization.js';
@@ -42,7 +43,6 @@ import {
   qualityTag,
   italianSeasonQuery,
   seasonFromTitle,
-  sameTitle,
 } from './anime-core/index.js';
 import {
   resolveMappingRequest,
@@ -990,7 +990,7 @@ export class AnimeUnityProvider {
     // italiani, che l'inglese non tocca. Se coincide con la query italiana non
     // aggiunge nulla (es. "Cyberpunk: Edgerunners" ha lo stesso nome in it-IT).
     const itQueryRaw = italianSeasonQuery(titleIt, titleItSeason ?? seasonNumber, normalizedTitle);
-    const itQuery = sameTitle(itQueryRaw, normalizedTitle) ? '' : itQueryRaw;
+    const itQuery = sameQuery(itQueryRaw, normalizedTitle) ? '' : itQueryRaw;
     const queryTitles = [normalizedTitle];
     if (itQuery) queryTitles.push(itQuery);
     // Se il titolo originale è una chiave dell'exactMap allora saltiamo qualsiasi filtro successivo:
@@ -1056,9 +1056,10 @@ export class AnimeUnityProvider {
       // storiche. Senza sottotitolo vince l'italiano.
       const hasSubtitle = /:|\s+-\s+/.test(normalizedTitle);
       const candidates = hasSubtitle
-        ? [altQuery, ...buildTitleFallbackQueries(normalizedTitle)]
-        : [itQuery, altQuery, ...buildTitleFallbackQueries(normalizedTitle)];
-      for (const fallbackQuery of candidates.filter(q => q && !sameTitle(q, normalizedTitle)).slice(0, 2)) {
+        ? [altQuery, ...buildTitleFallbackQueries(normalizedTitle, seasonNumber)]
+        : [itQuery, altQuery, ...buildTitleFallbackQueries(normalizedTitle, seasonNumber)];
+      for (const fallbackQuery of candidates.filter(q => q && !sameQuery(q, normalizedTitle)).slice(0, 2)) {
+        queryTitles.push(fallbackQuery);
         const fallbackVersions = filterAnimeResults(await this.searchAllVersions(fallbackQuery), queryTitles);
         if (fallbackVersions.length) {
           debug(2, 'AnimeUnity', `[AnimeUnity] Trovato con query di ripiego: ${fallbackQuery}`);

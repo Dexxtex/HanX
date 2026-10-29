@@ -94,9 +94,27 @@ function romanSuffixToDigits(title: string): string {
   });
 }
 
+/**
+ * Stessa query a meno di maiuscole e spazi. A differenza di sameTitle la
+ * punteggiatura conta: "Kaiju No.8 2" e "Kaiju No. 8 2" sembrano lo stesso
+ * titolo ma la ricerca del sito trova solo la seconda.
+ */
+export function sameQuery(a: string | null | undefined, b: string | null | undefined): boolean {
+  const key = (value: unknown) => String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
+  const left = key(a);
+  return Boolean(left) && left === key(b);
+}
+
 /** Query di ripiego usate quando la ricerca normale non restituisce risultati. */
-export function buildTitleFallbackQueries(normalized: string): string[] {
+export function buildTitleFallbackQueries(normalized: string, season?: number | null): string[] {
   const queries: string[] = [];
+  // I siti tengono una scheda per stagione e non indicizzano il sottotitolo
+  // dell'arco: "Tower of God 2: Workshop Battle" sta nella pagina "Tower of
+  // God 2". Va per prima, perché i ripieghi provati sono solo due.
+  if (season && season > 1) {
+    const seasonBase = normalized.split(':')[0].split(/\s+-\s+/)[0].trim();
+    if (seasonBase !== normalized && seasonBase.length >= 4) queries.push(seasonBase);
+  }
   // "CYBERPUNK: EDGERUNNERS II" cercato alla lettera dà 0 risultati: sui siti è "2".
   const romanDigits = romanSuffixToDigits(normalized);
   // Stesso motivo per gli ordinali inglesi: "Space Dandy 2nd" -> "Space Dandy 2".

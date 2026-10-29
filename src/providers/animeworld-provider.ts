@@ -11,6 +11,7 @@ import {
   normalizeSearchTitleKey,
   normalizeTitleForSearch,
   resolveExactMapKey,
+  sameQuery,
   titleMatchScoreAny,
   type TitleNormalizationOptions,
 } from '../utils/anime-title-normalization.js';
@@ -22,7 +23,6 @@ import {
   isAbortOrTimeoutError,
   episodeTag,
   italianSeasonQuery,
-  sameTitle,
 } from './anime-core/index.js';
 import {
   resolveMappingRequest,
@@ -928,7 +928,7 @@ export class AnimeWorldProvider {
     // Il titolo mostrato sulla scheda è spesso italiano, mentre lo slug resta
     // romaji: la query italiana va cercata e confrontata anche col searchTitle.
     const itQueryRaw = italianSeasonQuery(titleIt, titleItSeason ?? seasonNumber, normalized);
-    const itQuery = sameTitle(itQueryRaw, normalized) ? '' : itQueryRaw;
+    const itQuery = sameQuery(itQueryRaw, normalized) ? '' : itQueryRaw;
     if (itQuery) titleKeys.push(itQuery);
     const altQuery = titleAlt && titleAlt !== normalized ? titleAlt : '';
     const wantsRewrite = /rewrite/i.test(normalized);
@@ -965,9 +965,9 @@ export class AnimeWorldProvider {
       // sottotitolo vince l'italiano.
       const hasSubtitle = /:|\s+-\s+/.test(normalized);
       const candidates = hasSubtitle
-        ? [altQuery, ...buildTitleFallbackQueries(normalized)]
-        : [itQuery, altQuery, ...buildTitleFallbackQueries(normalized)];
-      for (const fallbackQuery of candidates.filter(q => q && !sameTitle(q, normalized)).slice(0, 2)) {
+        ? [altQuery, ...buildTitleFallbackQueries(normalized, seasonNumber)]
+        : [itQuery, altQuery, ...buildTitleFallbackQueries(normalized, seasonNumber)];
+      for (const fallbackQuery of candidates.filter(q => q && !sameQuery(q, normalized)).slice(0, 2)) {
         const res = await this.searchAllVersions(fallbackQuery, () => false);
         debug(2, 'AnimeWorld', `[AnimeWorld] Search fallback "${fallbackQuery}" -> ${res.length}`);
         if (res.length) {
