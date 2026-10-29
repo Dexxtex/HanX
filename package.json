@@ -1,6 +1,6 @@
 {
   "name": "hanx",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "description": "HanX - addon Stremio/NUVIO esclusivo per anime (AnimeUnity, AnimeSaturn, AnimeWorld)",
   "main": "dist/addon.js",
   "type": "module",
@@ -17,6 +17,7 @@
     "mapping:build": "node scripts/build-anime-mapping.mjs",
     "mapping:check": "node scripts/build-anime-mapping.mjs --check",
     "mapping:verify": "pnpm run mapping:check && node --test tests/mapping/index.test.mjs tests/mapping/generator.test.mjs",
+    "verify:status": "node scripts/verify-feature.mjs status",
     "check:domains": "node scripts/check_domains.cjs"
   },
   "dependencies": {
