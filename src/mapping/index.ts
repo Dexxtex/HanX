@@ -212,6 +212,20 @@ export function getMappingVersion(): string {
   return snapshot ? snapshot.signature : 'empty';
 }
 
+/** Stato dell'indice per la diagnostica runtime (/status.json). */
+export function getMappingStatus() {
+  const index = loadIndex();
+  const mtimeMs = snapshot?.mtimeMs ?? -1;
+  return {
+    schemaVersion: MAPPING_SCHEMA_VERSION,
+    generatedAt: index.generatedAt,
+    series: Object.keys(index.series).length,
+    movies: Object.keys(index.movies).length,
+    ageMs: mtimeMs === -1 ? null : Math.max(0, Date.now() - mtimeMs),
+    signature: getMappingVersion(),
+  };
+}
+
 export function resetMappingCache(): void {
   snapshot = null;
 }

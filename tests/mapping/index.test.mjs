@@ -126,7 +126,7 @@ fs.writeFileSync(fixtureFile, JSON.stringify({
 process.env.ANIME_MAPPING_FILE = fixtureFile;
 
 const { parseRequestId, resolveMappingRequest, toNumericId } = await import('../../dist/mapping/request.js');
-const { resolveLocalTarget, resolveSeasonFallbackTitle, getMappingVersion, resetMappingCache } = await import('../../dist/mapping/index.js');
+const { resolveLocalTarget, resolveSeasonFallbackTitle, getMappingVersion, getMappingStatus, resetMappingCache } = await import('../../dist/mapping/index.js');
 const { resolveLiveTarget } = await import('../../dist/mapping/live.js');
 
 function targetFor(id) {
@@ -398,6 +398,29 @@ test('mapping signature changes when index or overrides content changes', () => 
 
   delete process.env.ANIME_MAPPING_OVERRIDES;
   resetMappingCache();
+});
+
+test('getMappingStatus riflette indice, overrides e signature', () => {
+  const index = JSON.parse(fs.readFileSync(fixtureFile, 'utf8'));
+  // Il repo ha src/mapping/overrides.json (10 serie) sempre mergiato: qui si
+  // isola il solo indice di fixture.
+  const overridesFile = path.join(fixtureDir, 'overrides-empty.json');
+  fs.writeFileSync(overridesFile, JSON.stringify({ series: {}, movies: {} }));
+  process.env.ANIME_MAPPING_OVERRIDES = overridesFile;
+  resetMappingCache();
+  try {
+    const status = getMappingStatus();
+    assert.equal(status.schemaVersion, 1);
+    assert.equal(status.generatedAt, index.generatedAt);
+    assert.equal(status.series, Object.keys(index.series).length);
+    assert.equal(status.movies, Object.keys(index.movies).length);
+    assert.ok(Number.isFinite(status.ageMs) && status.ageMs >= 0);
+    assert.match(status.signature, /^[0-9a-f]{16}$/);
+    assert.equal(status.signature, getMappingVersion());
+  } finally {
+    delete process.env.ANIME_MAPPING_OVERRIDES;
+    resetMappingCache();
+  }
 });
 
 test('override kitsu fornisce il titolo giusto ai provider', () => {
