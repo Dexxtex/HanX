@@ -117,13 +117,39 @@ test('landing page prefills only env vars that have a matching manifest field', 
   const match = html.match(/window\.__HANX_PAGE_DATA__ = (\{.*?\});/s);
   assert.ok(match);
   const defaults = JSON.parse(match[1]).defaults;
+  // I segreti lato server non arrivano nell'HTML: la landing è pubblica e
+  // chiunque raggiunga / li leggerebbe con "visualizza sorgente".
   assert.deepEqual(defaults, {
-    tmdbApiKey: 'tmdb-env',
-    tvdbApiKey: 'tvdb-env',
-    tvdbPin: 'pin-env',
+    tmdbApiKey: 'manifest-default',
     easyProxyUrl: 'http://proxy.local/',
-    easyProxyPassword: 'proxy password',
   });
   assert.equal(manifest.config[0].default, 'manifest-default');
   assert.equal('default' in manifest.config[1], false);
+});
+
+test('landing page: i segreti delle env non compaiono mai nell\'HTML', () => {
+  const secrets = ['tmdb-env-key', 'tvdb-env-key', 'pin-env-123', 'proxy-password-secret'];
+  const manifest = {
+    name: 'HanX',
+    version: '1.0.0',
+    config: [
+      { key: 'tmdbApiKey' },
+      { key: 'tvdbApiKey' },
+      { key: 'tvdbPin' },
+      { key: 'easyProxyUrl' },
+      { key: 'easyProxyPassword' },
+    ],
+  };
+
+  const html = landingTemplate(manifest, {
+    TMDB_API_KEY: secrets[0],
+    TVDB_API_KEY: secrets[1],
+    TVDB_PIN: secrets[2],
+    EASYPROXY_URL: 'http://proxy.local/',
+    EASYPROXY_PASSWORD: secrets[3],
+  });
+
+  for (const secret of secrets) {
+    assert.ok(!html.includes(secret), `segreto leakato nell'HTML: ${secret}`);
+  }
 });

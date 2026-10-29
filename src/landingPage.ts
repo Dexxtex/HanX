@@ -1099,13 +1099,10 @@ function serializeForScript(value: unknown): string {
         .replace(/\u2029/g, '\\u2029');
 }
 
-// Env variables that have a matching manifest config field. Only these are prefilled.
+// Prefill only non-secret env vars. Secret fields (API keys, proxy password)
+// never get env values here: / is public and would leak them via view-source.
 const ENV_CONFIG_DEFAULTS: Record<string, string> = {
     EASYPROXY_URL: 'easyProxyUrl',
-    EASYPROXY_PASSWORD: 'easyProxyPassword',
-    TMDB_API_KEY: 'tmdbApiKey',
-    TVDB_API_KEY: 'tvdbApiKey',
-    TVDB_PIN: 'tvdbPin',
 };
 
 export function landingTemplate(
@@ -1127,11 +1124,9 @@ export function landingTemplate(
 
     for (const [envKey, configKey] of Object.entries(ENV_CONFIG_DEFAULTS)) {
         if (!configKeys.has(configKey)) continue;
-        const value = env[envKey];
+        const value = (env[envKey] || '').trim();
         if (!value) continue;
-        const normalized = envKey === 'EASYPROXY_PASSWORD' ? value : value.trim();
-        if (!normalized) continue;
-        defaults[configKey] = normalized;
+        defaults[configKey] = value;
     }
 
     const normalizedBaseUrl = String(publicBaseUrl || '').trim().replace(/\/+$/, '');
