@@ -397,7 +397,6 @@ interface ParsedSaturnPage {
   animePath: string | null;
   sourceTag: 'ITA' | 'SUB';
   episodes: { num: number; token: string; episodePath: string | null; watchUrl: string | null }[];
-  relatedAnimePaths: string[];
 }
 
 function parseAnimeSaturnPage(html: string, fallback: { animePath?: string | null; title?: string | null } = {}): ParsedSaturnPage {
@@ -434,25 +433,12 @@ function parseAnimeSaturnPage(html: string, fallback: { animePath?: string | nul
     }
   }
 
-  const relatedAnimePaths: string[] = [];
-  const seenRelated = new Set<string>();
-  collectAnchorMatches(html, '/anime/').forEach((anchor) => {
-    const relatedPath = normalizeAnimeSaturnPath(anchor.href);
-    if (!relatedPath || seenRelated.has(relatedPath)) return;
-    if (animePath && relatedPath === animePath) return;
-    const probe = `${anchor.text || ''} ${anchor.title || ''} ${relatedPath}`.toLowerCase();
-    if (!probe.includes('ita')) return;
-    seenRelated.add(relatedPath);
-    relatedAnimePaths.push(relatedPath);
-  });
-
   episodes.sort((a, b) => a.num - b.num);
   return {
     title,
     animePath,
     sourceTag,
     episodes,
-    relatedAnimePaths,
   };
 }
 
@@ -474,25 +460,6 @@ function normalizeEpisodesList(sourceEpisodes: any[] = []): { num: number; token
   }
   out.sort((a, b) => a.num - b.num);
   return out;
-}
-
-function mergeEpisodeLists(existingEpisodes: any[] = [], nextEpisodes: any[] = []): { num: number; token: string; episodePath: string | null; watchUrl: string | null }[] {
-  const map = new Map<number, { num: number; token: string | null; episodePath: string | null; watchUrl: string | null }>();
-  function setEpisode(entry: any) {
-    if (!entry) return;
-    const num = Number.parseInt(String(entry.num || ''), 10);
-    if (!Number.isFinite(num) || num <= 0) return;
-    const current = map.get(num) || { num, token: null, episodePath: null, watchUrl: null };
-    map.set(num, {
-      num,
-      token: entry.token || current.token || null,
-      episodePath: entry.episodePath || current.episodePath || null,
-      watchUrl: entry.watchUrl || current.watchUrl || null,
-    });
-  }
-  normalizeEpisodesList(existingEpisodes).forEach(setEpisode);
-  normalizeEpisodesList(nextEpisodes).forEach(setEpisode);
-  return [...map.values()].sort((a, b) => a.num - b.num) as any;
 }
 
 function pickEpisodeEntry(
@@ -823,29 +790,8 @@ export class AnimeSaturnProvider {
       originalEpisode === null || originalEpisode === undefined ? normalizedEpisode : originalEpisode
     );
 
-    let episodes = normalizeEpisodesList(parsedPage.episodes);
-    let selected = pickEpisodeEntry(episodes, normalizedEpisode, mediaType);
-
-    const allowRelated = String(parsedPage.sourceTag || '').toUpperCase() !== 'ITA';
-    if (allowRelated && (!selected || episodes.length === 0) && Array.isArray(parsedPage.relatedAnimePaths) && parsedPage.relatedAnimePaths.length > 0) {
-      for (const related of parsedPage.relatedAnimePaths.slice(0, 2)) {
-        try {
-          const relatedUrl = buildSaturnUrl(related);
-          if (!relatedUrl) continue;
-          const html = await fetchResource(relatedUrl, asCaches, {
-            ttlMs: 15 * 60 * 1000,
-            cacheKey: `anime-related:${related}`,
-            timeoutMs: AS_FETCH_TIMEOUT,
-            headers: buildSaturnHeaders(),
-          });
-          const relatedParsed = parseAnimeSaturnPage(html, { animePath: related, title: parsedPage.title });
-          episodes = mergeEpisodeLists(episodes, relatedParsed.episodes);
-        } catch {
-          // ignore related parse failure
-        }
-      }
-      selected = pickEpisodeEntry(episodes, normalizedEpisode, mediaType);
-    }
+    const episodes = normalizeEpisodesList(parsedPage.episodes);
+    const selected = pickEpisodeEntry(episodes, normalizedEpisode, mediaType);
 
     if (!selected) return [];
 

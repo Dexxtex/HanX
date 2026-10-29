@@ -211,3 +211,32 @@ test('titleMatchScoreAny recupera il romaji MAL quando l’inglese non matcha', 
   // Titolo non correlato resta a zero anche con l'alternativo.
   assert.equal(titleMatchScoreAny([english, romaji], 'One Piece'), 0);
 });
+
+test('un sottotitolo nuovo non è un match 0.9 (Prince of Tennis)', () => {
+  // La scheda "Final Member Selection Match" è l'anime del 2026, non la
+  // stagione 1 del 2022: il prefisso in comune non basta.
+  assert.equal(
+    titleMatchScore(
+      'The Prince of Tennis II: U-17 WORLD CUP',
+      'The Prince of Tennis II U-17 WORLD CUP: Final Member Selection Match'
+    ),
+    0
+  );
+});
+
+test('gli omoglifi cirillici di Kitsu non rompono ricerca e match', () => {
+  // Dato reale di Kitsu 50991: "Jyuоu" con la о cirillica (U+043E).
+  const dirty = 'Jyu\u043Eu Mujin Dandivine';
+  assert.equal(
+    normalizeTitleForSearch(dirty, { exactMap: {}, replacements: [] }),
+    'Jyuou Mujin Dandivine'
+  );
+  assert.equal(titleMatchScore(dirty, 'Jyuou Mujin Dandivine'), 1);
+  assert.equal(normalizeSearchTitleKey(dirty), 'jyuou mujin dandivine');
+});
+
+test('il trattino tolto dalla query non fa perdere il risultato (Kurumi-chan)', () => {
+  // AnimeUnity cerca "FX Fighter Kurumichan", la scheda del sito è
+  // "FX Fighter Kurumi-chan": stessi token, cambia solo il trattino.
+  assert.equal(titleMatchScore('FX Fighter Kurumichan', 'FX Fighter Kurumi-chan'), 1);
+});

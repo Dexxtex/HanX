@@ -1,5 +1,22 @@
 export type TitleReplacements = ReadonlyArray<readonly [string, string]>;
 
+// Kitsu a volte pubblica i titoli con lettere cirilliche/greche identiche a
+// quelle latine ("Jyuоu"): la query arriva ai siti con un carattere fantasma e
+// non trova nulla. Si riportano solo i gemelli visivamente uguali, non le
+// parole scritte davvero in cirillico.
+const HOMOGLYPHS: Record<string, string> = {
+  'а': 'a', 'А': 'A', 'е': 'e', 'Е': 'E', 'о': 'o', 'О': 'O', 'р': 'p', 'Р': 'P',
+  'с': 'c', 'С': 'C', 'у': 'y', 'У': 'Y', 'х': 'x', 'Х': 'X', 'і': 'i', 'І': 'I',
+  'ј': 'j', 'Ј': 'J', 'ѕ': 's', 'Ѕ': 'S', 'ԁ': 'd', 'Ԁ': 'D', 'һ': 'h', 'Һ': 'H',
+  'ӏ': 'l', 'Ӏ': 'L', 'ο': 'o', 'Ο': 'O', 'α': 'a', 'Α': 'A', 'ε': 'e', 'Ε': 'E',
+  'ι': 'i', 'Ι': 'I', 'κ': 'k', 'Κ': 'K', 'ρ': 'p', 'Ρ': 'P', 'τ': 't', 'Τ': 'T',
+  'υ': 'u', 'Υ': 'Y', 'χ': 'x', 'Χ': 'X',
+};
+
+export function normalizeHomoglyphs(input: string): string {
+  return String(input || '').replace(/[аАеЕоОрРсСуУхХіІјЈѕЅԁԀһҺӏӀοΟαΑεΕιΙκΚρΡτΤυΥχΧ]/g, (ch) => HOMOGLYPHS[ch] || ch);
+}
+
 export interface TitleNormalizationOptions {
   exactMap: Readonly<Record<string, string>>;
   replacements: TitleReplacements;
@@ -39,7 +56,7 @@ export function normalizeTitleForSearch(
     : (Object.prototype.hasOwnProperty.call(exactMap, title) ? title : null);
   if (key) return exactMap[key];
 
-  let normalized = title;
+  let normalized = normalizeHomoglyphs(title);
   for (const [from, to] of replacements) {
     if (!normalized.includes(from)) continue;
     normalized = replacementMode === 'literal'
@@ -125,9 +142,16 @@ const TITLE_LANGUAGE_WORDS = new Set(['cr', 'dub', 'eng', 'ita', 'jp', 'jap', 's
 const TITLE_SEASON_SUFFIXES = new Set([
   'arc', 'chapter', 'cour', 'hen', 'movie', 'ona', 'ova', 'part', 'saga', 'season', 'special',
 ]);
+// Suffissi che non identificano un'altra opera: "Show: Sub" e "Show: Sub
+// Special" restano la stessa scheda. Un sottotitolo nuovo ("...: Final
+// Member Selection Match") invece è un'altra stagione o un altro anime.
+const FORMAT_SUFFIX_TOKENS = new Set([
+  'movie', 'film', 'ova', 'ona', 'special', 'specials', 'recap', 'prologue',
+  'edition', 'version', 'uncut', 'uncensored', 'short',
+]);
 
 function titleTokens(title: string): string[] {
-  const tokens = String(title || '')
+  const tokens = normalizeHomoglyphs(String(title || ''))
     .normalize('NFKD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
@@ -143,9 +167,10 @@ function titleTokens(title: string): string[] {
 }
 
 /**
- * 1 = stesso titolo. 0.9 = stesso sottotitolo, con una parte extra non
- * numerata. 0.5 = stessa serie e almeno un token del sottotitolo in comune
- * ("The Three Deities" / "War of the Three Titans Arc"). 0 = non correlato.
+ * 1 = stesso titolo. 0.9 = stesso sottotitolo, con in più solo un suffisso di
+ * formato (movie, special, OVA...). 0.5 = stessa serie e almeno un token del
+ * sottotitolo in comune ("The Three Deities" / "War of the Three Titans Arc").
+ * 0 = non correlato.
  */
 export function titleMatchScore(requested: string, candidate: string): number {
   const query = titleTokens(requested);
@@ -155,14 +180,20 @@ export function titleMatchScore(requested: string, candidate: string): number {
   const queryKey = query.join(' ');
   const foundKey = found.join(' ');
   if (queryKey === foundKey) return 1;
+  // "Kurumi-chan" e "Kurumichan" sono lo stesso titolo: le normalizzazioni dei
+  // provider tolgono il trattino dalla query ma non dal titolo del sito.
+  if (query.join('') === found.join('')) return 1;
 
   // A bare series title must not match a season that only adds a subtitle.
   const bothHaveSubtitle = /:|\s+-\s+/.test(requested) && /:|\s+-\s+/.test(candidate);
   if (bothHaveSubtitle && (foundKey.includes(queryKey) || queryKey.includes(foundKey))) {
     const longer = queryKey.length >= foundKey.length ? query : found;
     const shorterLength = Math.min(query.length, found.length);
-    const hasNumber = longer.slice(shorterLength).some((token) => /^\d+$/.test(token));
-    if (!hasNumber) return 0.9;
+    const extra = longer.slice(shorterLength);
+    const hasNumber = extra.some((token) => /^\d+$/.test(token));
+    // Solo un suffisso di formato: un sottotitolo extra è un'altra opera, e
+    // un id sbagliato è peggio di un buco (DECISIONS #1).
+    if (!hasNumber && extra.every((token) => FORMAT_SUFFIX_TOKENS.has(token))) return 0.9;
   }
 
   let sharedPrefix = 0;
@@ -196,7 +227,7 @@ export function titleMatchScoreAny(titles: string[], candidate: string): number 
 
 /** Chiave usata per confrontare titoli mostrati nei risultati. */
 export function normalizeSearchTitleKey(title: string): string {
-  return String(title || '')
+  return normalizeHomoglyphs(String(title || ''))
     .replace(/\((?:ITA|CR|SUB\s*ITA)\)/gi, ' ')
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, ' ')

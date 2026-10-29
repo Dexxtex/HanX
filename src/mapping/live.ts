@@ -40,6 +40,7 @@ interface CacheEntry {
 }
 
 const liveCache = new Map<string, CacheEntry>();
+const liveInflight = new Map<string, Promise<unknown>>();
 const LIVE_CACHE_MAX_ENTRIES = 500;
 
 const RETRY_ATTEMPTS = 4;
@@ -102,24 +103,36 @@ async function cached<T>(key: string, fn: () => Promise<T>, ttlMs = LIVE_TTL_MS)
     debug(4, 'Mapping/Cache', 'hit', key);
     return hit.value as T;
   }
-  debug(4, 'Mapping/Cache', 'miss', key);
-  const value = await fn();
-  liveCache.set(key, { expires: Date.now() + ttlMs, value });
-  // Stesso limite della cache provider: l'eviction evita crescita illimitata
-  // in un processo che resta acceso per settimane.
-  if (liveCache.size > LIVE_CACHE_MAX_ENTRIES) {
-    const now = Date.now();
-    for (const [entryKey, entry] of liveCache) {
-      if (entry.expires <= now) liveCache.delete(entryKey);
-    }
-    let excess = liveCache.size - LIVE_CACHE_MAX_ENTRIES;
-    for (const entryKey of liveCache.keys()) {
-      if (excess <= 0) break;
-      liveCache.delete(entryKey);
-      excess -= 1;
-    }
+  // Tre provider chiedono lo stesso anime nello stesso istante: senza dedupe
+  // partono tre GET identiche (e il budget verso l'esterno è una risorsa).
+  const pending = liveInflight.get(key);
+  if (pending) {
+    debug(4, 'Mapping/Cache', 'join', key);
+    return pending as Promise<T>;
   }
-  return value;
+  debug(4, 'Mapping/Cache', 'miss', key);
+  const run = fn()
+    .then((value) => {
+      liveCache.set(key, { expires: Date.now() + ttlMs, value });
+      // Stesso limite della cache provider: l'eviction evita crescita illimitata
+      // in un processo che resta acceso per settimane.
+      if (liveCache.size > LIVE_CACHE_MAX_ENTRIES) {
+        const now = Date.now();
+        for (const [entryKey, entry] of liveCache) {
+          if (entry.expires <= now) liveCache.delete(entryKey);
+        }
+        let excess = liveCache.size - LIVE_CACHE_MAX_ENTRIES;
+        for (const entryKey of liveCache.keys()) {
+          if (excess <= 0) break;
+          liveCache.delete(entryKey);
+          excess -= 1;
+        }
+      }
+      return value;
+    })
+    .finally(() => liveInflight.delete(key));
+  liveInflight.set(key, run);
+  return run;
 }
 
 function kitsuEntryFromResource(resource: any): KitsuAnimeEntry | null {

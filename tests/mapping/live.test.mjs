@@ -60,3 +60,32 @@ test('fetchJson: imposta un timeout e non ritenta un abort', async () => {
   assert.equal(calls, 1);
   assert.ok(signal instanceof AbortSignal);
 });
+
+test('tre richieste concorrenti allo stesso anime fanno una sola GET', async () => {
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    return jsonResponse({
+      data: {
+        type: 'anime',
+        id: '111222333',
+        attributes: { titles: { en: 'Dedupe Test' }, canonicalTitle: 'Dedupe Test' },
+      },
+    });
+  };
+
+  try {
+    const [a, b, c] = await Promise.all([
+      fetchKitsuAnime('111222333'),
+      fetchKitsuAnime('111222333'),
+      fetchKitsuAnime('111222333'),
+    ]);
+    assert.equal(calls, 1);
+    assert.equal(a?.title, 'Dedupe Test');
+    assert.equal(b?.title, 'Dedupe Test');
+    assert.equal(c?.title, 'Dedupe Test');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
