@@ -89,7 +89,7 @@ volumes:
 
 Salva il file come `compose.yaml`, oppure incollalo nello stack manager. I
 valori `${...}` si impostano in un `.env` accanto al file oppure nel pannello
-**Environment** dello stack; tutte le variabili sono in
+**Environment** dello stack; le variabili principali sono in
 [`.env.example`](.env.example).
 
 ```bash
@@ -127,7 +127,7 @@ docker compose up -d
 
 ## Configurazione
 
-Tutte le variabili sono in [`.env.example`](.env.example). Le principali:
+Le variabili sono in [`.env.example`](.env.example). Le principali:
 
 | Variabile | Significato | Default |
 | --- | --- | --- |

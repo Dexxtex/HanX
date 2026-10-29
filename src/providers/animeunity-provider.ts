@@ -693,7 +693,7 @@ export class AnimeUnityProvider {
     if (!selected?.episodeId) return [];
 
     const resolvedEpisodeNum = parsePositiveInt(selected.num) || requestedEpisode;
-    const preferMp4 = /^(1|true|on)$/i.test(String(process.env.ANIMEUNITY_PREFER_MP4 || process.env.ANIME_MP4_FALLBACK || '0'));
+    const preferMp4 = /^(1|true|on)$/i.test(String(process.env.ANIMEUNITY_PREFER_MP4 || '0'));
 
     // --- 2 modalità (come StreamingCommunity) ---
     // animeunityDirect = Direct (solo locale, IP-bound)
