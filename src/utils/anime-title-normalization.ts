@@ -14,7 +14,12 @@ const HOMOGLYPHS: Record<string, string> = {
 };
 
 export function normalizeHomoglyphs(input: string): string {
-  return String(input || '').replace(/[аАеЕоОрРсСуУхХіІјЈѕЅԁԀһҺӏӀοΟαΑεΕιΙκΚρΡτΤυΥχΧ]/g, (ch) => HOMOGLYPHS[ch] || ch);
+  return String(input || '')
+    // Apostrofo tipografico (Kitsu: "Inukai-san’s") contro quello dritto delle
+    // schede dei siti: la ricerca di AnimeSaturn li distingue, e con "’" trova
+    // solo l'OVA omonima.
+    .replace(/[’‘`´]/g, "'")
+    .replace(/[аАеЕоОрРсСуУхХіІјЈѕЅԁԀһҺӏӀοΟαΑεΕιΙκΚρΡτΤυΥχΧ]/g, (ch) => HOMOGLYPHS[ch] || ch);
 }
 
 export interface TitleNormalizationOptions {

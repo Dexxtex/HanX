@@ -134,6 +134,15 @@ test('buildTitleFallbackQueries conserva ordine e varianti', () => {
   assert.deepEqual(buildTitleFallbackQueries('Death Note'), ['Death+Note']);
 });
 
+test('normalizeTitleForSearch riporta l apostrofo tipografico a quello dritto', () => {
+  // Le schede dei siti usano "'", Kitsu manda "’": la ricerca li distingue.
+  const config = { exactMap: {}, replacements: [] };
+  assert.equal(
+    normalizeTitleForSearch('My Life as Inukai-san’s Dog', config),
+    "My Life as Inukai-san's Dog"
+  );
+});
+
 test('buildTitleFallbackQueries prova l apostrofo dritto', () => {
   // Evidenza su AnimeSaturn: con "’" trova solo l'OVA, con "'" la serie.
   assert.equal(
