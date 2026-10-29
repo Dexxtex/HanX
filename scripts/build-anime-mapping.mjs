@@ -212,9 +212,12 @@ export function validateIndex(index) {
   return errors;
 }
 
-function applyOverrides(index, overrides) {
+export function applyOverrides(index, overrides) {
   if (!overrides || typeof overrides !== 'object') return index;
   for (const [key, entry] of Object.entries(overrides.series || {})) {
+    // Le chiavi kitsu:* esistono solo per il runtime (titoli che i siti
+    // romanizzano diversamente); l'indice pubblicato accetta solo le esterne.
+    if (!/^(imdb|tmdb|tvdb|mal):/.test(key)) continue;
     if (entry && typeof entry === 'object') index.series[key] = entry;
   }
   for (const [key, entry] of Object.entries(overrides.movies || {})) {

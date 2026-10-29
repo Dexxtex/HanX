@@ -1,4 +1,9 @@
 {
-  "series": {},
-  "movies": {}
+    "series": {
+        "kitsu:50991": {
+            "title": "Dandivine",
+            "titleAlt": "Juuou Mujin Dandivine"
+        }
+    },
+    "movies": {}
 }

@@ -82,6 +82,8 @@ export interface SeasonRange {
 
 export interface SeriesIndexEntry {
   title?: string;
+  /** Titolo romaji alternativo: gli override lo usano quando i siti romanizzano diversamente. */
+  titleAlt?: string;
   /** Titolo italiano dell'opera (TMDB it-IT), usato come query di ripiego. */
   titleIt?: string;
   /** External season number -> step ranges, ordered by `from`. */

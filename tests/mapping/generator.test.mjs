@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { alignEntries, alignTmdbEpisodes, pickKitsuResult, pickTmdbResult, rangesFrom, titleVariants, tmdbQuery, tvdbSeriesIdFromMappings, pickTvdbSeries, tvdbQueries, tvdbIdFromSearch, tmdbIdFromMdblistMap, kitsuIdFromSimklMap, singleSeasonRanges, validateIndex } from '../../scripts/build-anime-mapping.mjs';
+import { alignEntries, alignTmdbEpisodes, pickKitsuResult, pickTmdbResult, rangesFrom, titleVariants, tmdbQuery, tvdbSeriesIdFromMappings, pickTvdbSeries, tvdbQueries, tvdbIdFromSearch, tmdbIdFromMdblistMap, kitsuIdFromSimklMap, singleSeasonRanges, validateIndex, applyOverrides } from '../../scripts/build-anime-mapping.mjs';
 
 const entry = (overrides = {}) => ({
   id: '100',
@@ -125,6 +125,28 @@ test('validateIndex accetta un range senza kitsuId solo se ha un titolo', () => 
   const errors = validateIndex(withoutTitle);
   assert.ok(errors.some((error) => /range without kitsuId or title/.test(error)));
   assert.ok(errors.some((error) => /movie tmdb:2 without kitsuId or title/.test(error)));
+});
+
+test('applyOverrides ignora le chiavi kitsu:* nell\'indice pubblicato', () => {
+  const index = { version: 1, series: {}, movies: {} };
+  applyOverrides(index, {
+    series: {
+      'kitsu:50991': { title: 'Dandivine', titleAlt: 'Juuou Mujin Dandivine' },
+      'tmdb:1': { title: 'OK', seasons: { '1': [{ from: 1, kitsuId: '1', offset: 0 }] } },
+    },
+    movies: {},
+  });
+  assert.equal(index.series['kitsu:50991'], undefined);
+  assert.ok(index.series['tmdb:1']);
+});
+
+test('validateIndex rifiuta le chiavi kitsu:*', () => {
+  const errors = validateIndex({
+    version: 1,
+    series: { 'kitsu:50991': { title: 'Dandivine', titleAlt: 'X', seasons: {} } },
+    movies: {},
+  });
+  assert.ok(errors.some((error) => /invalid series key: kitsu:50991/.test(error)));
 });
 
 test('tvdbQueries pesca l\'inglese da titles[] quando title_english manca', () => {

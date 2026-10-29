@@ -379,6 +379,27 @@ test('mapping signature changes when index or overrides content changes', () => 
   resetMappingCache();
 });
 
+test('override kitsu fornisce il titolo giusto ai provider', () => {
+  // Kitsu scrive "Jyuоu..." (con о cirillica) ma AnimeSaturn lista "Dandivine"
+  // e AnimeWorld "Juuou Mujin Dandivine": senza override la ricerca esce a vuoto.
+  const overridesFile = path.join(fixtureDir, 'overrides-kitsu.json');
+  fs.writeFileSync(overridesFile, JSON.stringify({
+    series: { 'kitsu:50991': { title: 'Dandivine', titleAlt: 'Juuou Mujin Dandivine' } },
+    movies: {},
+  }));
+  process.env.ANIME_MAPPING_OVERRIDES = overridesFile;
+  resetMappingCache();
+
+  const target = targetFor('kitsu:50991:2');
+  assert.equal(target.title, 'Dandivine');
+  assert.equal(target.titleAlt, 'Juuou Mujin Dandivine');
+  assert.equal(target.kitsuId, '50991');
+  assert.equal(target.kitsuEpisode, 2);
+
+  delete process.env.ANIME_MAPPING_OVERRIDES;
+  resetMappingCache();
+});
+
 test('parser handles TVDB and no S/E movies', () => {
   const series = parseRequestId('tvdb:377543:3:13');
   assert.ok(series);

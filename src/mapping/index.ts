@@ -335,14 +335,15 @@ export function resolveLocalTarget(request: MappingRequest): MappingTarget | nul
   if (request.provider === 'kitsu') {
     loadIndex();
     const alt = snapshot?.kitsuAlt.get(String(request.id));
+    // Un override esplicito (kitsu:<id>) vince: alcuni siti romanizzano il
+    // titolo in modo diverso da Kitsu e senza la query giusta non esce nulla.
+    const override = seriesFor(request);
     const target: MappingTarget = {
       kitsuId: request.id,
       kitsuEpisode: request.episode ?? 1,
-      title: '',
-      // Solo l'italiano: per le richieste Kitsu il romaji non è mai stato usato
-      // e anticiperebbe le varianti storiche che oggi trovano la scheda giusta.
-      titleAlt: '',
-      titleIt: alt?.titleIt || '',
+      title: override?.title || '',
+      titleAlt: override?.titleAlt || '',
+      titleIt: alt?.titleIt || override?.titleIt || '',
       titleItSeason: alt?.season ?? null,
       displaySeason: null,
       source: 'kitsu',
