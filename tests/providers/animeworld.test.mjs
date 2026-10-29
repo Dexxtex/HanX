@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-const { animeWorldDisplayName, animeWorldStreamName, awResultsRelateToQuery, filterWorldVersionsByQuery } = await import('../../dist/providers/animeworld-provider.js');
+const { animeWorldDisplayName, animeWorldStreamName, awResultsRelateToQuery, filterWorldVersionsByQuery, isSingleFallbackHit } = await import('../../dist/providers/animeworld-provider.js');
 
 // AnimeWorld restituisce il listone "ultimi arrivi" quando il filtro non ha
 // corrispondenze: se viene preso per vero, il fallback produce stream di un
@@ -87,4 +87,17 @@ test('il filtro tiene il titolo mostrato quando lo slug e in un altra lingua', (
 
 test('query senza parole utili non filtra nulla', () => {
   assert.equal(filterWorldVersionsByQuery(JUNK, 'a b').length, JUNK.length);
+});
+
+test('unico risultato da query di ripiego: accettato senza match di slug', () => {
+  // Caso reale: AnimeWorld lista "Dandivine" come beast-king-war-god-dandivine,
+  // la query di ripiego e' "Juuou Mujin Dandivine" e lo slug inglese non combacia.
+  const beast = [{ slug: 'beast-king-war-god-dandivine.iuwjg', name: 'Dandivine', searchTitle: 'Dandivine' }];
+  assert.equal(isSingleFallbackHit(beast, [], true), true);
+  // La ricerca principale non passa dal ripiego: il listone generico non va accettato.
+  assert.equal(isSingleFallbackHit(beast, [], false), false);
+  // Piu' risultati dal ripiego: serve ancora il filtro strict.
+  assert.equal(isSingleFallbackHit([...beast, ...JUNK], [], true), false);
+  // Se il filtro ha gia' trovato qualcosa, nessun bisogno dell'eccezione.
+  assert.equal(isSingleFallbackHit(beast, beast, true), false);
 });

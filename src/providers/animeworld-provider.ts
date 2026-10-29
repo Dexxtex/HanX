@@ -310,6 +310,20 @@ export function filterWorldVersionsByQuery<T extends { searchTitle?: string; nam
   });
 }
 
+/**
+ * Unica scheda trovata da una query di ripiego: il sito ha risposto a un
+ * titolo derivato (romaji/variante), quindi lo slug puo' essere in un'altra
+ * lingua e il filtro strict la scarterebbe. Stessa regola di AnimeSaturn:
+ * un solo risultato del sito vale come match.
+ */
+export function isSingleFallbackHit(
+  versions: Array<{ slug?: string }>,
+  filtered: Array<{ slug?: string }>,
+  fromFallback: boolean
+): boolean {
+  return fromFallback && filtered.length === 0 && versions.length === 1;
+}
+
 async function awSearch(query: string, date?: string): Promise<AnimeWorldResult[]> {  const q = encodeURIComponent(String(query || '').trim());
   if (!q) return [];
   const year = date ? String(date).split('-')[0] : null;
@@ -942,6 +956,7 @@ export class AnimeWorldProvider {
     debug(3, 'AnimeWorld', '[AnimeWorld] Title normalized:', normalized);
 
     let versions = await searchWithLogging(normalized);
+    let versionsFromFallback = false;
 
     if (!skipExtraNormalization && !versions.length) {
       // Budget ricerca <=3 fetch: la principale più DUE ripieghi, il secondo
@@ -957,6 +972,7 @@ export class AnimeWorldProvider {
         debug(2, 'AnimeWorld', `[AnimeWorld] Search fallback "${fallbackQuery}" -> ${res.length}`);
         if (res.length) {
           versions = res;
+          versionsFromFallback = true;
           break;
         }
       }
@@ -1002,6 +1018,10 @@ export class AnimeWorldProvider {
             if (filtered.length) {
               debug(2, 'AnimeWorld', `[AnimeWorld] Match con titolo alternativo "${titleAlt}"`);
             }
+          }
+          if (isSingleFallbackHit(versions, filtered, versionsFromFallback)) {
+            debug(2, 'AnimeWorld', `[AnimeWorld] Unico risultato da query di ripiego accettato: ${versions[0]?.slug}`);
+            filtered = versions;
           }
           debug(3, 'AnimeWorld', `[AnimeWorld] Strict base filter applied (${normSlugKey}) from ${beforeCount} -> ${filtered.length}`);
           if (!filtered.length) {
