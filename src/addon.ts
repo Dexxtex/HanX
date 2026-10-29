@@ -19,7 +19,7 @@ import { AnimeUnityProvider } from './providers/animeunity-provider.js';
 import { providerLabel } from './utils/unifiedNames.js';
 import { landingTemplate } from './landingPage.js';
 import { toNumericId, parseRequestId } from './mapping/request.js';
-import { getMappingVersion, refreshMappingFromUrl } from './mapping/index.js';
+import { getMappingStatus, getMappingVersion, refreshMappingFromUrl } from './mapping/index.js';
 import { debug, DEBUG_LEVEL } from './utils/logger.js';
 import { unifyStreams, providerRank } from './utils/streamTitle.js';
 import { sendHtmlResponse } from './utils/http.js';
@@ -53,7 +53,7 @@ function sortStreamsByPriority(streams: { url?: string; title?: string }[]): voi
 // ================= MANIFEST BASE (restored) =================
 const baseManifest: Manifest = {
     id: "org.stremio.hanx",
-    version: "1.0.5",
+    version: "1.0.6",
     name: "HanX",
     description: "HanX addon dedicato ad AnimeUnity, AnimeSaturn e AnimeWorld",
     types: ["movie", "series", "anime"],
@@ -552,6 +552,27 @@ app.use((req: Request, res: ExpressResponse, next: NextFunction) => {
     }
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.type('application/json').send(JSON.stringify(manifest));
+});
+
+// Diagnostica runtime: niente config utente, segreti o valori di env.
+// Prima del middleware qui sotto per non passare dal parsing config e dal
+// router Stremio (che farebbe next() → 404).
+app.get('/status.json', (_req: Request, res: ExpressResponse) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Cache-Control', 'no-store');
+    res.type('application/json').send(JSON.stringify({
+        addon: {
+            version: loadCustomConfig().version,
+            uptimeMs: Math.round(process.uptime() * 1000),
+        },
+        mapping: getMappingStatus(),
+        cache: {
+            entries: _providerStreamCache.size,
+            maxEntries: PROVIDER_CACHE_MAX_ENTRIES,
+            ttlMs: PROVIDER_CACHE_TTL_MS,
+            disabled: PROVIDER_CACHE_DISABLED,
+        },
+    }));
 });
 
 // ✅ Middleware semplificato che usa sempre il router globale

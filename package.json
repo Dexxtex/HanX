@@ -1,6 +1,6 @@
 {
   "name": "hanx",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "HanX - addon Stremio/NUVIO esclusivo per anime (AnimeUnity, AnimeSaturn, AnimeWorld)",
   "main": "dist/addon.js",
   "type": "module",
