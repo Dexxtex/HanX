@@ -27,6 +27,7 @@ docker-compose.yml
 graphify-out
 .graphifyignore
 .devloop
+.opencode
 
 # --- Script: nel container servono solo build e converter del mapping ---
 scripts/*

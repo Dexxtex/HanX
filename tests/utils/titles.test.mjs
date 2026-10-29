@@ -134,6 +134,14 @@ test('buildTitleFallbackQueries conserva ordine e varianti', () => {
   assert.deepEqual(buildTitleFallbackQueries('Death Note'), ['Death+Note']);
 });
 
+test('buildTitleFallbackQueries prova l apostrofo dritto', () => {
+  // Evidenza su AnimeSaturn: con "’" trova solo l'OVA, con "'" la serie.
+  assert.equal(
+    buildTitleFallbackQueries('My Life as Inukai-san’s Dog')[0],
+    "My Life as Inukai-san's Dog"
+  );
+});
+
 test('buildTitleFallbackQueries mette per prima la scheda di stagione senza sottotitolo', () => {
   // "Tower of God 2: Workshop Battle" sta nella pagina "Tower of God 2":
   // il sottotitolo dell'arco non è indicizzato e brucerebbe i due ripieghi.

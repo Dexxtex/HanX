@@ -110,6 +110,10 @@ export function sameQuery(a: string | null | undefined, b: string | null | undef
 /** Query di ripiego usate quando la ricerca normale non restituisce risultati. */
 export function buildTitleFallbackQueries(normalized: string, season?: number | null): string[] {
   const queries: string[] = [];
+  // Kitsu scrive l'apostrofo tipografico ("Inukai-san’s"), il sito quello
+  // dritto: la ricerca di AnimeSaturn li distingue e trova solo l'OVA.
+  const straightApostrophe = normalized.replace(/[’‘`´]/g, "'");
+  if (straightApostrophe !== normalized) queries.push(straightApostrophe);
   // I siti tengono una scheda per stagione e non indicizzano il sottotitolo
   // dell'arco: "Tower of God 2: Workshop Battle" sta nella pagina "Tower of
   // God 2". Va per prima, perché i ripieghi provati sono solo due.
