@@ -1084,7 +1084,10 @@ export class AnimeSaturnProvider {
     // L'alternativo (romaji MAL) entra solo se l'inglese non trova nulla: così
     // non può scavalcare un match già buono. Prima si rifiltrano gli stessi
     // risultati; se il sito non ha nemmeno risposto, si usa come query.
-    const altQuery = titleAlt && titleAlt !== normalizedTitle ? titleAlt : '';
+    // Anche il romaji passa dalla normalizzazione: "Aharen-san wa Hakarenai
+    // Season 2" così com'è dà 0 risultati, la scheda è "... 2".
+    const altRaw = titleAlt ? normalizeTitleForSearch(titleAlt, animeSaturnTitleNormalization) : '';
+    const altQuery = sameQuery(altRaw, normalizedTitle) ? '' : altRaw;
     // Saturn indicizza i titoli italiani: senza sottotitolo è il primo ripiego.
     const itQueryRaw = italianSeasonQuery(titleIt, titleItSeason ?? seasonNumber, normalizedTitle);
     const itQuery = sameQuery(itQueryRaw, normalizedTitle) ? '' : itQueryRaw;
@@ -1108,7 +1111,7 @@ export class AnimeSaturnProvider {
       const candidates = hasSubtitle
         ? [altQuery, ...buildTitleFallbackQueries(normalizedTitle, seasonNumber)]
         : [itQuery, altQuery, ...buildTitleFallbackQueries(normalizedTitle, seasonNumber)];
-      for (const fallbackQuery of candidates.filter(q => q && !sameQuery(q, normalizedTitle)).slice(0, 2)) {
+      for (const fallbackQuery of candidates.filter((q, i, all) => q && !sameQuery(q, normalizedTitle) && all.indexOf(q) === i).slice(0, 2)) {
         titles.push(fallbackQuery);
         const fallbackVersions = filterAnimeResults(await this.searchAllVersions(fallbackQuery), titles);
         if (fallbackVersions.length) {

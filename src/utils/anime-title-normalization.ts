@@ -84,11 +84,13 @@ export function normalizeTitleForSearch(
 const ROMAN_NUMERALS: Record<string, string> = {
   ii: '2', iii: '3', iv: '4', v: '5', vi: '6', vii: '7', viii: '8', ix: '9',
   x: '10', xi: '11', xii: '12',
+  // Varianti Unicode (U+2161…): Kitsu usa "Ⅱ" in "Demon King Academy Ⅱ".
+  'ⅱ': '2', 'ⅲ': '3', 'ⅳ': '4', 'ⅴ': '5', 'ⅵ': '6', 'ⅶ': '7', 'ⅷ': '8', 'ⅸ': '9', 'ⅹ': '10',
 };
 
 /** Converte solo un numero romano in coda: "Edgerunners II" -> "Edgerunners 2". */
 function romanSuffixToDigits(title: string): string {
-  return title.replace(/\s+(ii|iii|iv|v|vi|vii|viii|ix|x|xi|xii)$/i, (match, roman) => {
+  return title.replace(/\s+(xii|xi|viii|vii|iii|ii|ix|iv|vi|x|v|ⅷ|ⅶ|ⅲ|ⅱ|ⅸ|ⅳ|ⅵ|ⅹ|ⅴ)$/i, (match, roman) => {
     const digits = ROMAN_NUMERALS[String(roman).toLowerCase()];
     return digits ? ` ${digits}` : match;
   });
@@ -112,7 +114,7 @@ export function buildTitleFallbackQueries(normalized: string, season?: number | 
   // dell'arco: "Tower of God 2: Workshop Battle" sta nella pagina "Tower of
   // God 2". Va per prima, perché i ripieghi provati sono solo due.
   if (season && season > 1) {
-    const seasonBase = normalized.split(':')[0].split(/\s+-\s+/)[0].trim();
+    const seasonBase = romanSuffixToDigits(normalized.split(':')[0].split(/\s+-\s+/)[0].trim());
     if (seasonBase !== normalized && seasonBase.length >= 4) queries.push(seasonBase);
   }
   // "CYBERPUNK: EDGERUNNERS II" cercato alla lettera dà 0 risultati: sui siti è "2".

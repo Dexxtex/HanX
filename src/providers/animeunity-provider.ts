@@ -985,7 +985,9 @@ export class AnimeUnityProvider {
     // Romaji MAL: alcuni record del sito non hanno name_eng e il titolo inglese
     // non supera la soglia. Entra solo se l'inglese non trova nulla: prima nel
     // filtro, poi (se il sito non ha risposto) come query di ripiego.
-    const altQuery = titleAlt && titleAlt !== normalizedTitle ? titleAlt : '';
+    // Anche il romaji passa dalla normalizzazione ("... Season 2" -> "... 2").
+    const altRaw = titleAlt ? normalizeTitleForSearch(titleAlt) : '';
+    const altQuery = sameQuery(altRaw, normalizedTitle) ? '' : altRaw;
     // Titolo italiano (TMDB): molti record di .co hanno solo name_it/name_eng
     // italiani, che l'inglese non tocca. Se coincide con la query italiana non
     // aggiunge nulla (es. "Cyberpunk: Edgerunners" ha lo stesso nome in it-IT).
@@ -1058,7 +1060,7 @@ export class AnimeUnityProvider {
       const candidates = hasSubtitle
         ? [altQuery, ...buildTitleFallbackQueries(normalizedTitle, seasonNumber)]
         : [itQuery, altQuery, ...buildTitleFallbackQueries(normalizedTitle, seasonNumber)];
-      for (const fallbackQuery of candidates.filter(q => q && !sameQuery(q, normalizedTitle)).slice(0, 2)) {
+      for (const fallbackQuery of candidates.filter((q, i, all) => q && !sameQuery(q, normalizedTitle) && all.indexOf(q) === i).slice(0, 2)) {
         queryTitles.push(fallbackQuery);
         const fallbackVersions = filterAnimeResults(await this.searchAllVersions(fallbackQuery), queryTitles);
         if (fallbackVersions.length) {

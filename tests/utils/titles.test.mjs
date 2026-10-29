@@ -148,6 +148,14 @@ test('sameQuery distingue le query che differiscono solo per punteggiatura', () 
   assert.equal(sameQuery('BOFURI 2', 'bofuri  2'), true);
 });
 
+test('buildTitleFallbackQueries converte i numeri romani Unicode di stagione', () => {
+  // Kitsu scrive "Demon King Academy Ⅱ", la scheda del sito è "... 2".
+  assert.equal(
+    buildTitleFallbackQueries('The Misfit of Demon King Academy Ⅱ: History', 2)[0],
+    'The Misfit of Demon King Academy 2'
+  );
+});
+
 test('buildTitleFallbackQueries prova la metà italiana dei titoli ibridi', () => {
   // "Hungry Heart: Wild Striker - La squadra del cuore": su AnimeSaturn la
   // scheda si chiama "La squadra del cuore".

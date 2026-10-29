@@ -930,7 +930,9 @@ export class AnimeWorldProvider {
     const itQueryRaw = italianSeasonQuery(titleIt, titleItSeason ?? seasonNumber, normalized);
     const itQuery = sameQuery(itQueryRaw, normalized) ? '' : itQueryRaw;
     if (itQuery) titleKeys.push(itQuery);
-    const altQuery = titleAlt && titleAlt !== normalized ? titleAlt : '';
+    // Anche il romaji passa dalla normalizzazione ("... Season 2" -> "... 2").
+    const altRaw = titleAlt ? normalizeTitleForSearch(titleAlt, animeWorldTitleNormalization) : '';
+    const altQuery = sameQuery(altRaw, normalized) ? '' : altRaw;
     const wantsRewrite = /rewrite/i.test(normalized);
     const strictFilterActive = !skipExtraNormalization && !wantsRewrite;
     const allowedSuffixes = ['-ita', '-subita', '-sub-ita', '-cr-ita', '-ita-cr'];
@@ -967,7 +969,7 @@ export class AnimeWorldProvider {
       const candidates = hasSubtitle
         ? [altQuery, ...buildTitleFallbackQueries(normalized, seasonNumber)]
         : [itQuery, altQuery, ...buildTitleFallbackQueries(normalized, seasonNumber)];
-      for (const fallbackQuery of candidates.filter(q => q && !sameQuery(q, normalized)).slice(0, 2)) {
+      for (const fallbackQuery of candidates.filter((q, i, all) => q && !sameQuery(q, normalized) && all.indexOf(q) === i).slice(0, 2)) {
         const res = await this.searchAllVersions(fallbackQuery, () => false);
         debug(2, 'AnimeWorld', `[AnimeWorld] Search fallback "${fallbackQuery}" -> ${res.length}`);
         if (res.length) {
