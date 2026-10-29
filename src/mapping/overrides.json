@@ -3,6 +3,135 @@
         "kitsu:50991": {
             "title": "Dandivine",
             "titleAlt": "Juuou Mujin Dandivine"
+        },
+        "imdb:tt38491451": {
+            "title": "Tatsuki Fujimoto 17-26",
+            "seasons": {
+                "1": [
+                    {
+                        "from": 1,
+                        "kitsuId": "",
+                        "offset": 0,
+                        "title": "Tatsuki Fujimoto 17-26",
+                        "titleAlt": "Fujimoto Tatsuki 17-26",
+                        "episodeCount": 8
+                    }
+                ]
+            }
+        },
+        "tmdb:299778": {
+            "title": "Tatsuki Fujimoto 17-26",
+            "seasons": {
+                "1": [
+                    {
+                        "from": 1,
+                        "kitsuId": "",
+                        "offset": 0,
+                        "title": "Tatsuki Fujimoto 17-26",
+                        "titleAlt": "Fujimoto Tatsuki 17-26",
+                        "episodeCount": 8
+                    }
+                ]
+            }
+        },
+        "tvdb:467641": {
+            "title": "Tatsuki Fujimoto 17-26",
+            "seasons": {
+                "1": [
+                    {
+                        "from": 1,
+                        "kitsuId": "",
+                        "offset": 0,
+                        "title": "Tatsuki Fujimoto 17-26",
+                        "titleAlt": "Fujimoto Tatsuki 17-26",
+                        "episodeCount": 8
+                    }
+                ]
+            }
+        },
+        "imdb:tt16969708": {
+            "title": "Scott Pilgrim Takes Off",
+            "seasons": {
+                "1": [
+                    {
+                        "from": 1,
+                        "kitsuId": "",
+                        "offset": 0,
+                        "title": "Scott Pilgrim Takes Off",
+                        "episodeCount": 8
+                    }
+                ]
+            }
+        },
+        "tmdb:155292": {
+            "title": "Scott Pilgrim Takes Off",
+            "seasons": {
+                "1": [
+                    {
+                        "from": 1,
+                        "kitsuId": "",
+                        "offset": 0,
+                        "title": "Scott Pilgrim Takes Off",
+                        "episodeCount": 8
+                    }
+                ]
+            }
+        },
+        "tvdb:433113": {
+            "title": "Scott Pilgrim Takes Off",
+            "seasons": {
+                "1": [
+                    {
+                        "from": 1,
+                        "kitsuId": "",
+                        "offset": 0,
+                        "title": "Scott Pilgrim Takes Off",
+                        "episodeCount": 8
+                    }
+                ]
+            }
+        },
+        "imdb:tt10545250": {
+            "title": "Eden",
+            "seasons": {
+                "1": [
+                    {
+                        "from": 1,
+                        "kitsuId": "",
+                        "offset": 0,
+                        "title": "Eden",
+                        "episodeCount": 4
+                    }
+                ]
+            }
+        },
+        "tmdb:92584": {
+            "title": "Eden",
+            "seasons": {
+                "1": [
+                    {
+                        "from": 1,
+                        "kitsuId": "",
+                        "offset": 0,
+                        "title": "Eden",
+                        "episodeCount": 4
+                    }
+                ]
+            }
+        },
+        "tvdb:371311": {
+            "title": "Eden",
+            "seasons": {
+                "1": [
+                    {
+                        "from": 1,
+                        "kitsuId": "",
+                        "offset": 0,
+                        "title": "Eden",
+                        "episodeCount": 4
+                    }
+                ]
+            }
         }
     },
     "movies": {}

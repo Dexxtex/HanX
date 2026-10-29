@@ -401,8 +401,14 @@ export function resolveLocalTarget(request: MappingRequest): MappingTarget | nul
     // Un range senza kitsuId (mappato col solo TMDB) è valido se ha un titolo:
     // è quello che i provider cercano.
     .filter((item) => Number.isFinite(item.from) && item.from <= episode && (item.kitsuId || item.title))
-    .sort((a, b) => a.from - b.from)
-    .at(-1);
+    .sort((a, b) => b.from - a.from)
+    // Un range-alias con offset negativo può superare episodeCount: in quel caso
+    // vale il range precedente, che per questo episodio è ancora dentro la entry.
+    .find((item) => {
+      const itemOffset = Number.isFinite(item.offset) ? Number(item.offset) : item.from - 1;
+      const itemEpisode = episode - itemOffset;
+      return itemEpisode >= 1 && (!Number.isFinite(item.episodeCount) || itemEpisode <= Number(item.episodeCount));
+    });
   if (!range) {
     debug(3, 'Mapping', 'local miss', { provider: request.provider, id: request.id, season: request.season, episode, reason: 'range-not-mapped' });
     return null;

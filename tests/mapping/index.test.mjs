@@ -99,6 +99,17 @@ fs.writeFileSync(fixtureFile, JSON.stringify({
       titleIt: 'ファントム THE ANIMATION',
       seasons: { '1': [{ from: 1, kitsuId: '42', offset: 0, title: 'Phantom: The Animation', episodeCount: 3 }] },
     },
+    // Alias con offset negativo oltre episodeCount (Frieren): per l'episodio
+    // richiesto l'ultimo range non vale e serve quello precedente.
+    'tvdb:90004': {
+      title: 'Frieren: Beyond Journey\'s End',
+      seasons: {
+        '1': [
+          { from: 1, kitsuId: '46474', offset: 0, title: 'Frieren: Beyond Journey\'s End', episodeCount: 28 },
+          { from: 20, kitsuId: '46474', offset: -8, title: 'Frieren: Beyond Journey\'s End', episodeCount: 28 },
+        ],
+      },
+    },
     // Offset negativo: numerazione sfasata da una special, non va usata.
     'tmdb:81000': {
       title: 'Shifted',
@@ -214,6 +225,16 @@ test('un passo nella numerazione (offset negativo) resta una mappatura valida', 
   const target = targetFor('tvdb:90001:1:6');
   assert.equal(target.kitsuId, '13939');
   assert.equal(target.kitsuEpisode, 7);
+});
+
+test('un alias con offset negativo oltre episodeCount non nasconde il range precedente', () => {
+  // Frieren: dal 20 il range-alias mappa E20 sul 28 di Kitsu; per E21 il
+  // calcolo uscirebbe dall'entry (29 > 28), quindi vale il range precedente.
+  const target = targetFor('tvdb:90004:1:21');
+  assert.equal(target.kitsuId, '46474');
+  assert.equal(target.kitsuEpisode, 21);
+  // L'alias resta valido finché l'episodio calcolato è dentro la entry.
+  assert.equal(targetFor('tvdb:90004:1:20').kitsuEpisode, 28);
 });
 
 test('una special di stagione 0 che riusa il kitsuId della madre resta bloccata', () => {
