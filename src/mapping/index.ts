@@ -49,6 +49,12 @@ function defaultIndexPath(): string {
   return path.resolve(__dirname, 'data', 'anime-seasons.json');
 }
 
+/**
+ * Cadenza del timer che tenta il refresh dell'indice remoto: 6 ore.
+ * Non è il TTL del download: `refreshMappingFromUrl` scarica al massimo una
+ * volta ogni `REMOTE_TTL_MS` (24 ore), i tentativi intermedi escono subito.
+ */
+export const MAPPING_REFRESH_INTERVAL_MS = 6 * 60 * 60 * 1000;
 /** TTL dell'indice scaricato da ANIME_MAPPING_URL: un giorno. */
 const REMOTE_TTL_MS = 24 * 60 * 60 * 1000;
 /** Un indice corrotto o enorme non deve finire in memoria. */
@@ -212,18 +218,51 @@ export function getMappingVersion(): string {
   return snapshot ? snapshot.signature : 'empty';
 }
 
-/** Stato dell'indice per la diagnostica runtime (/status.json). */
+/** Oltre 48 ore senza ricostruzione l'indice è vecchio (banner in landing). */
+export const MAPPING_STALE_MS = 172800000;
+
+/**
+ * Pura: vera solo con generatedAt stringa parsabile e più vecchia della soglia.
+ * Null, non parsabile e date future non sono "vecchie" (fail-open).
+ */
+export function isMappingStale(generatedAt: unknown, now = Date.now()): boolean {
+  if (typeof generatedAt !== 'string') return false;
+  const time = Date.parse(generatedAt);
+  if (!Number.isFinite(time)) {
+    debug(2, 'Mapping', 'generatedAt non parsabile', { generatedAt });
+    return false;
+  }
+  return now - time > MAPPING_STALE_MS;
+}
+
+/** Stato dell'indice per /status.json e per il banner della landing. */
 export function getMappingStatus() {
-  const index = loadIndex();
-  const mtimeMs = snapshot?.mtimeMs ?? -1;
-  return {
-    schemaVersion: MAPPING_SCHEMA_VERSION,
-    generatedAt: index.generatedAt,
-    series: Object.keys(index.series).length,
-    movies: Object.keys(index.movies).length,
-    ageMs: mtimeMs === -1 ? null : Math.max(0, Date.now() - mtimeMs),
-    signature: getMappingVersion(),
-  };
+  try {
+    const index = loadIndex();
+    const mtimeMs = snapshot?.mtimeMs ?? -1;
+    return {
+      schemaVersion: MAPPING_SCHEMA_VERSION,
+      generatedAt: index.generatedAt,
+      series: Object.keys(index.series).length,
+      movies: Object.keys(index.movies).length,
+      ageMs: mtimeMs === -1 ? null : Math.max(0, Date.now() - mtimeMs),
+      signature: getMappingVersion(),
+      stale: isMappingStale(index.generatedAt),
+    };
+  } catch (e) {
+    // Un indice illeggibile non deve far cadere /status.json né la landing:
+    // fallback con gli stessi tipi dell'indice assente.
+    debug(2, 'Mapping', 'status non disponibile', { error: (e as any)?.message || String(e) });
+    return {
+      schemaVersion: MAPPING_SCHEMA_VERSION,
+      generatedAt: null,
+      series: 0,
+      movies: 0,
+      ageMs: null,
+      signature: 'unavailable',
+      stale: false,
+    };
+  }
 }
 
 export function resetMappingCache(): void {
@@ -246,6 +285,16 @@ function readEtag(filePath: string): string {
 }
 
 /**
+ * Indice su disco usabile: schema supportato e almeno una entry. Non passa da
+ * `loadIndex` di proposito: quello fonde gli override, quindi un indice rotto
+ * risulterebbe usabile grazie alle serie di `overrides.json`.
+ */
+function isUsableIndexFile(target: string): boolean {
+  const index = normalizeIndex(readJson(target));
+  return Boolean(index.version) && Object.keys(index.series).length + Object.keys(index.movies).length > 0;
+}
+
+/**
  * Scarica l'indice mapping da ANIME_MAPPING_URL (es. raw di un branch) e lo
  * mette in cache su disco. Best effort: senza URL, o con rete/schema rotti,
  * resta il file precedente o quello nell'immagine. Non blocca l'avvio.
@@ -255,42 +304,60 @@ export async function refreshMappingFromUrl(): Promise<void> {
   if (!url) return;
   const target = remoteCachePath();
   const mtime = statMtime(target);
-  if (mtime !== -1 && Date.now() - mtime < REMOTE_TTL_MS) {
+  // Un file fresco ma inutilizzabile (schema non supportato o vuoto) non vale
+  // il TTL: riscaricarlo è l'unico modo per ripararlo.
+  if (mtime !== -1 && Date.now() - mtime < REMOTE_TTL_MS && isUsableIndexFile(target)) {
     debug(4, 'Mapping', 'remote index fresh', { ageMs: Date.now() - mtime });
     return;
   }
 
-  const headers: Record<string, string> = {};
   // Repo privato: raw.githubusercontent.com richiede un token (Contents: read).
   const token = String(process.env.ANIME_MAPPING_TOKEN || '').trim();
-  if (token) headers.authorization = `Bearer ${token}`;
   const etag = mtime === -1 ? '' : readEtag(`${target}.etag`);
-  if (etag) headers['if-none-match'] = etag;
 
   try {
-    const res = await fetch(url, { headers, signal: AbortSignal.timeout(15000) });
-    if (res.status === 304 && mtime !== -1) {
-      // Contenuto identico: rinnova solo la scadenza, senza riscrivere il file.
-      const now = new Date();
-      fs.utimesSync(target, now, now);
-      debug(3, 'Mapping', 'remote index unchanged (304)');
+    // Massimo due tentativi: il secondo, senza `if-none-match`, serve quando il
+    // 304 nasconde un indice in cache inutilizzabile.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const headers: Record<string, string> = {};
+      if (token) headers.authorization = `Bearer ${token}`;
+      if (attempt === 0 && etag) headers['if-none-match'] = etag;
+
+      const res = await fetch(url, { headers, signal: AbortSignal.timeout(15000) });
+      if (res.status === 304 && mtime !== -1) {
+        if (attempt === 0 && isUsableIndexFile(target)) {
+          // Contenuto identico: rinnova solo la scadenza, senza riscrivere il file.
+          const now = new Date();
+          fs.utimesSync(target, now, now);
+          debug(3, 'Mapping', 'remote index unchanged (304)');
+          return;
+        }
+        if (attempt === 0) {
+          // Indice in cache inutilizzabile: niente `utimesSync` (non si rinnova
+          // il TTL di un file rotto), etag cancellato e una sola ripetizione
+          // senza `if-none-match` per ottenere il payload vero.
+          fs.rmSync(`${target}.etag`, { force: true });
+          debug(2, 'Mapping', 'remote index unusable (304), retrying without etag');
+          continue;
+        }
+      }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const body = await res.text();
+      if (body.length > REMOTE_MAX_BYTES) throw new Error(`payload troppo grande (${body.length} byte)`);
+      const index = normalizeIndex(JSON.parse(body));
+      const entries = Object.keys(index.series).length + Object.keys(index.movies).length;
+      if (!index.version || entries === 0) throw new Error('indice vuoto o schema non supportato');
+      writeAtomic(target, body);
+      const nextEtag = res.headers.get('etag');
+      if (nextEtag) writeAtomic(`${target}.etag`, nextEtag);
+      snapshot = null;
+      debug(2, 'Mapping', 'remote index updated', {
+        series: Object.keys(index.series).length,
+        movies: Object.keys(index.movies).length,
+        generatedAt: index.generatedAt,
+      });
       return;
     }
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const body = await res.text();
-    if (body.length > REMOTE_MAX_BYTES) throw new Error(`payload troppo grande (${body.length} byte)`);
-    const index = normalizeIndex(JSON.parse(body));
-    const entries = Object.keys(index.series).length + Object.keys(index.movies).length;
-    if (!index.version || entries === 0) throw new Error('indice vuoto o schema non supportato');
-    writeAtomic(target, body);
-    const nextEtag = res.headers.get('etag');
-    if (nextEtag) writeAtomic(`${target}.etag`, nextEtag);
-    snapshot = null;
-    debug(2, 'Mapping', 'remote index updated', {
-      series: Object.keys(index.series).length,
-      movies: Object.keys(index.movies).length,
-      generatedAt: index.generatedAt,
-    });
   } catch (e) {
     debug(2, 'Mapping', 'remote index refresh failed, keeping local', {
       error: (e as any)?.message || String(e),

@@ -6,7 +6,7 @@ name: Anime Mapping
 
 on:
   schedule:
-    - cron: '30 3 * * *' # ogni notte
+    - cron: '37 3 * * *' # ogni notte; minuto disparie: :00/:30 sono i picchi di carico del scheduler, che rimanda o scarta run in silenzio
   workflow_dispatch:
     inputs:
       limit:

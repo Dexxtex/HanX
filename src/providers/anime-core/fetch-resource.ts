@@ -4,6 +4,7 @@
  * Ported 1:1 from easystreams-main fetchResource() + fetchWithTimeout().
  */
 
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { getCached, setCached, type CacheEntry } from './cache.js';
 import { debug, redactUrl } from '../../utils/logger.js';
 
@@ -23,6 +24,19 @@ export const DEFAULT_FETCH_TIMEOUT = Number.parseInt(
   process.env.ANIME_FETCH_TIMEOUT_MS || '10000',
   10
 ) || 10000;
+
+/**
+ * Stato del provider-run in corso: `runProvider` (addon.ts) esegue l'handler
+ * dentro questo store e legge `failed` per non cachare una lista parziale.
+ * Unica istanza nel processo, una per provider-run.
+ */
+export const providerRequestStore = new AsyncLocalStorage<{ failed: boolean }>();
+
+/** Marca il provider-run corrente come fallito; fuori da uno store è un no-op. */
+export function markProviderFetchFailure(): void {
+  const store = providerRequestStore.getStore();
+  if (store) store.failed = true;
+}
 
 // Riusa lo stesso agent: crearne uno per richiesta lascia pool di connessioni aperti.
 const proxyAgents = new Map<string, any>();
@@ -259,73 +273,83 @@ export async function fetchResource(
 
   // 2. Inflight deduplication
   const inflightKey = `http:${key}`;
-  const running = caches.inflight.get(inflightKey);
-  if (running) {
-    debug(4, 'Fetch', 'inflight dedup', redactUrl(url));
-    return running;
-  }
-
-  // Uscita respinta poco fa: nessuna rete, insistere rinnova il blocco.
-  const host = hostOf(url);
-  const exitKey = `${options.exitLabel || 'diretto'}:${host}`;
-  if ((blockedHosts.get(exitKey) || 0) > Date.now()) {
-    throw new Error(`HTTP 403 (${exitKey} in cooldown) for ${url}`);
-  }
-
-  // 3. Execute fetch
-  const startedAt = Date.now();
-  const task = paceHost(host, async () => {
-    let resolvedAgent: any = undefined;
-
-    // Se l'agent è stato passato esplicitamente nelle opzioni, usalo (anche null = diretto).
-    if ('agent' in options && options.agent !== undefined) {
-      resolvedAgent = options.agent || undefined;
+  // Un hop di proxy fallito non è un fallimento del provider: marca solo il
+  // tentativo finale (diretto), cioè senza agent esplicito o con `agent: null`.
+  const isFinalAttempt = !hasExplicitAgent || options.agent === null;
+  try {
+    const running = caches.inflight.get(inflightKey);
+    if (running) {
+      debug(4, 'Fetch', 'inflight dedup', redactUrl(url));
+      // `await` obbligatorio: con `return running` il rifiuto della promise
+      // condivisa non passerebbe dal catch e l'osservatore non marcherebbe.
+      return await running;
     }
 
-    const response = await fetchWithTimeout(
-      url,
-      {
-        method,
-        headers: {
-          'user-agent': DEFAULT_USER_AGENT,
-          'accept-language': 'it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7',
-          ...headers,
-        },
-        body,
-        agent: resolvedAgent,
-        redirect: 'follow',
-      },
-      timeoutMs
-    );
+    // Uscita respinta poco fa: nessuna rete, insistere rinnova il blocco.
+    const host = hostOf(url);
+    const exitKey = `${options.exitLabel || 'diretto'}:${host}`;
+    if ((blockedHosts.get(exitKey) || 0) > Date.now()) {
+      throw new Error(`HTTP 403 (${exitKey} in cooldown) for ${url}`);
+    }
 
-    if (!response.ok) {
-      debug(2, 'Fetch', 'http error', {
+    // 3. Execute fetch
+    const startedAt = Date.now();
+    const task = paceHost(host, async () => {
+      let resolvedAgent: any = undefined;
+
+      // Se l'agent è stato passato esplicitamente nelle opzioni, usalo (anche null = diretto).
+      if ('agent' in options && options.agent !== undefined) {
+        resolvedAgent = options.agent || undefined;
+      }
+
+      const response = await fetchWithTimeout(
+        url,
+        {
+          method,
+          headers: {
+            'user-agent': DEFAULT_USER_AGENT,
+            'accept-language': 'it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7',
+            ...headers,
+          },
+          body,
+          agent: resolvedAgent,
+          redirect: 'follow',
+        },
+        timeoutMs
+      );
+
+      if (!response.ok) {
+        debug(2, 'Fetch', 'http error', {
+          url: redactUrl(url),
+          status: response.status,
+          statusText: response.statusText,
+          ms: Date.now() - startedAt,
+        });
+        if (response.status === 403 || response.status === 429) {
+          blockedHosts.set(exitKey, Date.now() + (response.status === 403 ? BLOCK_403_MS : BLOCK_429_MS));
+        }
+        throw new Error(`HTTP ${response.status} ${response.statusText} for ${url}`);
+      }
+
+      const payload = as === 'json' ? await response.json() : await response.text();
+      if (ttlMs > 0) setCached(caches.http, key, payload, ttlMs);
+      debug(4, 'Fetch', 'ok', {
         url: redactUrl(url),
         status: response.status,
-        statusText: response.statusText,
         ms: Date.now() - startedAt,
+        bytes: typeof payload === 'string' ? payload.length : undefined,
       });
-      if (response.status === 403 || response.status === 429) {
-        blockedHosts.set(exitKey, Date.now() + (response.status === 403 ? BLOCK_403_MS : BLOCK_429_MS));
-      }
-      throw new Error(`HTTP ${response.status} ${response.statusText} for ${url}`);
-    }
-
-    const payload = as === 'json' ? await response.json() : await response.text();
-    if (ttlMs > 0) setCached(caches.http, key, payload, ttlMs);
-    debug(4, 'Fetch', 'ok', {
-      url: redactUrl(url),
-      status: response.status,
-      ms: Date.now() - startedAt,
-      bytes: typeof payload === 'string' ? payload.length : undefined,
+      return payload;
     });
-    return payload;
-  });
 
-  caches.inflight.set(inflightKey, task);
-  try {
-    return await task;
-  } finally {
-    caches.inflight.delete(inflightKey);
+    caches.inflight.set(inflightKey, task);
+    try {
+      return await task;
+    } finally {
+      caches.inflight.delete(inflightKey);
+    }
+  } catch (error) {
+    if (isFinalAttempt) markProviderFetchFailure();
+    throw error;
   }
 }

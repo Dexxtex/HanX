@@ -153,3 +153,41 @@ test('landing page: i segreti delle env non compaiono mai nell\'HTML', () => {
     assert.ok(!html.includes(secret), `segreto leakato nell'HTML: ${secret}`);
   }
 });
+
+const MANIFEST = { name: 'HanX', version: '1.0.0', config: [] };
+
+test('landing page: banner indice vecchio solo con stale true, con data UTC e giorni interi', () => {
+  const generatedAt = new Date(Date.now() - (30 * 86400000 + 3600000)).toISOString();
+  const html = landingTemplate(MANIFEST, {}, '', { generatedAt, stale: true });
+  const date = generatedAt.slice(0, 10);
+
+  // Un solo nodo, primo figlio di .wrap, prima della hero, con testo reale:
+  // data YYYY-MM-DD e giorni interi, niente generatedAt grezzo.
+  assert.equal((html.match(/data-mapping-stale="true"/g) || []).length, 1);
+  assert.match(html, /<div class="wrap">\s*<div class="mapping-stale" data-mapping-stale="true" role="status">[^<]*<\/div>/);
+  assert.ok(html.indexOf('data-mapping-stale="true"') < html.indexOf('class="hero"'), 'banner prima della hero');
+  assert.ok(html.includes(date), 'data build YYYY-MM-DD');
+  assert.match(html, /\(30 giorni fa\)/);
+  assert.ok(!html.includes(generatedAt), 'generatedAt grezzo nel banner');
+  assert.doesNotMatch(html, /[0-9]{4}-[0-9]{2}-[0-9]{2}T/, 'nessun timestamp ISO stampato');
+  assert.doesNotMatch(html, /aria-hidden/);
+  // Stile in STYLESHEET, niente inline style.
+  assert.match(html, /\.mapping-stale \{/);
+  assert.doesNotMatch(html, /<div class="mapping-stale"[^>]*style=/);
+});
+
+test('landing page: nessun banner senza mappingStatus, con stale false o data non parsabile', () => {
+  const generatedAt = new Date(Date.now() - 30 * 86400000).toISOString();
+  const pages = [
+    landingTemplate(MANIFEST),
+    landingTemplate(MANIFEST, {}, ''),
+    landingTemplate(MANIFEST, {}, '', null),
+    landingTemplate(MANIFEST, {}, '', { generatedAt, stale: false }),
+    // stale true ma data non parsabile: niente banner e niente markup grezzo.
+    landingTemplate(MANIFEST, {}, '', { generatedAt: '<img src=x onerror=alert(1)>', stale: true }),
+  ];
+  for (const html of pages) {
+    assert.doesNotMatch(html, /data-mapping-stale/);
+    assert.doesNotMatch(html, /onerror/);
+  }
+});

@@ -105,6 +105,15 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
     margin: auto;
 }
 
+.mapping-stale {
+    margin: 18px 0 0;
+    padding: 12px 16px;
+    border: 1px solid #f4788866;
+    border-left: 3px solid var(--coral);
+    background: #1b1020;
+    font: 12px/1.6 monospace;
+}
+
 .hero {
     position: relative;
     display: grid;
@@ -1099,6 +1108,20 @@ function serializeForScript(value: unknown): string {
         .replace(/\u2029/g, '\\u2029');
 }
 
+/**
+ * Banner server-side per un indice vecchio. Solo testo derivato (data UTC e
+ * giorni interi): il generatedAt grezzo non arriva mai all'HTML.
+ */
+function staleBannerHtml(mappingStatus?: { generatedAt?: unknown; stale?: boolean } | null): string {
+    if (mappingStatus?.stale !== true || typeof mappingStatus.generatedAt !== 'string') return '';
+    const time = Date.parse(mappingStatus.generatedAt);
+    if (!Number.isFinite(time)) return '';
+    const days = Math.floor((Date.now() - time) / 86400000);
+    const date = escapeHtml(new Date(time).toISOString().slice(0, 10));
+    return '<div class="mapping-stale" data-mapping-stale="true" role="status">'
+        + `Indice anime non aggiornato: build del ${date} (${days} giorni fa).</div>`;
+}
+
 // Prefill only non-secret env vars. Secret fields (API keys, proxy password)
 // never get env values here: / is public and would leak them via view-source.
 const ENV_CONFIG_DEFAULTS: Record<string, string> = {
@@ -1108,8 +1131,10 @@ const ENV_CONFIG_DEFAULTS: Record<string, string> = {
 export function landingTemplate(
     manifest: any,
     env: Record<string, string | undefined> = process.env,
-    publicBaseUrl = ''
+    publicBaseUrl = '',
+    mappingStatus?: { generatedAt?: unknown; stale?: boolean } | null
 ): string {
+    const staleBanner = staleBannerHtml(mappingStatus);
     const defaults: Record<string, unknown> = {};
     const fields = Array.isArray(manifest.config) ? manifest.config : [];
     const configKeys = new Set<string>();
@@ -1146,6 +1171,7 @@ ${STYLESHEET}
     </head>
     <body>
         <div class="wrap">
+            ${staleBanner}
             <section class="hero">
                 <div class="hero-copy">
                     <h1>YOUR NEXT<br><em>UNIVERSE.</em></h1>

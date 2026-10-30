@@ -126,7 +126,7 @@ fs.writeFileSync(fixtureFile, JSON.stringify({
 process.env.ANIME_MAPPING_FILE = fixtureFile;
 
 const { parseRequestId, resolveMappingRequest, toNumericId } = await import('../../dist/mapping/request.js');
-const { resolveLocalTarget, resolveSeasonFallbackTitle, getMappingVersion, getMappingStatus, resetMappingCache } = await import('../../dist/mapping/index.js');
+const { resolveLocalTarget, resolveSeasonFallbackTitle, getMappingVersion, getMappingStatus, resetMappingCache, MAPPING_STALE_MS, isMappingStale, MAPPING_REFRESH_INTERVAL_MS } = await import('../../dist/mapping/index.js');
 const { resolveLiveTarget } = await import('../../dist/mapping/live.js');
 
 function targetFor(id) {
@@ -418,6 +418,97 @@ test('getMappingStatus riflette indice, overrides e signature', () => {
     assert.match(status.signature, /^[0-9a-f]{16}$/);
     assert.equal(status.signature, getMappingVersion());
   } finally {
+    delete process.env.ANIME_MAPPING_OVERRIDES;
+    resetMappingCache();
+  }
+});
+
+test('MAPPING_STALE_MS e isMappingStale: soglia stretta, input non parsabili e data-only (AC3)', () => {
+  const now = Date.parse('2026-10-29T12:00:00.000Z');
+  const iso = (ms) => new Date(ms).toISOString();
+  assert.equal(MAPPING_STALE_MS, 172800000);
+
+  // Soglia stretta: 48h esatte non sono vecchie, basta un millisecondo in più.
+  assert.equal(isMappingStale(iso(now - MAPPING_STALE_MS - 1), now), true);
+  assert.equal(isMappingStale(iso(now - MAPPING_STALE_MS), now), false);
+  assert.equal(isMappingStale(iso(now - MAPPING_STALE_MS + 1), now), false);
+
+  // Null, non stringhe, non parsabili e date future non sono "vecchie".
+  assert.equal(isMappingStale(null, now), false);
+  assert.equal(isMappingStale(undefined, now), false);
+  assert.equal(isMappingStale(172800000, now), false);
+  assert.equal(isMappingStale('non una data', now), false);
+  assert.equal(isMappingStale(iso(now + 86400000), now), false);
+  assert.equal(isMappingStale(iso(now + 1), now), false);
+
+  // 'YYYY-MM-DD' vale mezzanotte UTC: 24h -> fresco, 72h -> vecchio.
+  assert.equal(Date.parse('2026-10-01'), Date.parse('2026-10-01T00:00:00.000Z'));
+  assert.equal(isMappingStale('2026-10-01', Date.parse('2026-10-02T00:00:00.000Z')), false);
+  assert.equal(isMappingStale('2026-10-01', Date.parse('2026-10-04T00:00:00.000Z')), true);
+});
+
+test('getMappingStatus: stale legge generatedAt, ageMs resta la mtime del file (AC2)', () => {
+  const overridesFile = path.join(fixtureDir, 'overrides-empty-stale.json');
+  fs.writeFileSync(overridesFile, JSON.stringify({ series: {}, movies: {} }));
+  const originalFile = process.env.ANIME_MAPPING_FILE;
+  process.env.ANIME_MAPPING_OVERRIDES = overridesFile;
+
+  try {
+    // generatedAt vecchio 30 giorni + mtime appena scritta: stale true.
+    const oldGeneratedAt = new Date(Date.now() - 30 * 86400000).toISOString();
+    const oldIndex = path.join(fixtureDir, 'index-old-generated.json');
+    fs.writeFileSync(oldIndex, JSON.stringify({ version: 1, generatedAt: oldGeneratedAt, series: {}, movies: {} }));
+    process.env.ANIME_MAPPING_FILE = oldIndex;
+    resetMappingCache();
+    const old = getMappingStatus();
+    assert.equal(old.generatedAt, oldGeneratedAt);
+    assert.ok(old.ageMs < 60000, 'mtime recente (diagnostica di download)');
+    assert.equal(old.stale, true);
+
+    // generatedAt fresco + mtime retrodatata 40 giorni: stale false.
+    const freshGeneratedAt = new Date().toISOString();
+    const freshIndex = path.join(fixtureDir, 'index-fresh-generated.json');
+    fs.writeFileSync(freshIndex, JSON.stringify({ version: 1, generatedAt: freshGeneratedAt, series: {}, movies: {} }));
+    const backdated = new Date(Date.now() - 40 * 86400000);
+    fs.utimesSync(freshIndex, backdated, backdated);
+    process.env.ANIME_MAPPING_FILE = freshIndex;
+    resetMappingCache();
+    const fresh = getMappingStatus();
+    assert.equal(fresh.generatedAt, freshGeneratedAt);
+    assert.ok(fresh.ageMs >= 40 * 86400000 - 5000, 'mtime retrodatata');
+    assert.equal(fresh.stale, false);
+  } finally {
+    if (originalFile === undefined) delete process.env.ANIME_MAPPING_FILE;
+    else process.env.ANIME_MAPPING_FILE = originalFile;
+    delete process.env.ANIME_MAPPING_OVERRIDES;
+    resetMappingCache();
+  }
+});
+
+test('getMappingStatus: indice con entry malformata non lancia (fail-open AC6)', () => {
+  const overridesFile = path.join(fixtureDir, 'overrides-empty-malformed.json');
+  fs.writeFileSync(overridesFile, JSON.stringify({ series: {}, movies: {} }));
+  const originalFile = process.env.ANIME_MAPPING_FILE;
+  const malformed = path.join(fixtureDir, 'index-malformed-entry.json');
+  fs.writeFileSync(malformed, JSON.stringify({ version: 1, generatedAt: new Date().toISOString(), series: { x: null }, movies: {} }));
+  process.env.ANIME_MAPPING_OVERRIDES = overridesFile;
+  process.env.ANIME_MAPPING_FILE = malformed;
+  resetMappingCache();
+  try {
+    // buildKitsuAlt lancia su entry null: lo status resta totale e torna come
+    // per l'indice assente, così la landing non eredita il 500.
+    assert.deepEqual(getMappingStatus(), {
+      schemaVersion: 1,
+      generatedAt: null,
+      series: 0,
+      movies: 0,
+      ageMs: null,
+      signature: 'unavailable',
+      stale: false,
+    });
+  } finally {
+    if (originalFile === undefined) delete process.env.ANIME_MAPPING_FILE;
+    else process.env.ANIME_MAPPING_FILE = originalFile;
     delete process.env.ANIME_MAPPING_OVERRIDES;
     resetMappingCache();
   }
@@ -743,4 +834,36 @@ test('no old mapping API references remain in src/config/scripts', () => {
   };
   for (const root of roots) if (fs.existsSync(root)) walk(root);
   assert.deepEqual(offenders, []);
+});
+
+test('refresh mapping interval is shared between mapping and addon', () => {
+  assert.equal(MAPPING_REFRESH_INTERVAL_MS, 21600000);
+
+  const root = path.resolve(__dirname, '..', '..');
+  const addonSource = fs.readFileSync(path.join(root, 'src', 'addon.ts'), 'utf8');
+  assert.doesNotMatch(addonSource, /\b21600000\b|6\s*\*\s*60\s*\*\s*60/, 'addon.ts must not repeat the interval literal');
+  assert.match(
+    addonSource,
+    /import\s*\{[^}]*\bMAPPING_REFRESH_INTERVAL_MS\b[^}]*\}\s*from\s*['"]\.\/mapping\/index\.js['"]/,
+    'addon.ts must import the interval from ./mapping/index.js',
+  );
+  assert.match(
+    addonSource,
+    /setInterval\s*\(\s*\(\s*\)\s*=>\s*void\s+refreshMappingFromUrl\s*\(\s*\)\s*,\s*MAPPING_REFRESH_INTERVAL_MS\s*\)\s*\.\s*unref\s*\(\s*\)/,
+    'addon.ts must arm the refresh timer with the shared interval',
+  );
+
+  // Solo la prosa: i blocchi di codice (es. compose) contengono le stesse parole.
+  const readme = fs.readFileSync(path.join(root, 'README.md'), 'utf8').replace(/```[\s\S]*?```/g, '');
+  const anchors = readme
+    .split(/\r?\n\s*\r?\n/)
+    .filter((chunk) => chunk.includes('anime-seasons.json') && chunk.includes('ANIME_MAPPING_URL'));
+  assert.equal(anchors.length, 1, 'README must have one prose paragraph with anime-seasons.json and ANIME_MAPPING_URL');
+  const prose = anchors[0].replace(/\s+/g, ' ').trim();
+  assert.ok(
+    prose.includes("L'addon lo scarica da `ANIME_MAPPING_URL` e tenta il controllo ogni 6 ore; il download effettivo avviene al massimo una volta ogni 24 ore (ETag). Se il download fallisce, continua con la copia locale."),
+    'README must distinguish the 6h check from the 24h download',
+  );
+  assert.ok(!prose.includes('lo ricontrolla ogni 24 ore'), 'README must not call the 24h download a check');
+  assert.ok(!prose.includes('scarica ogni 6 ore'), 'README must not claim a 6h download');
 });

@@ -16,10 +16,11 @@ import {
     resolvePlaybackProxyUrl,
 } from './config.js';
 import { AnimeUnityProvider } from './providers/animeunity-provider.js';
+import { providerRequestStore } from './providers/anime-core/fetch-resource.js';
 import { providerLabel } from './utils/unifiedNames.js';
 import { landingTemplate } from './landingPage.js';
 import { toNumericId, parseRequestId } from './mapping/request.js';
-import { getMappingStatus, getMappingVersion, refreshMappingFromUrl } from './mapping/index.js';
+import { getMappingStatus, getMappingVersion, MAPPING_REFRESH_INTERVAL_MS, refreshMappingFromUrl } from './mapping/index.js';
 import { debug, DEBUG_LEVEL } from './utils/logger.js';
 import { unifyStreams, providerRank } from './utils/streamTitle.js';
 import { sendHtmlResponse } from './utils/http.js';
@@ -395,6 +396,9 @@ function createBuilder() {
                         }
                         const startedAt = Date.now();
                         debug(2, 'Provider', 'start', name);
+                        // Lo store vive quanto il provider-run: fetchResource marca
+                        // `failed` quando una fetch provider-site fallisce.
+                        const store = { failed: false };
                         try {
                             let result;
 
@@ -405,14 +409,16 @@ function createBuilder() {
                                     timer = setTimeout(() => reject(new Error(`${name} timeout after ${timeoutMs}ms`)), timeoutMs);
                                 });
                                 try {
-                                    result = await Promise.race([handler(), timeoutPromise]);
+                                    result = await Promise.race([providerRequestStore.run(store, () => handler()), timeoutPromise]);
                                 } finally {
                                     if (timer !== undefined) clearTimeout(timer);
                                 }
                             } else {
                                 // Provider senza timeout (comportamento attuale)
-                                result = await handler();
+                                result = await providerRequestStore.run(store, () => handler());
                             }
+
+                            if (store.failed) providerFailure = true;
 
                             if (result && result.streams) {
                                 const prepared = result.streams.map(s => ({ ...s, name: (s as any).name || streamName } as Stream));
@@ -665,7 +671,7 @@ app.get('/', (req: Request, res: ExpressResponse) => {
             forwardedProto: req.get('x-forwarded-proto'),
             protocol: req.protocol,
         });
-        void sendHtmlResponse(req, res, landingTemplate(manifest, process.env, publicBaseUrl));
+        void sendHtmlResponse(req, res, landingTemplate(manifest, process.env, publicBaseUrl, getMappingStatus()));
     } catch (e) {
         console.error('[Landing] error:', (e as any)?.message || e);
         res.status(500).send('Errore caricamento landing page');
@@ -678,5 +684,5 @@ app.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 HanX addon listening on http://0.0.0.0:${PORT}`);
     // Indice mapping remoto: parte dopo il listen, non blocca l'avvio.
     void refreshMappingFromUrl();
-    setInterval(() => void refreshMappingFromUrl(), 6 * 60 * 60 * 1000).unref();
+    setInterval(() => void refreshMappingFromUrl(), MAPPING_REFRESH_INTERVAL_MS).unref();
 });

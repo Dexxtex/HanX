@@ -105,7 +105,7 @@ test('GET /status.json: header, body esatto, versione del manifest e cache legat
 
     assert.deepEqual(Object.keys(body).sort(), ['addon', 'cache', 'mapping']);
     assert.deepEqual(Object.keys(body.addon).sort(), ['uptimeMs', 'version']);
-    assert.deepEqual(Object.keys(body.mapping).sort(), ['ageMs', 'generatedAt', 'movies', 'schemaVersion', 'series', 'signature']);
+    assert.deepEqual(Object.keys(body.mapping).sort(), ['ageMs', 'generatedAt', 'movies', 'schemaVersion', 'series', 'signature', 'stale']);
     assert.deepEqual(Object.keys(body.cache).sort(), ['disabled', 'entries', 'maxEntries', 'ttlMs']);
 
     // addon.version è quella servita dal manifest, non package.json.
@@ -121,6 +121,7 @@ test('GET /status.json: header, body esatto, versione del manifest e cache legat
     assert.equal(body.mapping.movies, 0);
     assert.equal(body.mapping.generatedAt, null);
     assert.equal(body.mapping.ageMs, null);
+    assert.equal(body.mapping.stale, false);
     assert.match(body.mapping.signature, /^[0-9a-f]{16}$/);
 
     const again = await statusBody(server);

@@ -212,7 +212,8 @@ L'indice (`anime-seasons.json`) viene costruito dalla workflow
 [`anime-mapping.yml`](.github/workflows/anime-mapping.yml): ogni notte converte
 le nuove entry del catalogo MAL e pubblica indice **e cursore** sul branch
 orfano `mapping` (un commit solo, senza storia: il repository non cresce).
-L'addon lo scarica da `ANIME_MAPPING_URL` e lo ricontrolla ogni 24 ore; se il
+L'addon lo scarica da `ANIME_MAPPING_URL` e tenta il controllo ogni 6 ore; il
+download effettivo avviene al massimo una volta ogni 24 ore (ETag). Se il
 download fallisce, continua con la copia locale.
 
 **L'indice incluso nell'immagine è vuoto**: senza `ANIME_MAPPING_URL` servono
