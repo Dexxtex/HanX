@@ -6,9 +6,10 @@
  * - una richiesta alla volta, 3 s tra la fine di una e l'inizio della successiva;
  * - timeout 15 s, User-Agent esplicito, 2 retry con backoff solo su 5xx/rete;
  * - 403 e 429 fermano tutto: il WAF si prolunga se si insiste;
- * - tetti giornalieri: Saturn ~2 richieste (sitemap), World 200 pagine (40
- *   schede, ci si ferma alla prima vuota), Unity 1 + 300 pagine (30 schede).
- *   Totale massimo ~505, ~25 minuti; il tetto di World è solo una sicurezza.
+ * - tetti giornalieri: Saturn ~2 richieste (sitemap), World fino alle pagine
+ *   dichiarate dal sito (172 oggi, 40 schede) con tetto 300, Unity 1 + 300
+ *   pagine (30 schede). Totale massimo ~545, ~29 minuti; il tetto di World è
+ *   solo una sicurezza, `truncated` scatta se il dichiarato lo supera.
  *
  * Uso: npm run sync-catalog [-- --site unity --max-pages 2 --dry-run]
  */
@@ -22,6 +23,7 @@ import {
   mergeSite,
   parseSaturnAnimeSitemap,
   parseSaturnSitemapIndex,
+  parseWorldMaxPage,
   parseUnityRecords,
   parseWorldFilterPage,
   readCatalog,
@@ -113,15 +115,21 @@ async function crawlSaturn(maxPages: number): Promise<CrawlResult> {
 async function crawlWorld(maxPages: number): Promise<CrawlResult> {
   const entries: CatalogEntry[] = [];
   const seen = new Set<string>();
-  for (let page = 1; page <= maxPages; page += 1) {
+  let declared: number | null = null;
+  for (let page = 1; page <= (declared === null ? maxPages : Math.min(maxPages, declared)); page += 1) {
     const html = await request(`${BASES.world}/filter?page=${page}`);
+    if (page === 1) {
+      declared = parseWorldMaxPage(html.body);
+      if (declared !== null) console.log(`[catalog] world: il sito dichiara ${declared} pagine`);
+    }
     const fresh = parseWorldFilterPage(html.body).filter((entry) => !seen.has(entry.slug));
-    // Pagina vuota o identica alla precedente: la paginazione è finita.
+    // Oltre l'ultima pagina il sito ripete la prima: nessuna scheda nuova = fine.
     if (!fresh.length) return { entries, capped: false };
     for (const entry of fresh) seen.add(entry.slug);
     entries.push(...fresh);
   }
-  return { entries, capped: true };
+  // Troncato solo se il dichiarato supera il tetto, o se il numero non è dichiarato.
+  return { entries, capped: declared === null || declared > maxPages };
 }
 
 function csrfFrom(html: string): { xsrf: string; token: string } {
@@ -186,7 +194,7 @@ function parseArgs(argv: string[]): Options {
     sites: [...CATALOG_SITES],
     maxPages: {
       saturn: 10,
-      world: Number(process.env.CATALOG_WORLD_MAX_PAGES) || 200,
+      world: Number(process.env.CATALOG_WORLD_MAX_PAGES) || 300,
       unity: Number(process.env.CATALOG_UNITY_MAX_PAGES) || 300,
     },
     dryRun: false,

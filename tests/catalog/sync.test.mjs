@@ -10,6 +10,7 @@ import {
   mergeSite,
   parseSaturnAnimeSitemap,
   parseSaturnSitemapIndex,
+  parseWorldMaxPage,
   parseUnityRecords,
   parseWorldFilterPage,
   readCatalog,
@@ -81,6 +82,13 @@ test('saturn: scheda dallo slug, gli episodi restano fuori', () => {
     url: 'https://www.animesaturn.net/anime/tutor-hitman-reborn-tuTL8',
     titleSite: 'Tutor Hitman Reborn',
   });
+});
+
+test('world: il sito dichiara quante pagine ha (paginationMaxPage)', () => {
+  assert.equal(parseWorldMaxPage('<script>paginationMaxPage = parseInt("172");</script>'), 172);
+  assert.equal(parseWorldMaxPage('<script>paginationMaxPage = parseInt("172")</script>'), 172);
+  assert.equal(parseWorldMaxPage('<div class="film-list"></div>'), null);
+  assert.equal(parseWorldMaxPage('paginationMaxPage = parseInt("0")'), null);
 });
 
 test('world: una pagina vuota è il segnale di fine (il tetto resta una sicurezza)', () => {

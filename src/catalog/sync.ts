@@ -81,6 +81,17 @@ export function parseSaturnAnimeSitemap(xml: string, site: CatalogSite = 'saturn
   return out;
 }
 
+/**
+ * AnimeWorld dichiara quante pagine ha /filter (`paginationMaxPage`). Oltre
+ * l'ultima il sito ripete la prima pagina invece di rispondere vuota: senza
+ * questo numero l'unico segnale di fine è la pagina ripetuta.
+ */
+export function parseWorldMaxPage(html: string): number | null {
+  const match = String(html || '').match(/paginationMaxPage\s*=\s*parseInt\(\s*["'](\d+)["']/);
+  const value = match ? Number(match[1]) : Number.NaN;
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
 /** Una pagina di /filter: una scheda per .film-list .item, titolo in a.name o alt della locandina. */
 export function parseWorldFilterPage(html: string): CatalogEntry[] {
   const $ = cheerio.load(String(html || ''));

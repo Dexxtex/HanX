@@ -237,7 +237,7 @@ provider usano solo la ricerca di rete, come prima.
 | Sito | Sorgente | Copertura |
 | --- | --- | --- |
 | AnimeSaturn | `sitemap-anime-*.xml` | completa (6.179), titolo ricavato dallo slug |
-| AnimeWorld | `/filter?page=N` | prime 160 pagine (~6.400 schede), titoli reali |
+| AnimeWorld | `/filter?page=N` | tutte le pagine dichiarate dal sito (172 oggi, ~6.880 schede), titoli reali |
 | AnimeUnity | `POST /archivio/get-animes` | completa (7.266), titoli reali it/eng/romaji |
 
 Una richiesta alla volta con 3 s di intervallo, timeout 15 s, 2 retry solo su
