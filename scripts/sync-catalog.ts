@@ -6,9 +6,9 @@
  * - una richiesta alla volta, 3 s tra la fine di una e l'inizio della successiva;
  * - timeout 15 s, User-Agent esplicito, 2 retry con backoff solo su 5xx/rete;
  * - 403 e 429 fermano tutto: il WAF si prolunga se si insiste;
- * - tetti giornalieri: Saturn ~2 richieste (sitemap), World 160 pagine (40
- *   schede), Unity 1 + 300 pagine (30 schede). Totale massimo ~463, ~22 minuti:
- *   un crawl completo di tutti e tre i siti non entrerebbe nei 30 minuti del job.
+ * - tetti giornalieri: Saturn ~2 richieste (sitemap), World 200 pagine (40
+ *   schede, ci si ferma alla prima vuota), Unity 1 + 300 pagine (30 schede).
+ *   Totale massimo ~505, ~25 minuti; il tetto di World è solo una sicurezza.
  *
  * Uso: npm run sync-catalog [-- --site unity --max-pages 2 --dry-run]
  */
@@ -186,7 +186,7 @@ function parseArgs(argv: string[]): Options {
     sites: [...CATALOG_SITES],
     maxPages: {
       saturn: 10,
-      world: Number(process.env.CATALOG_WORLD_MAX_PAGES) || 160,
+      world: Number(process.env.CATALOG_WORLD_MAX_PAGES) || 200,
       unity: Number(process.env.CATALOG_UNITY_MAX_PAGES) || 300,
     },
     dryRun: false,
@@ -217,8 +217,7 @@ async function main(): Promise<number> {
   const previous = readCatalog(options.dataDir);
   const catalog = emptyCatalog();
   const startedAt = Date.now();
-  let blocked = false;
-  let failure: string | null = null;
+  const failures: string[] = [];
 
   for (const site of CATALOG_SITES) {
     if (!options.sites.includes(site)) {
@@ -231,15 +230,13 @@ async function main(): Promise<number> {
     try {
       result = await CRAWLERS[site](options.maxPages[site]);
     } catch (err: any) {
-      const isBlocked = err instanceof BlockedError;
-      console.error(`[catalog] ${site}: ${isBlocked ? 'BLOCCATO' : 'errore'} — ${err?.message || err}`);
-      console.error(`[catalog] ${site}: catalogo precedente mantenuto (${previous.sites[site].length} schede)`);
+      // Un sito bloccato non ferma gli altri (host diversi): il suo catalogo
+      // resta quello di ieri, gli altri si aggiornano e il job esce rosso.
+      const message = `${site}: ${err instanceof BlockedError ? 'BLOCCATO' : 'errore'} — ${err?.message || err}`;
+      console.error(`[catalog] ${message}; catalogo precedente mantenuto (${previous.sites[site].length} schede)`);
       catalog.sites[site] = previous.sites[site];
       if (previous.truncated[site]) catalog.truncated[site] = true;
-      if (isBlocked) {
-        blocked = true;
-        break;
-      }
+      failures.push(message);
       continue;
     }
     const merged = mergeSite(site, previous.sites[site] || [], result.entries);
@@ -247,7 +244,7 @@ async function main(): Promise<number> {
       console.error(`[catalog] ${site}: ${merged.reason}`);
       catalog.sites[site] = previous.sites[site];
       if (previous.truncated[site]) catalog.truncated[site] = true;
-      failure = merged.reason || `${site}: catalogo incompleto`;
+      failures.push(merged.reason || `${site}: catalogo incompleto`);
       continue;
     }
     const diff = diffEntries(previous.sites[site] || [], merged.entries);
@@ -262,18 +259,19 @@ async function main(): Promise<number> {
 
   const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
   const total = CATALOG_SITES.reduce((sum, site) => sum + catalog.sites[site].length, 0);
-  if (blocked || failure) {
-    console.error(`[catalog] nessuna scrittura: il catalogo pubblicato resta quello di ieri (${elapsed}s)`);
-    return 1;
-  }
   if (options.dryRun) {
     console.log(`[catalog] dry-run: ${total} schede, nessun file scritto (${elapsed}s)`);
-    return 0;
+    return failures.length ? 1 : 0;
   }
+  // Si scrive anche con un sito fallito: i dati buoni degli altri non vanno persi.
   catalog.generatedAt = new Date().toISOString();
   writeCatalogsAtomic(options.dataDir, catalog, buildTitleIndex(catalog));
   const rel = path.relative(process.cwd(), options.dataDir) || '.';
   console.log(`[catalog] ${total} schede in ${elapsed}s -> ${rel}/catalogs.json, ${rel}/catalog-titles.json`);
+  if (failures.length) {
+    console.error(`[catalog] ${failures.length} siti falliti (catalogo di ieri), gli altri sono aggiornati: ${failures.join('; ')}`);
+    return 1;
+  }
   return 0;
 }
 

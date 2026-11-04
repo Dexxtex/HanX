@@ -83,6 +83,12 @@ test('saturn: scheda dallo slug, gli episodi restano fuori', () => {
   });
 });
 
+test('world: una pagina vuota è il segnale di fine (il tetto resta una sicurezza)', () => {
+  // /filter?page=N oltre l'ultima pagina risponde 200 senza schede.
+  assert.deepEqual(parseWorldFilterPage('<html><body><div class="film-list"></div></body></html>'), []);
+  assert.deepEqual(parseWorldFilterPage(''), []);
+});
+
 test('world: una scheda per slug, titolo da a.name, link non-anime scartati', () => {
   const entries = parseWorldFilterPage(WORLD_PAGE);
   assert.equal(entries.length, 2);
