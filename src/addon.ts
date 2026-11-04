@@ -21,6 +21,7 @@ import { providerLabel } from './utils/unifiedNames.js';
 import { landingTemplate } from './landingPage.js';
 import { toNumericId, parseRequestId } from './mapping/request.js';
 import { getMappingStatus, getMappingVersion, MAPPING_REFRESH_INTERVAL_MS, refreshMappingFromUrl } from './mapping/index.js';
+import { CATALOG_REFRESH_INTERVAL_MS, refreshCatalogFromUrl } from './catalog/remote.js';
 import { debug, DEBUG_LEVEL } from './utils/logger.js';
 import { unifyStreams, providerRank } from './utils/streamTitle.js';
 import { sendHtmlResponse } from './utils/http.js';
@@ -685,4 +686,7 @@ app.listen(PORT, '0.0.0.0', () => {
     // Indice mapping remoto: parte dopo il listen, non blocca l'avvio.
     void refreshMappingFromUrl();
     setInterval(() => void refreshMappingFromUrl(), MAPPING_REFRESH_INTERVAL_MS).unref();
+    // Catalogo dei titoli (branch `data`): stesso schema, non blocca l'avvio.
+    void refreshCatalogFromUrl();
+    setInterval(() => void refreshCatalogFromUrl(), CATALOG_REFRESH_INTERVAL_MS).unref();
 });

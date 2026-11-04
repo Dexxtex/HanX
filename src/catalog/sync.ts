@@ -41,7 +41,6 @@ export interface TitleIndexEntry {
 export interface TitleIndexFile {
   generatedAt: string | null;
   sites: Record<CatalogSite, TitleIndexEntry[]>;
-  truncated: Partial<Record<CatalogSite, boolean>>;
 }
 
 export function emptyCatalog(): CatalogFile {
@@ -189,10 +188,19 @@ export function buildTitleIndex(catalog: CatalogFile): TitleIndexFile {
       ...(entry.type ? { type: entry.type } : {}),
     }));
   }
-  return { generatedAt: catalog.generatedAt, sites, truncated: catalog.truncated || {} };
+  return { generatedAt: catalog.generatedAt, sites };
 }
 
-/** Scrive prima i due temporanei, poi rinomina: un crash non lascia file a metà. */
+/** Scrive su .tmp e rinomina: un crash non lascia un file a metà. */
+export function writeJsonAtomic(file: string, data: unknown): void {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const tmp = `${file}.tmp`;
+  fs.writeFileSync(tmp, `${JSON.stringify(data)}
+`);
+  fs.renameSync(tmp, file);
+}
+
+/** Scrive prima i due temporanei, poi rinomina: un crash non lascia la coppia a metà. */
 export function writeCatalogsAtomic(dir: string, catalog: CatalogFile, index: TitleIndexFile): void {
   fs.mkdirSync(dir, { recursive: true });
   const files: [string, unknown][] = [

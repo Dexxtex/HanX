@@ -15,10 +15,7 @@ server.log
 .env
 .env.*
 !.env.example
-/data/*
-# Catalogo locale dei tre siti: è versionato, lo aggiorna il workflow sync-catalog
-!/data/catalogs.json
-!/data/catalog-titles.json
+/data/
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal

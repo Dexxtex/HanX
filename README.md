@@ -72,6 +72,7 @@ services:
       - PORT=7000
       - ANIME_MAPPING_URL=https://raw.githubusercontent.com/Dexxtex/HanX/mapping/anime-seasons.json
       - ANIME_MAPPING_FILE=/app/data/anime-seasons.json
+      - CATALOG_URL=https://raw.githubusercontent.com/Dexxtex/HanX/data/catalog-titles.json
       - TMDB_API_KEY=${TMDB_API_KEY:-}
       - TVDB_API_KEY=${TVDB_API_KEY:-}
       - TVDB_PIN=${TVDB_PIN:-}
@@ -135,6 +136,7 @@ Le variabili sono in [`.env.example`](.env.example). Le principali:
 | `TMDB_API_KEY` | TMDB, per metadati e mapping | — |
 | `TVDB_API_KEY` / `TVDB_PIN` | TVDB v4, per ordine episodi e fallback | — |
 | `ANIME_MAPPING_URL` | Indice mapping scaricato all'avvio | branch `mapping` su GitHub |
+| `CATALOG_URL` | Catalogo dei titoli scaricato all'avvio (ricontrollo ogni 6 h) | branch `data` su GitHub |
 | `EASYPROXY_URL` / `EASYPROXY_PASSWORD` | Proxy HLS per la riproduzione | — |
 | `PROXY`, `AU_PROXY`, `AS_PROXY`, `AW_PROXY` | Forward proxy per lo scraping (HTTP/SOCKS) | — |
 | `ANIMEUNITY_ENABLED`, `ANIMESATURN_ENABLED`, `ANIMEWORLD_ENABLED` | Sorgenti attive | `true` |
@@ -221,38 +223,51 @@ download fallisce, continua con la copia locale.
 
 ### Catalogo locale dei titoli
 
-`data/catalogs.json` tiene le schede dei tre siti (`site`, `slug`, `url`,
-`titleSite`, titoli alternativi, anno); `data/catalog-titles.json` è lo stesso
-elenco ridotto a indice con la chiave compatta (`Mission-E` e `MissionE` danno
-la stessa chiave). Li aggiorna la workflow
-[`sync-catalog.yml`](.github/workflows/sync-catalog.yml) ogni giorno alle 20:00
-italiane e li committa solo se cambiano.
+`catalogs.json` tiene le schede dei tre siti (`site`, `slug`, `url`,
+`titleSite`, titoli alternativi, anno); `catalog-titles.json` è lo stesso elenco
+ridotto a indice con la chiave compatta (`Mission-E` e `MissionE` danno la stessa
+chiave). Li aggiorna ogni giorno alle 20:00 italiane la workflow
+[`sync-catalog.yml`](.github/workflows/sync-catalog.yml) e li pubblica sul
+**branch orfano `data`**, con un solo commit sovrascritto ogni volta: i 4-7 MB
+di JSON non entrano nella storia del repository. L'addon li scarica da
+`CATALOG_URL` (ricontrollo ogni 6 ore, download al massimo una volta al giorno)
+e **l'immagine non contiene catalogo**: senza `CATALOG_URL` o senza rete i
+provider usano solo la ricerca di rete, come prima.
 
 | Sito | Sorgente | Copertura |
 | --- | --- | --- |
-| AnimeSaturn | `sitemap-anime-*.xml` | completa; il titolo è ricavato dallo slug |
+| AnimeSaturn | `sitemap-anime-*.xml` | completa (6.179), titolo ricavato dallo slug |
 | AnimeWorld | `/filter?page=N` | prime 160 pagine (~6.400 schede), titoli reali |
-| AnimeUnity | `POST /archivio/get-animes` | completa, titoli reali it/eng/romaji |
+| AnimeUnity | `POST /archivio/get-animes` | completa (7.266), titoli reali it/eng/romaji |
 
 Una richiesta alla volta con 3 s di intervallo, timeout 15 s, 2 retry solo su
-5xx e rete; un `403` o un `429` ferma la run. Se un sito restituisce meno del
-70% delle schede di ieri, o la run fallisce, il catalogo committato non viene
-toccato: i file si scrivono prima su `.tmp` e poi si rinominano.
+5xx e rete, ~460 richieste in ~23 minuti (job a 45 minuti). Un `403`/`429` o una
+sitemap sotto il 70% delle schede di ieri ferma **quel sito**: il suo catalogo
+resta quello pubblicato, gli altri due si aggiornano lo stesso e il job esce
+rosso. La coppia di file si scrive prima su `.tmp` e poi si rinomina.
 
 A mano: `pnpm run sync-catalog` in locale (`--site unity --max-pages 2
 --dry-run` per una prova senza scrivere) oppure **Actions → Catalog Sync → Run
-workflow**. GitHub può ritardare i job schedulati di qualche minuto e
-**disattiva i workflow schedulati dopo 60 giorni senza attività nel repo**: per
-riattivarlo basta “Enable workflow” nella pagina della workflow, o un
-`workflow_dispatch` qualsiasi.
+workflow** (il workflow deve essere sul branch predefinito perché la voce
+compaia). GitHub può ritardare i job schedulati di qualche minuto e **disattiva
+i workflow schedulati dopo 60 giorni senza attività nel repo**: per riattivarlo
+basta “Enable workflow” nella pagina della workflow, o un `workflow_dispatch`
+qualsiasi.
 
 Nei provider il catalogo ha la precedenza sulla ricerca del sito
 (`src/catalog/matcher.ts`): un match ≥ 0,8 apre la scheda senza chiedere nulla,
 tra 0,5 e 0,8 il risultato viene solo registrato nel log (`DEBUG_LEVEL=2`),
-sotto 0,5 si ignora. Se il catalogo ha meno di 48 ore ed è completo, un titolo
-che non c'è chiude la richiesta **senza rete**; altrimenti vale la ricerca di
-prima, con gli stessi due ripieghi. AnimeWorld resta sempre sulla ricerca di
-rete perché il suo catalogo è troncato.
+sotto 0,5 si ignora. **Il catalogo non decide mai che un titolo non esiste**:
+misurato con un replay sui 26.097 check trovati dallo sweep, il catalogo
+riconosce il 2-7% delle serie che i siti hanno davvero (AnimeSaturn 110 su 8.494,
+AnimeUnity 624 su 9.634, AnimeWorld 1.062 su 8.677): usarlo come verdetto di
+assenza azzererebbe il resto. Quindi per un titolo non trovato si usa sempre la
+ricerca di rete di prima, con gli stessi due ripieghi.
+
+**Titolo appena uscito.** Il catalogo è di ieri sera: un'opera aggiunta al sito
+oggi non c'è fino al sync successivo, cioè fino a ~24 ore. In quella finestra
+l'unico ripiego è la ricerca di rete, che però non viene più saltata — il
+limite resta solo per i match positivi, che mancano fino al sync.
 
 ## API
 
