@@ -76,3 +76,5 @@ PENDING_COMMITS.md
 # --- Istruzioni e appunti dell'agente: locali, non del repo ---
 AGENTS.md
 DECISIONS.md
+# --- Conoscenza del repo: locale, contiene bug aperti e cose da non pubblicare ---
+/Conoscenza/
