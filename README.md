@@ -250,14 +250,15 @@ recuperare il resto:
 | lingua | dal titolo: ITA 1.256 / CR 2 / SUB 4.921 | ITA 1.273 / CR 2 / SUB 5.589 | dal titolo |
 | anno | — (solo nelle card di `/az-list`: ~325 richieste) | — (`/api/tooltip` è vietato da robots.txt) | `date`, su tutte |
 | tipo | — | — | `type`: TV 3.864, Movie 1.121, OVA 798, ONA 795, Special 384, TV Short 304 (somma esatta: 7.266) |
-| `mal_id` | — | — | presente, salvato come `malId` |
+| `mal_id` | — | — | salvato come `malId` (7.128 su 7.266) e usato per il **match esatto** |
 | stagione | — | — | `season` (7.260 su 7.266) |
 | episodi | — (solo `/az-list`) | — | `episodes_count` |
 
-Unity è l'unico provider che espone `mal_id`: è la chiave per un match esatto
-quando il titolo non basta, e lo salviamo già (7.128 schede su 7.266) per non
-dover ri-crawelare quando servirà. Saturn e World non hanno id né anno nel
-listing.
+Unity è l'unico provider che espone `mal_id`. Per le richieste `mal:<id>` il
+matcher usa quello: se l'indice ha schede con quel `malId` le serve senza fuzzy
+né tie-break (le varianti ITA/SUB della stessa opera condividono il `mal_id` e
+vengono servite entrambe). Negli altri casi si torna al confronto per titolo.
+Saturn e World non hanno id né anno nel listing.
 
 Tutti i path provati sui tre siti, i metadati disponibili e i costi per ottenerli sono
 in [`docs/provider-catalog-research.md`](docs/provider-catalog-research.md).
@@ -296,7 +297,8 @@ qualsiasi.
 Nei provider il catalogo ha la precedenza sulla ricerca del sito
 (`src/catalog/matcher.ts`): un match ≥ 0,8 apre la scheda senza chiedere nulla,
 tra 0,5 e 0,8 il risultato viene solo registrato nel log (`DEBUG_LEVEL=2`),
-sotto 0,5 si ignora. **Il catalogo non decide mai che un titolo non esiste**:
+sotto 0,5 si ignora. Con una richiesta `mal:<id>` il catalogo risponde prima per
+`mal_id` (esatto, senza fuzzy) e solo in mancanza ripiega sui titoli. **Il catalogo non decide mai che un titolo non esiste**:
 con le query che passa davvero il provider (titolo del mapping + titolo italiano
 + romaji) il catalogo serve una scheda nel 57-67% dei check trovati (Saturn
 57,2%, World 58,7%, Unity 67,3%; campione 600 per sito, ±4 punti). Se la

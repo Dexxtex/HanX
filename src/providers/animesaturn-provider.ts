@@ -965,7 +965,8 @@ export class AnimeSaturnProvider {
       if (!request) return { streams: [] };
       const englishTitle = await getEnglishTitleFromAnyId(request.id, 'mal', this.config.tmdbApiKey);
       debug(2, 'AnimeSaturn', `[AnimeSaturn] Ricerca con titolo inglese: ${englishTitle}`);
-      return this.handleTitleRequest(englishTitle, request.season, request.episode, request.isMovie);
+      const malId = Number(request.id);
+      return this.handleTitleRequest(englishTitle, request.season, request.episode, request.isMovie, undefined, undefined, undefined, malId);
     } catch (error) {
       console.error('Error handling MAL request:', error);
       return { streams: [] };
@@ -1084,7 +1085,7 @@ export class AnimeSaturnProvider {
     }
   }
 
-  async handleTitleRequest(title: string, seasonNumber: number | null, episodeNumber: number | null, isMovie = false, titleAlt?: string | null, titleIt?: string | null, titleItSeason?: number | null): Promise<{ streams: StreamForStremio[] }> {
+  async handleTitleRequest(title: string, seasonNumber: number | null, episodeNumber: number | null, isMovie = false, titleAlt?: string | null, titleIt?: string | null, titleItSeason?: number | null, malId?: number | null): Promise<{ streams: StreamForStremio[] }> {
     debug(1, 'AnimeSaturn', 'title request', { title, titleAlt, titleIt, titleItSeason, season: seasonNumber, episode: episodeNumber, isMovie });
     const universalTitle = applyUniversalAnimeTitleNormalization(title);
     if (universalTitle !== title) {
@@ -1105,7 +1106,7 @@ export class AnimeSaturnProvider {
     const itQuery = sameQuery(itQueryRaw, normalizedTitle) ? '' : itQueryRaw;
     const titles = [normalizedTitle];
     if (itQuery) titles.push(itQuery);
-    const catalogVersions = catalogSaturnVersions([normalizedTitle, itQuery, altQuery], { season: seasonNumber, isMovie });
+    const catalogVersions = catalogSaturnVersions([normalizedTitle, itQuery, altQuery], { season: seasonNumber, isMovie, malId });
     const rawVersions = catalogVersions.length ? [] : await this.searchAllVersions(normalizedTitle);
     let animeVersions = catalogVersions.length ? catalogVersions : filterAnimeResults(rawVersions, titles);
     if (!animeVersions.length && altQuery) {

@@ -117,6 +117,15 @@ test('catalogo: per un film si serve la scheda film, per una serie quella TV', a
   assert.deepEqual(serie.streams.map((stream) => stream.url), ['https://cdn.example/reborn-tv-Qq1w2.mp4']);
 });
 
+test('catalogo: malId esatto apre la scheda anche se il titolo non c entra', async () => {
+  useCatalog([{ ...catalogEntry('Titolo Sul Sito', 'scheda-mal-Qw3Er'), malId: 52034 }]);
+  mockAnime('scheda-mal-Qw3Er', 'Titolo Sul Sito');
+  calls.length = 0;
+  const { streams } = await provider.handleTitleRequest('Un Titolo Diverso', 1, 1, false, undefined, undefined, undefined, 52034);
+  assert.deepEqual(streams.map((stream) => stream.url), ['https://cdn.example/scheda-mal-Qw3Er.mp4']);
+  assert.deepEqual(calls.filter((url) => /\/api\/search|\/filter\?key/.test(url)), []);
+});
+
 test('catalogo: ambiguo (due basi diverse) non si serve, si torna alla ricerca', async () => {
   useCatalog([catalogEntry('Tutor Hitman Reborn', 'a1'), catalogEntry('Katekyo Hitman Reborn', 'b2')]);
   calls.length = 0;

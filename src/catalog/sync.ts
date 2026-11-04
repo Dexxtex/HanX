@@ -40,6 +40,8 @@ export interface TitleIndexEntry {
   key: string;
   aliases?: string[];
   type?: string;
+  /** Solo AnimeUnity: id MAL, per il match esatto senza passare dai titoli. */
+  malId?: number;
 }
 
 export interface TitleIndexFile {
@@ -205,6 +207,7 @@ export function buildTitleIndex(catalog: CatalogFile): TitleIndexFile {
       key: compactKey(entry.titleSite),
       ...(entry.titles?.length ? { aliases: entry.titles } : {}),
       ...(entry.type ? { type: entry.type } : {}),
+      ...(entry.malId ? { malId: entry.malId } : {}),
     }));
   }
   return { generatedAt: catalog.generatedAt, sites };

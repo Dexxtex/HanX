@@ -150,6 +150,39 @@ test('e) il log non supera 5 titoli', () => {
   assert.ok(JSON.parse(line.slice(line.indexOf('{'))).tie.length <= 5, line);
 });
 
+test('malId: l id esatto vince sul titolo, senza fuzzy', () => {
+  fixture({ sites: { unity: [entry('Mou Ippon!', '4354-mou-ippon', { malId: 52034 })] } });
+  const lookup = lookupTitle('unity', ['Titolo Che Non C Entra Nulla'], { malId: 52034 });
+  assert.equal(lookup.hits.length, 1);
+  assert.equal(lookup.hits[0].slug, '4354-mou-ippon');
+  assert.equal(lookup.hits[0].score, 1);
+});
+
+test('malId: ITA e SUB della stessa opera si servono entrambe', () => {
+  fixture({
+    sites: {
+      unity: [
+        entry('Mou Ippon!', '4354-mou-ippon', { malId: 52034 }),
+        entry('Mou Ippon! (ITA)', '4355-mou-ippon-ita', { malId: 52034 }),
+      ],
+    },
+  });
+  const lookup = lookupTitle('unity', ['niente'], { malId: 52034 });
+  assert.deepEqual(lookup.hits.map((hit) => hit.language).sort(), ['ITA', 'SUB ITA']);
+});
+
+test('malId: se l indice non ce l ha si torna al titolo', () => {
+  fixture({ sites: { unity: [entry('Mou Ippon!', '4354-mou-ippon', { malId: 52034 })] } });
+  assert.deepEqual(lookupTitle('unity', ['niente che matchi'], { malId: 99999 }).hits, []);
+  assert.equal(lookupTitle('unity', ['Mou Ippon!'], { malId: 99999 }).hits[0].slug, '4354-mou-ippon');
+});
+
+test('malId: vince anche sulla stagione dichiarata nella scheda', () => {
+  fixture({ sites: { unity: [entry('Mou Ippon! 2', '4354-mou-ippon-2', { malId: 52034 })] } });
+  const lookup = lookupTitle('unity', ['niente'], { season: 1, malId: 52034 });
+  assert.deepEqual(lookup.hits.map((hit) => hit.slug), ['4354-mou-ippon-2']);
+});
+
 test('fascia 0.5-0.8: il risultato non si usa', () => {
   fixture({ sites: { saturn: [entry('The Three Titans Battle')] } });
   assert.deepEqual(lookupTitle('saturn', ['The Three Deities Battle'], { season: 1 }).hits, []);

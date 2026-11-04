@@ -176,6 +176,9 @@ test('indice: chiave compatta, Mission-E e MissionE coincidono', () => {
   const index = buildTitleIndex(catalog);
   assert.equal(index.sites.saturn[0].key, compactKey('Mission-E'));
   assert.equal(compactKey('Mission-E'), compactKey('MissionE'));
+  // Il malId di Unity viaggia nell'indice: serve al match esatto.
+  catalog.sites.unity = [{ site: 'unity', slug: '4354-mou-ippon', url: 'u', titleSite: 'Mou Ippon!', malId: 52034 }];
+  assert.equal(buildTitleIndex(catalog).sites.unity[0].malId, 52034);
   assert.deepEqual(index.sites.world, []);
 });
 

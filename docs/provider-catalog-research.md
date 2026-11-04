@@ -134,12 +134,13 @@ pubblicato nulla: il confronto senza `generatedAt` ha funzionato.
 
 | idea | guadagno | costo |
 |---|---|---|
+| ~~match per `malId`~~ | **fatto**: per `mal:<id>` il matcher serve la scheda senza fuzzy | — |
 | JSON-LD di Saturn per le schede **nuove** | titolo vero + `alternateName`, anno, generi, episodi | ~1 richiesta/scheda nuova (2-5 min/giorno) |
 | backfill JSON-LD Saturn | idem su tutte | 150/notte → completo in ~41 notti (+7,5 min/run) |
 | World `?dub=1` | lingua esatta invece che dedotta | +34 richieste/run |
 | campo `dub` di Unity | lingua esatta | gratis (già nella risposta) |
 | Saturn `/filter?years=YYYY` | anno su tutte le 6.179 | ~266 richieste (una notte) |
-| match per `malId` | match esatto sulle 7.128 schede Unity | 1-2 ore di codice, da testare col catalogo vero |
+
 
 ## Errori di misura da non ripetere
 

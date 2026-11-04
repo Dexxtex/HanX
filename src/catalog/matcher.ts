@@ -37,6 +37,12 @@ export interface CatalogQueryOptions {
   season?: number | null;
   /** Film, OVA o stagione 0. */
   isMovie?: boolean;
+  /**
+   * Id MAL della richiesta (`mal:1234`). Se il catalogo ha schede con quel
+   * `mal_id` si servono quelle, senza fuzzy né tie-break: l'id identifica la
+   * scheda, non il titolo che il sito le ha dato.
+   */
+  malId?: number | null;
 }
 
 export interface CatalogLookup {
@@ -159,6 +165,23 @@ export function lookupTitle(site: CatalogSite, queries: string[], options?: Cata
   const index = loadIndex();
   const entries = index?.sites?.[site] || [];
   const generatedAt = typeof index?.generatedAt === 'string' ? index.generatedAt : null;
+  const wantedMal = Number.isInteger(options?.malId) && Number(options?.malId) > 0 ? Number(options?.malId) : null;
+  if (wantedMal !== null) {
+    const exact = entries.filter((entry) => entry.malId === wantedMal);
+    if (exact.length) {
+      const hits: CatalogHit[] = exact.map((entry) => ({
+        slug: entry.slug,
+        url: entry.url,
+        title: entry.title,
+        score: 1,
+        language: languageOf(entry.title),
+        ...(entry.type ? { type: entry.type } : {}),
+      }));
+      // ITA e SUB della stessa opera possono condividere il mal_id: si servono entrambe.
+      debug(2, 'Catalog', JSON.stringify({ t: 'catalog-lookup', site, query: `mal:${wantedMal}`, slug: hits[0].slug, score: 1, band: 'auto', served: true, tie: null }));
+      return { hits, generatedAt };
+    }
+  }
   const wantedSeason = Number.isInteger(options?.season) && Number(options?.season) > 0 ? Number(options?.season) : null;
   // `season: null` non è un film: solo 0 esplicito lo è.
   const isFilm = options?.isMovie === true || options?.season === 0;

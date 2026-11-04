@@ -815,7 +815,8 @@ export class AnimeWorldProvider {
       const request = resolveMappingRequest(malIdString);
       if (!request) return { streams: [] };
       const englishTitle = await getEnglishTitleFromAnyId(request.id, 'mal', this.config.tmdbApiKey, ALLOW_EMPTY_TITLE);
-      return this.handleTitleRequest(englishTitle, request.season, request.episode, request.isMovie);
+      const malId = Number(request.id);
+      return this.handleTitleRequest(englishTitle, request.season, request.episode, request.isMovie, undefined, undefined, undefined, malId);
     } catch (e) { console.error('[AnimeWorld] mal handler error', e); return { streams: [] }; }
   }
   /** Split-cour safety net: season title on a mapping miss, never the base series title. */
@@ -913,7 +914,7 @@ export class AnimeWorldProvider {
     } catch(e){ console.error('[AnimeWorld] tvdb handler error', e); return { streams: [] }; }
   }
 
-  async handleTitleRequest(title: string, seasonNumber: number | null, episodeNumber: number | null, isMovie = false, titleAlt?: string | null, titleIt?: string | null, titleItSeason?: number | null): Promise<{ streams: StreamForStremio[] }> {
+  async handleTitleRequest(title: string, seasonNumber: number | null, episodeNumber: number | null, isMovie = false, titleAlt?: string | null, titleIt?: string | null, titleItSeason?: number | null, malId?: number | null): Promise<{ streams: StreamForStremio[] }> {
     debug(1, 'AnimeWorld', 'title request', { title, titleAlt, titleIt, titleItSeason, season: seasonNumber, episode: episodeNumber, isMovie });
     const universalTitle = applyUniversalAnimeTitleNormalization(title);
     if (universalTitle !== title) {
@@ -970,7 +971,7 @@ export class AnimeWorldProvider {
     debug(3, 'AnimeWorld', '[AnimeWorld] Title original:', title);
     debug(3, 'AnimeWorld', '[AnimeWorld] Title normalized:', normalized);
 
-    const catalogVersions = catalogWorldVersions([normalized, itQuery, altQuery], { season: seasonNumber, isMovie });
+    const catalogVersions = catalogWorldVersions([normalized, itQuery, altQuery], { season: seasonNumber, isMovie, malId });
     let versions = catalogVersions.length ? catalogVersions : await searchWithLogging(normalized);
     let versionsFromFallback = false;
 
