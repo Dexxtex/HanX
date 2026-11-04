@@ -150,6 +150,51 @@ test('e) il log non supera 5 titoli', () => {
   assert.ok(JSON.parse(line.slice(line.indexOf('{'))).tie.length <= 5, line);
 });
 
+test('lingua: quella dichiarata dal sito vince sulla deduzione dal titolo', () => {
+  fixture({
+    sites: {
+      unity: [
+        entry('Sword Art Online', '4579-sword-art-online', { language: 'ITA' }),
+        entry('Kiseiju', '4578-kiseiju', { language: 'SUB ITA' }),
+        entry('Altro Titolo (ITA)', '4577-altro-titolo'),
+      ],
+    },
+  });
+  const hit = (q) => lookupTitle('unity', [q]).hits[0].language;
+  assert.equal(hit('Sword Art Online'), 'ITA');
+  assert.equal(hit('Kiseiju'), 'SUB ITA');
+  // senza il campo si deduce dal titolo, come prima
+  assert.equal(hit('Altro Titolo (ITA)'), 'ITA');
+});
+
+test('episodi: la scheda troppo corta non contiene la richiesta e si scarta', () => {
+  fixture({
+    sites: {
+      saturn: [
+        entry('Dr. Stone', 'dr-stone', { episodes: 24 }),
+        entry('Dr. Stone 2', 'dr-stone-2', { episodes: 11 }),
+      ],
+      world: [entry('One Piece', 'one-piece', { episodes: 1100 })],
+    },
+  });
+  // Stagione 2, episodio 5: la scheda da 11 episodi va bene anche se la serie ne ha 24.
+  assert.deepEqual(lookupTitle('saturn', ['Dr. Stone 2'], { season: 2, episode: 5 }).hits.map((h) => h.slug), ['dr-stone-2']);
+  // Stagione 2, episodio 15: la scheda da 11 non può contenerlo.
+  assert.deepEqual(lookupTitle('saturn', ['Dr. Stone 2'], { season: 2, episode: 15 }).hits, []);
+  // Monostagione da 1.100 episodi: l episodio assoluto passa.
+  assert.deepEqual(lookupTitle('world', ['One Piece'], { episode: 1090 }).hits.map((h) => h.slug), ['one-piece']);
+});
+
+test('episodi: senza conteggio non si scarta niente, e il filtro vale anche per il malId', () => {
+  fixture({ sites: { unity: [
+    entry('Serie Senza Conteggio', 'senza-conteggio'),
+    entry('Corta', 'corta', { episodes: 12, malId: 777 }),
+  ] } });
+  assert.equal(lookupTitle('unity', ['Serie Senza Conteggio'], { episode: 500 }).hits.length, 1);
+  assert.deepEqual(lookupTitle('unity', ['niente'], { malId: 777, episode: 15 }).hits, []);
+  assert.deepEqual(lookupTitle('unity', ['niente'], { malId: 777, episode: 3 }).hits.map((h) => h.slug), ['corta']);
+});
+
 test('malId: l id esatto vince sul titolo, senza fuzzy', () => {
   fixture({ sites: { unity: [entry('Mou Ippon!', '4354-mou-ippon', { malId: 52034 })] } });
   const lookup = lookupTitle('unity', ['Titolo Che Non C Entra Nulla'], { malId: 52034 });

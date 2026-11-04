@@ -7,11 +7,18 @@ import {
   buildTitleIndex,
   diffEntries,
   emptyCatalog,
+  carryOverMalIds,
   mergeSite,
+  parseCardDetails,
+  parseCardIds,
+  applyCardDetails,
   parseSaturnAnimeSitemap,
   parseSaturnSitemapIndex,
   parseWorldMaxPage,
   parseUnityRecords,
+  parseSaturnCardMeta,
+  parseSaturnFilterPage,
+  saturnListingGap,
   parseWorldFilterPage,
   readCatalog,
   writeCatalogsAtomic,
@@ -62,6 +69,24 @@ const UNITY_PAYLOAD = {
       date: '2023',
       season: 'inverno',
       mal_id: 52034,
+      anilist_id: 151514,
+      type: 'TV',
+      genres: ['Sport', 'Commedia'],
+      plot: 'Un club di judo femminile che riparte da zero.',
+      imageurl: 'https://img.animeunity.co/ippon.jpg',
+      score: '8.2',
+      studio: 'Bakken Record',
+      status: 'Completato',
+      day: 'Lunedì',
+      episodes_count: 13,
+      real_episodes_count: 13,
+      episodes_length: 24,
+      favorites: 1200,
+      visite: 45000,
+      members: 30000,
+      created_at: '2023-01-10 09:15:00',
+      crunchy_id: 0,
+      netflix_id: 81345678,
     },
     // Titolo principale vuoto (bug del sito su .hack): si usa l'italiano.
     { id: 830, slug: 'hackgu-returner', title: null, title_it: 'hack//G.U. Returner', title_eng: null, date: '2006' },
@@ -98,6 +123,131 @@ test('world: una pagina vuota è il segnale di fine (il tetto resta una sicurezz
   assert.deepEqual(parseWorldFilterPage(''), []);
 });
 
+const SATURN_PAGE = `<div class="grid">
+  <a href="/anime/the-holy-grail-of-eris-Qqj3j" class="ac group">
+    <div class="ac__poster"><span>8.60</span></div>
+    <div class="ac__caption"><h3 class="ac__title">The Holy Grail of Eris</h3>
+    <p class="ac__sub">08 Gennaio 2026 &middot; 12 ep</p></div>
+  </a>
+  <a href="/anime/the-holy-grail-of-eris-Qqj3j" class="ac group">
+    <h3 class="ac__title">Doppione</h3>
+  </a>
+  <a href="/anime/senza-dati-Ux1" class="ac group">
+    <h3 class="ac__title">Senza Dati</h3>
+  </a>
+  <a href="/toplist" class="ac">non una scheda</a>
+</div>`;
+
+const SATURN_CARD = `<html><head><script type="application/ld+json">{"@type":"TVSeries","name":"Tutor Hitman Reborn!","alternateName":"Katekyo Hitman Reborn!","description":"Tsuna &amp; i suoi amici.","genre":["Azione","Commedia"],"image":"https://img.saturncdn.net/r.jpg","datePublished":"2006","numberOfEpisodes":"203","aggregateRating":{"ratingValue":"8.1"}}</script></head>
+<body><div class="ag-links"><a href="https://myanimelist.net/anime/1604/">MAL</a><a href="https://anilist.co/anime/1604/">AL</a></div></body></html>`;
+
+const WORLD_CARD = `<html><head><script type="application/ld+json">{"@type":"TVEpisode","name":"MaR Episodio 1","episodeNumber":"1","partOfSeries":{"@type":"TVSeries","name":"MaR - Märchen Awakens Romance (ITA)","alternateName":"MÄR (ITA)"}}</script></head>
+<body><a href="https://myanimelist.net/anime/738">MAL</a><a href="https://anilist.co/anime/738">AL</a></body></html>`;
+
+test('scheda Saturn: alias, episodi, anno e id, senza trama e generi', () => {
+  const details = parseCardDetails(SATURN_CARD, 'saturn');
+  assert.deepEqual(details, {
+    malId: 1604,
+    anilistId: 1604,
+    titles: ['Katekyo Hitman Reborn!'],
+    episodes: 203,
+    year: 2006,
+  });
+});
+
+test('scheda World: il JSON-LD e un episodio, la serie sta in partOfSeries', () => {
+  const details = parseCardDetails(WORLD_CARD, 'world');
+  assert.deepEqual(details, { malId: 738, anilistId: 738, titles: ['MÄR (ITA)'] });
+});
+
+const WORLD_DL = `<dl><dt> Anno: </dt><dd> 2005 </dd><dt> Audio: </dt><dd> Italiano </dd><dt> Data di Uscita: </dt><dd> 03 Aprile 2005 </dd>
+<dt> Stagione: </dt><dd> Primavera 2005 </dd><dt> Studio: </dt><dd> SynergySP </dd><dt> Episodi: </dt><dd> 102 </dd><dt> Stato: </dt><dd> Finito </dd></dl>`;
+
+test('scheda Saturn: la lingua audio dichiarata vince sul suffisso del titolo', () => {
+  const plain = SATURN_CARD.replace('</body>', '<div><span>Lingua</span> <span>Giapponese</span></div></body>');
+  assert.equal(parseCardDetails(plain, 'saturn').language, 'SUB ITA');
+  const dubbed = SATURN_CARD.replace('</body>', '<div><span>Lingua</span> <span>Italiano</span></div></body>');
+  assert.equal(parseCardDetails(dubbed, 'saturn').language, 'ITA');
+  // Scheda senza il campo: resta la deduzione dal titolo fatta dal matcher.
+  assert.equal(parseCardDetails(SATURN_CARD, 'saturn').language, undefined);
+});
+
+test('scheda World: dal blocco informazioni anno, data, episodi e lingua audio', () => {
+  const ita = parseCardDetails(WORLD_CARD + WORLD_DL, 'world');
+  assert.equal(ita.episodes, 102);
+  assert.equal(ita.year, 2005);
+  assert.equal(ita.startDate, '2005-04-03');
+  assert.equal(ita.language, 'ITA');
+
+  // Audio originale: la scheda è sottotitolata, non doppiata.
+  const sub = parseCardDetails(WORLD_CARD + WORLD_DL.replace('Italiano', 'Giapponese'), 'world');
+  assert.equal(sub.language, 'SUB ITA');
+
+  // I campi che non risolvono una richiesta non entrano.
+  assert.equal(ita.studio, undefined);
+  assert.equal(ita.plot, undefined);
+});
+
+test('scheda World: gli episodi si leggono da max del campo watchlist o dalla lista', () => {
+  const withMax = `${WORLD_CARD}<input type="number" id="watchlist-edit-episodes" placeholder="0" min="0" max="12" value="">`;
+  assert.equal(parseCardDetails(withMax, 'world').episodes, 12);
+
+  const withList = `${WORLD_CARD}<a data-episode-num="0"></a><a data-episode-num="11"></a><a data-episode-num="12"></a>`;
+  assert.equal(parseCardDetails(withList, 'world').episodes, 12);
+
+  // Saturn non ha questo markup: il conteggio resta quello del JSON-LD.
+  assert.equal(parseCardDetails(SATURN_CARD, 'saturn').episodes, 203);
+});
+
+test('scheda: i dati si fondono senza toccare il titolo del listing e il malId vuole la conferma', () => {
+  const entry = { site: 'saturn', slug: 's', url: 'u', titleSite: 'Tutor Hitman Reborn' };
+  applyCardDetails(entry, parseCardDetails(SATURN_CARD, 'saturn'), new Map());
+  assert.equal(entry.titleSite, 'Tutor Hitman Reborn'); // il listing vince
+  assert.deepEqual(entry.titles, ['Katekyo Hitman Reborn!']);
+  assert.equal(entry.episodes, 203);
+  assert.equal(entry.malId, undefined); // AniList non ha confermato
+
+  const confirmed = { site: 'saturn', slug: 's', url: 'u', titleSite: 'Tutor Hitman Reborn' };
+  applyCardDetails(confirmed, parseCardDetails(SATURN_CARD, 'saturn'), new Map([[1604, 1604]]));
+  assert.equal(confirmed.malId, 1604);
+  assert.equal(confirmed.anilistId, 1604);
+});
+
+test('saturn: la copertura del listing sotto il 98% è un guasto, non un dettaglio', () => {
+  assert.equal(saturnListingGap(6179, 6179), null);
+  assert.equal(saturnListingGap(6055, 6179), null); // 98,0%
+  assert.match(String(saturnListingGap(6054, 6179)), /listing con buchi: 6054\/6179/);
+  assert.match(String(saturnListingGap(0, 10)), /minimo 9/);
+});
+
+test('saturn: dal listing titolo vero, data ISO, episodi e tipo della partizione', () => {
+  const entries = parseSaturnFilterPage(SATURN_PAGE, 'TV');
+  assert.equal(entries.length, 2);
+  assert.deepEqual(entries[0], {
+    site: 'saturn',
+    slug: 'the-holy-grail-of-eris-Qqj3j',
+    url: 'https://www.animesaturn.net/anime/the-holy-grail-of-eris-Qqj3j',
+    titleSite: 'The Holy Grail of Eris',
+    startDate: '2026-01-08',
+    episodes: 12,
+    type: 'TV',
+  });
+  assert.deepEqual(entries[1], {
+    site: 'saturn',
+    slug: 'senza-dati-Ux1',
+    url: 'https://www.animesaturn.net/anime/senza-dati-Ux1',
+    titleSite: 'Senza Dati',
+    type: 'TV',
+  });
+});
+
+test('saturn: data ed episodi si leggono anche da soli, e una data storta non passa', () => {
+  assert.deepEqual(parseSaturnCardMeta('12 ep'), { episodes: 12 });
+  assert.deepEqual(parseSaturnCardMeta('08 Gennaio 2026'), { startDate: '2026-01-08' });
+  assert.deepEqual(parseSaturnCardMeta('In uscita'), {});
+  assert.deepEqual(parseSaturnCardMeta(''), {});
+});
+
 test('world: una scheda per slug, titolo da a.name, link non-anime scartati', () => {
   const entries = parseWorldFilterPage(WORLD_PAGE);
   assert.equal(entries.length, 2);
@@ -107,6 +257,8 @@ test('world: una scheda per slug, titolo da a.name, link non-anime scartati', ()
       slug: 'mar-marchen-awakens-romance-ita',
       url: 'https://www.animeworld.ac/play/mar-marchen-awakens-romance-ita.BNESr',
       titleSite: 'MaR - Märchen Awakens Romance (ITA)',
+      // data-jtitle diverso dal nome mostrato: finisce negli alias
+      titles: ['MÄR (ITA)'],
     },
     {
       site: 'world',
@@ -115,6 +267,18 @@ test('world: una scheda per slug, titolo da a.name, link non-anime scartati', ()
       titleSite: 'Absolute Duo',
     },
   ]);
+});
+
+test('unity: dub=1 dà la lingua esatta, dub=0 non la dichiara', () => {
+  const { entries } = parseUnityRecords({
+    tot: 2,
+    records: [
+      { id: 1, slug: 'ita-card', title: 'Alfa Sub ITA', dub: 1 },
+      { id: 2, slug: 'sub-card', title: 'Beta', dub: 0 },
+    ],
+  });
+  assert.equal(entries[0].language, 'ITA');
+  assert.equal(entries[1].language, undefined);
 });
 
 test('unity: titolo, titoli alternativi deduplicati, anno e url della scheda', () => {
@@ -128,8 +292,11 @@ test('unity: titolo, titoli alternativi deduplicati, anno e url della scheda', (
     titleSite: 'Mou Ippon!',
     titles: ['Mou Ippon! Sub ITA'],
     year: 2023,
+    type: 'TV',
     malId: 52034,
+    anilistId: 151514,
     season: 'inverno',
+    episodes: 13,
   });
   assert.deepEqual(entries[1], {
     site: 'unity',
@@ -139,6 +306,38 @@ test('unity: titolo, titoli alternativi deduplicati, anno e url della scheda', (
     year: 2006,
   });
   assert.deepEqual(parseUnityRecords({ tot: 'x' }), { total: 0, entries: [] });
+});
+
+test('ids della scheda: MAL e AniList, anche doppi come su World', () => {
+  assert.deepEqual(
+    parseCardIds('<div class="ag-links"><a href="https://myanimelist.net/anime/34566/">MAL</a><a href="https://anilist.co/anime/97938/">AL</a></div>'),
+    { malId: 34566, anilistId: 97938 }
+  );
+  assert.deepEqual(
+    parseCardIds('<a href="https://myanimelist.net/anime/738">x</a><a href="https://myanimelist.net/anime/738">y</a>'),
+    { malId: 738, anilistId: null }
+  );
+  assert.deepEqual(parseCardIds('<a href="https://anilist.co/anime/0">zero</a>'), { malId: null, anilistId: null });
+  assert.deepEqual(parseCardIds(''), { malId: null, anilistId: null });
+});
+
+test('malId: il crawl non li porta con sé, quindi si riprendono da ieri', () => {
+  const previous = [
+    { site: 'saturn', slug: 'a', url: '', titleSite: 'A', malId: 1 },
+    { site: 'saturn', slug: 'b', url: '', titleSite: 'B' },
+  ];
+  const next = [
+    { site: 'saturn', slug: 'a', url: '', titleSite: 'A' },
+    { site: 'saturn', slug: 'b', url: '', titleSite: 'B', malId: 99 },
+    { site: 'saturn', slug: 'nuova', url: '', titleSite: 'N' },
+  ];
+  assert.equal(carryOverMalIds(previous, next), 1);
+  assert.equal(next[0].malId, 1);
+  assert.equal(next[1].malId, 99); // il dato fresco non si sovrascrive
+  assert.equal(next[2].malId, undefined);
+
+  const accepted = mergeSite('saturn', previous, next);
+  assert.equal(accepted.entries[0].malId, 1);
 });
 
 test('protezione: sotto il 70% il catalogo di ieri resta', () => {
@@ -177,8 +376,9 @@ test('indice: chiave compatta, Mission-E e MissionE coincidono', () => {
   assert.equal(index.sites.saturn[0].key, compactKey('Mission-E'));
   assert.equal(compactKey('Mission-E'), compactKey('MissionE'));
   // Il malId di Unity viaggia nell'indice: serve al match esatto.
-  catalog.sites.unity = [{ site: 'unity', slug: '4354-mou-ippon', url: 'u', titleSite: 'Mou Ippon!', malId: 52034 }];
+  catalog.sites.unity = [{ site: 'unity', slug: '4354-mou-ippon', url: 'u', titleSite: 'Mou Ippon!', malId: 52034, episodes: 13 }];
   assert.equal(buildTitleIndex(catalog).sites.unity[0].malId, 52034);
+  assert.equal(buildTitleIndex(catalog).sites.unity[0].episodes, 13);
   assert.deepEqual(index.sites.world, []);
 });
 

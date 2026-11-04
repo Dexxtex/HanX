@@ -40,8 +40,9 @@ jobs:
     # I secret dell'environment `CATALOG` (CATALOG_PROXY) arrivano solo se il job
     # lo dichiara. L'environment non ha regole di protezione: il cron gira da solo.
     environment: CATALOG
-    # ~500 richieste a 3 s sono ~25 minuti: 45 lasciano spazio a retry e code.
-    timeout-minutes: 45
+    # ~700 richieste a 3 s sono ~35 minuti; il backfill dei malId ne aggiunge
+    # fino a 300 (15 min). 60 lascia spazio a retry e code.
+    timeout-minutes: 60
     steps:
       # Il workflow gira due volte al giorno per coprire l'ora legale: qui si
       # scarta la run che a Roma non è delle 20:00.
@@ -103,6 +104,9 @@ jobs:
         if: steps.guard.outputs.should_run == 'true'
         env:
           CATALOG_PROXY: ${{ secrets.CATALOG_PROXY }}
+          # Backfill malId: 300 schede per run, stop a 52' (il job ha 60').
+          CATALOG_MALID_MAX_REQUESTS: 300
+          CATALOG_MALID_DEADLINE_MIN: 52
         run: pnpm run sync-catalog
 
       # `always()`: anche con il sync rosso i siti riusciti vanno pubblicati.

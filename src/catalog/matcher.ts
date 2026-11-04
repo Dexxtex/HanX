@@ -3,7 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { debug } from '../utils/logger.js';
 import { titleMatchScoreAny } from '../utils/anime-title-normalization.js';
-import type { CatalogSite, TitleIndexEntry, TitleIndexFile } from './sync.js';
+import type { CatalogLanguage, CatalogSite, TitleIndexEntry, TitleIndexFile } from './sync.js';
 
 /** Sopra questa soglia il match è automatico; sotto 0.5 si ignora. */
 const AUTO_SCORE = 0.8;
@@ -17,7 +17,7 @@ const FORMAT_ONLY = /\b(?:movie|film|ova|oav|oad|ona|special|specials|recap|pilo
 /** Un numero dopo questi token è la parte, non la stagione ("Dr. Stone 3 Part 2"). */
 const PART_MARKERS = new Set(['part', 'cour', 'chapter', 'volume', 'vol', 'ep', 'episode']);
 
-export type CatalogLanguage = 'ITA' | 'CR ITA' | 'SUB ITA';
+export type { CatalogLanguage };
 
 export type CatalogBand = 'auto' | 'review' | 'low' | 'none';
 
@@ -43,6 +43,13 @@ export interface CatalogQueryOptions {
    * scheda, non il titolo che il sito le ha dato.
    */
   malId?: number | null;
+  /**
+   * Episodio richiesto **dentro la stagione** (`:S:E`). Una scheda che dichiara
+   * meno episodi non può contenerlo: si scarta, così il provider torna alla
+   * ricerca invece di servire una scheda che non ha quell'episodio. Vale sia per
+   * le schede monostagione da centinaia di episodi sia per quelle per stagione.
+   */
+  episode?: number | null;
 }
 
 export interface CatalogLookup {
@@ -153,6 +160,16 @@ function resolveTie(groups: Scored[][], context: { season: number | null; isFilm
 }
 
 /**
+ * Una scheda che dichiara meno episodi della richiesta non può contenerlo: la
+ * serie monostagione da 1.100 episodi passa, la scheda da 11 episodi no, e la
+ * stagione richiesta resta quella che il provider ha già passato. Le schede
+ * senza conteggio non si scartano: possono essere serie intere non dichiarate.
+ */
+function fitsEpisode(entry: { episodes?: number }, episode: number | null): boolean {
+  return episode === null || !entry.episodes || entry.episodes >= episode;
+}
+
+/**
  * Cerca il titolo nel catalogo locale di un sito. Il punteggio è quello dei
  * provider (`titleMatchScore`: forma grezza senza stopword, quindi "Mission-E"
  * combacia con "MissionE", e 0.9 quando la query chiude il titolo del sito).
@@ -166,20 +183,29 @@ export function lookupTitle(site: CatalogSite, queries: string[], options?: Cata
   const entries = index?.sites?.[site] || [];
   const generatedAt = typeof index?.generatedAt === 'string' ? index.generatedAt : null;
   const wantedMal = Number.isInteger(options?.malId) && Number(options?.malId) > 0 ? Number(options?.malId) : null;
+  const wantedEpisode =
+    Number.isInteger(options?.episode) && Number(options?.episode) > 0 ? Number(options?.episode) : null;
   if (wantedMal !== null) {
     const exact = entries.filter((entry) => entry.malId === wantedMal);
     if (exact.length) {
-      const hits: CatalogHit[] = exact.map((entry) => ({
-        slug: entry.slug,
-        url: entry.url,
-        title: entry.title,
-        score: 1,
-        language: languageOf(entry.title),
-        ...(entry.type ? { type: entry.type } : {}),
-      }));
-      // ITA e SUB della stessa opera possono condividere il mal_id: si servono entrambe.
-      debug(2, 'Catalog', JSON.stringify({ t: 'catalog-lookup', site, query: `mal:${wantedMal}`, slug: hits[0].slug, score: 1, band: 'auto', served: true, tie: null }));
-      return { hits, generatedAt };
+      const hits: CatalogHit[] = exact
+        .filter((entry) => fitsEpisode(entry, wantedEpisode))
+        .map((entry) => ({
+          slug: entry.slug,
+          url: entry.url,
+          title: entry.title,
+          score: 1,
+          language: entry.language ?? languageOf(entry.title),
+          ...(entry.type ? { type: entry.type } : {}),
+        }));
+      if (hits.length) {
+        // ITA e SUB della stessa opera possono condividere il mal_id: si servono entrambe.
+        debug(2, 'Catalog', JSON.stringify({ t: 'catalog-lookup', site, query: `mal:${wantedMal}`, slug: hits[0].slug, score: 1, band: 'auto', served: true, tie: null, ep: wantedEpisode }));
+        return { hits, generatedAt };
+      }
+      debug(2, 'Catalog', JSON.stringify({ t: 'catalog-lookup', site, query: `mal:${wantedMal}`, slug: exact[0].slug, score: 1, band: 'auto', served: false, tie: null, ep: wantedEpisode, reason: 'episode' }));
+      // L'id è giusto ma la scheda non ha quell'episodio: decide la ricerca.
+      return { hits: [], generatedAt };
     }
   }
   const wantedSeason = Number.isInteger(options?.season) && Number(options?.season) > 0 ? Number(options?.season) : null;
@@ -197,10 +223,13 @@ export function lookupTitle(site: CatalogSite, queries: string[], options?: Cata
   const band: CatalogBand =
     scoreBest >= AUTO_SCORE ? 'auto' : scoreBest >= REVIEW_SCORE ? 'review' : scoreBest > 0 ? 'low' : 'none';
 
-  // Una scheda che dichiara un'altra stagione non è quella richiesta. Le schede
+  // Una scheda che dichiara un'altra stagione non è quella richiesta, e una che
+  // dichiara meno episodi non può contenere l'episodio: si scartano **prima** del
+  // tie-break, così la scelta avviene tra schede che possono rispondere. Le schede
   // senza numero restano: i siti tengono spesso una sola pagina per serie.
   const wanted = all.filter((item) => {
     if (item.score < REVIEW_SCORE) return false;
+    if (!fitsEpisode(item.entry, wantedEpisode)) return false;
     if (wantedSeason === null || isFilm) return true;
     const season = seasonOf(item.entry.title);
     return season === null || season === wantedSeason;
@@ -229,13 +258,19 @@ export function lookupTitle(site: CatalogSite, queries: string[], options?: Cata
           url: entry.url,
           title: entry.title,
           score,
-          language: languageOf(entry.title),
+          language: entry.language ?? languageOf(entry.title),
           ...(entry.type ? { type: entry.type } : {}),
         }))
       : [];
 
-  // Una riga sola per lookup da rivedere (ambiguo o fascia 0,5-0,8), mai liste di centinaia di basi.
-  if (tie || band === 'review') {
+  // Il filtro episodio che azzera un match altrimenti buono va visto: è la misura
+  // di quante volte il conteggio della scheda manda il provider sulla rete.
+  const droppedByEpisode =
+    wantedEpisode !== null &&
+    hits.length === 0 &&
+    all.some((item) => item.score >= REVIEW_SCORE && !fitsEpisode(item.entry, wantedEpisode));
+  // Una riga sola per lookup da rivedere (ambiguo, fascia 0,5-0,8 o scartato per episodio).
+  if (tie || band === 'review' || droppedByEpisode) {
     debug(
       2,
       'Catalog',
@@ -248,6 +283,8 @@ export function lookupTitle(site: CatalogSite, queries: string[], options?: Cata
         band,
         served: hits.length > 0,
         tie,
+        ...(wantedEpisode !== null ? { ep: wantedEpisode } : {}),
+        ...(droppedByEpisode ? { reason: 'episode', dropped: selected.map((item) => item.entry.slug) } : {}),
       })
     );
   }

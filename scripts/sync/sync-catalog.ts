@@ -6,7 +6,8 @@
  * - una richiesta alla volta, 3 s tra la fine di una e l'inizio della successiva;
  * - timeout 15 s, User-Agent esplicito, 2 retry con backoff solo su 5xx/rete;
  * - 403 e 429 fermano tutto: il WAF si prolunga se si insiste;
- * - tetti giornalieri: Saturn ~2 richieste (sitemap), World fino alle pagine
+ * - tetti giornalieri: Saturn 2 richieste di sitemap + ~206 pagine di listing (una
+ *   partizione per tipo), World fino alle pagine
  *   dichiarate dal sito (172 oggi, 40 schede) con tetto 300, Unity 1 + 300
  *   pagine (30 schede). Totale massimo ~545, ~29 minuti; il tetto di World è
  *   solo una sicurezza, `truncated` scatta se il dichiarato lo supera.
@@ -16,6 +17,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { fetch as undiciFetch } from 'undici';
+import { confirmMalIds } from '../../src/catalog/anilist.js';
 import { proxyDispatcher, redactProxy } from '../../src/catalog/proxy.js';
 import {
   CATALOG_SITES,
@@ -24,13 +26,19 @@ import {
   emptyCatalog,
   mergeSite,
   parseSaturnAnimeSitemap,
+  parseSaturnFilterPage,
   parseSaturnSitemapIndex,
+  applyCardDetails,
+  parseCardDetails,
+  saturnListingGap,
+  SATURN_TYPES,
   parseWorldMaxPage,
   parseUnityRecords,
   parseWorldFilterPage,
   readCatalog,
   writeCatalogsAtomic,
   type CatalogEntry,
+  type CatalogFile,
   type CatalogSite,
 } from '../../src/catalog/sync.js';
 
@@ -119,15 +127,65 @@ interface CrawlResult {
   capped: boolean;
 }
 
+/** Tetto del walk di /filter: 206 pagine reali, il resto è margine, non un piano. */
+const SATURN_WALK_BUDGET = 260;
+
 async function crawlSaturn(maxPages: number): Promise<CrawlResult> {
   const index = await request(`${BASES.saturn}/sitemap.xml`);
   const parts = parseSaturnSitemapIndex(index.body);
   if (!parts.length) throw new Error('sitemap index senza parti /sitemap-anime-*.xml');
-  const entries: CatalogEntry[] = [];
+  // La sitemap resta la spina (2 richieste): le schede sono quelle, il listing
+  // aggiunge titolo vero, data e tipo senza poterle perdere.
+  const bySlug = new Map<string, CatalogEntry>();
   for (const part of parts.slice(0, maxPages)) {
-    entries.push(...parseSaturnAnimeSitemap((await request(part)).body));
+    for (const entry of parseSaturnAnimeSitemap((await request(part)).body)) bySlug.set(entry.slug, entry);
   }
-  return { entries, capped: parts.length > maxPages };
+  const spine = bySlug.size;
+  // Una partizione di tipo per giro: le pagine in totale restano ~206, e il tipo
+  // arriva dal filtro invece di essere dedotto. Titolo e data sono in ogni card.
+  let budget = SATURN_WALK_BUDGET;
+  let walked = 0;
+  // Il walk è arrivato in fondo (pagina vuota) o è stato tagliato da tetto/budget?
+  let truncatedByCap = false;
+  // Slug distinti arricchiti: una scheda può comparire in due partizioni di tipo.
+  const enriched = new Set<string>();
+  for (const type of SATURN_TYPES) {
+    let closed = false;
+    for (let page = 1; page <= maxPages && budget > 0; page += 1) {
+      budget -= 1;
+      walked += 1;
+      const url = `${BASES.saturn}/filter?types%5B%5D=${encodeURIComponent(type)}&page=${page}`;
+      const found = parseSaturnFilterPage((await request(url)).body, type);
+      if (!found.length) {
+        closed = true;
+        break;
+      }
+      for (const entry of found) {
+        const known = bySlug.get(entry.slug);
+        if (!known) {
+          bySlug.set(entry.slug, entry);
+          enriched.add(entry.slug);
+          continue;
+        }
+        Object.assign(known, {
+          titleSite: entry.titleSite,
+          ...(entry.startDate ? { startDate: entry.startDate } : {}),
+          ...(entry.episodes ? { episodes: entry.episodes } : {}),
+          ...(entry.type ? { type: entry.type } : {}),
+        });
+        enriched.add(entry.slug);
+      }
+    }
+    if (!closed) truncatedByCap = true;
+  }
+  console.log(`[catalog] saturn: ${bySlug.size} schede, ${enriched.size}/${spine} arricchite dal listing (${walked} pagine)`);
+  // Solo su un walk completo: con --max-pages o budget esaurito la copertura
+  // parziale è voluta e non va segnalata come guasto.
+  if (!truncatedByCap) {
+    const gap = saturnListingGap(enriched.size, spine);
+    if (gap) throw new Error(gap);
+  }
+  return { entries: [...bySlug.values()], capped: parts.length > maxPages || budget === 0 };
 }
 
 async function crawlWorld(maxPages: number): Promise<CrawlResult> {
@@ -194,6 +252,61 @@ async function crawlUnity(maxPages: number): Promise<CrawlResult> {
   return { entries, capped: offset < total };
 }
 
+/** Schede a cui prendere il malId per run: 300 richieste ≈ 15 min a 3 s. */
+const MALID_MAX_REQUESTS = Number(process.env.CATALOG_MALID_MAX_REQUESTS) || 300;
+/** Oltre questo minuto dall'avvio la fase si ferma: il job ha 60 min di tetto. */
+const MALID_DEADLINE_MIN = Number(process.env.CATALOG_MALID_DEADLINE_MIN) || 52;
+
+/**
+ * Backfill del `malId` dalle pagine delle schede, una richiesta per scheda: 6.179
+ * Saturn + 6.864 World, quindi si fa a rate e si riprende dalla sera dopo. Le
+ * schede nuove passano davanti al backlog; i malId già presi restano (mergeSite).
+ */
+async function enrichMalIds(catalog: CatalogFile, previous: CatalogFile, startedAt: number): Promise<void> {
+  const deadline = startedAt + MALID_DEADLINE_MIN * 60_000;
+  const quota = Math.ceil(MALID_MAX_REQUESTS / 2);
+  for (const site of ['saturn', 'world'] as const) {
+    const yesterday = new Set(previous.sites[site].map((entry) => entry.slug));
+    const entries = catalog.sites[site];
+    const pending = entries.filter((entry) => !entry.malId);
+    // Le nuove prima: l'indice non le conosce e le vorrebbe subito.
+    pending.sort((a, b) => Number(yesterday.has(a.slug)) - Number(yesterday.has(b.slug)));
+    const before = entries.length - pending.length;
+    const found: { entry: CatalogEntry; details: ReturnType<typeof parseCardDetails> }[] = [];
+    let requests = 0;
+    for (const entry of pending) {
+      if (requests >= quota || Date.now() > deadline) break;
+      requests += 1;
+      try {
+        found.push({ entry, details: parseCardDetails((await request(entry.url)).body, site) });
+      } catch (err) {
+        // Mezzo backfill vale più di un job rosso: la fase si chiude e si riprende domani.
+        console.error(`[catalog] malId ${site}: ${err instanceof BlockedError ? 'BLOCCATO' : 'errore'} — ${describeError(err)}`);
+        break;
+      }
+    }
+    // Solo gli id che AniList conferma: una pagina con il link MAL sbagliato non
+    // deve entrare nel ramo esatto del matcher.
+    const confirmed = await confirmMalIds(found.map((item) => item.details));
+    let done = 0;
+    let rejected = 0;
+    let enriched = 0;
+    for (const { entry, details } of found) {
+      // Tutto il resto della scheda si salva comunque: sono dati del sito, non
+      // id di altri cataloghi. Solo il malId ha bisogno di conferma.
+      applyCardDetails(entry, details, confirmed);
+      if (entry.malId && details.malId) done += 1;
+      else if (details.malId) rejected += 1;
+      if (entry.titles?.length) enriched += 1;
+    }
+    console.log(
+      `[catalog] schede ${site}: ${requests} lette, +${done} malId confermati, ${rejected} scartati, ` +
+        `${enriched} con alias nuovi (${before + done}/${entries.length} con malId)`
+    );
+    if (Date.now() > deadline) break;
+  }
+}
+
 const CRAWLERS: Record<CatalogSite, (maxPages: number) => Promise<CrawlResult>> = {
   saturn: crawlSaturn,
   world: crawlWorld,
@@ -211,7 +324,7 @@ function parseArgs(argv: string[]): Options {
   const options: Options = {
     sites: [...CATALOG_SITES],
     maxPages: {
-      saturn: 10,
+      saturn: 260,
       world: Number(process.env.CATALOG_WORLD_MAX_PAGES) || 300,
       unity: Number(process.env.CATALOG_UNITY_MAX_PAGES) || 300,
     },
@@ -285,6 +398,11 @@ async function main(): Promise<number> {
 
   const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
   const total = CATALOG_SITES.reduce((sum, site) => sum + catalog.sites[site].length, 0);
+  // Solo con la rete libera: dopo i tre crawl, con il tempo che resta.
+  if (options.sites.includes('saturn') || options.sites.includes('world')) {
+    await enrichMalIds(catalog, previous, startedAt);
+  }
+
   if (options.dryRun) {
     console.log(`[catalog] dry-run: ${total} schede, nessun file scritto (${elapsed}s)`);
     return failures.length ? 1 : 0;

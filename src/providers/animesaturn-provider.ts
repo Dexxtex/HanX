@@ -1106,7 +1106,7 @@ export class AnimeSaturnProvider {
     const itQuery = sameQuery(itQueryRaw, normalizedTitle) ? '' : itQueryRaw;
     const titles = [normalizedTitle];
     if (itQuery) titles.push(itQuery);
-    const catalogVersions = catalogSaturnVersions([normalizedTitle, itQuery, altQuery], { season: seasonNumber, isMovie, malId });
+    const catalogVersions = catalogSaturnVersions([normalizedTitle, itQuery, altQuery], { season: seasonNumber, isMovie, malId, episode: episodeNumber });
     const rawVersions = catalogVersions.length ? [] : await this.searchAllVersions(normalizedTitle);
     let animeVersions = catalogVersions.length ? catalogVersions : filterAnimeResults(rawVersions, titles);
     if (!animeVersions.length && altQuery) {

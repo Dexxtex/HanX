@@ -971,7 +971,7 @@ export class AnimeWorldProvider {
     debug(3, 'AnimeWorld', '[AnimeWorld] Title original:', title);
     debug(3, 'AnimeWorld', '[AnimeWorld] Title normalized:', normalized);
 
-    const catalogVersions = catalogWorldVersions([normalized, itQuery, altQuery], { season: seasonNumber, isMovie, malId });
+    const catalogVersions = catalogWorldVersions([normalized, itQuery, altQuery], { season: seasonNumber, isMovie, malId, episode: episodeNumber });
     let versions = catalogVersions.length ? catalogVersions : await searchWithLogging(normalized);
     let versionsFromFallback = false;
 

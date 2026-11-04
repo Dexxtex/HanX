@@ -1021,7 +1021,7 @@ export class AnimeUnityProvider {
     if (skipFilter) {
       debug(3, 'AnimeUnity', `[AnimeUnity][ExactMap] Skip filtro: titolo di input corrisponde a chiave exactMap -> "${title}"`);
     }
-    const catalogVersions = catalogUnityVersions([normalizedTitle, itQuery, altQuery], { season: seasonNumber, isMovie, malId });
+    const catalogVersions = catalogUnityVersions([normalizedTitle, itQuery, altQuery], { season: seasonNumber, isMovie, malId, episode: episodeNumber });
     let animeVersions = catalogVersions.length ? catalogVersions : await this.searchAllVersions(normalizedTitle);
     if (!skipFilter) {
       const rawVersions = animeVersions;
