@@ -5,59 +5,34 @@
 <h2 align="center">Addon Stremio per anime</h2>
 
 <p align="center">
-  Cerca e aggrega stream da AnimeUnity, AnimeSaturn e AnimeWorld in un'unica interfaccia.
+  Stream da AnimeUnity, AnimeSaturn e AnimeWorld in un'unica interfaccia.
 </p>
 
 | AnimeUnity | AnimeSaturn | AnimeWorld |
 |:---:|:---:|:---:|
 | <img src="public/provider-animeunity.jpg" alt="AnimeUnity" width="250"> | <img src="public/provider-animesaturn.jpg" alt="AnimeSaturn" width="250"> | <img src="public/provider-animeworld.jpg" alt="AnimeWorld" width="250"> |
 
-> **Progetto vibecoded.** HanX è un derivato di
-> [StreamViX](https://github.com/qwertyuiop8899/StreamViX) ed è scritto con
-> agenti AI: nessuna garanzia di stabilità, sicurezza o supporto. Dettagli in
-> [Crediti](#crediti).
-
 ![Node](https://img.shields.io/badge/node-%3E%3D24-green)
 ![Docker](https://img.shields.io/badge/docker-ready-blue)
-![TypeScript](https://img.shields.io/badge/typescript-7-blue)
 
-## Indice
-
-- [Cosa fa](#cosa-fa)
-- [Installazione](#installazione)
-- [Configurazione](#configurazione)
-- [Riproduzione: diretta o con proxy](#riproduzione-diretta-o-con-proxy)
-- [Mapping anime](#mapping-anime)
-- [API](#api)
-- [Sviluppo](#sviluppo)
-- [Struttura](#struttura)
-- [Appendici](#appendici)
-  - [Copertura e limiti del mapping](#copertura-e-limiti-del-mapping)
-  - [Limiti noti](#limiti-noti)
-  - [Crediti](#crediti)
+> **Progetto vibecoded.** Derivato di [StreamViX](https://github.com/qwertyuiop8899/StreamViX)
+> e scritto con agenti AI: nessuna garanzia di stabilità o supporto. Va usato a
+> proprio rischio. Non è affiliato a StreamViX né ai siti di streaming.
 
 ## Cosa fa
 
-- Cerca in parallelo sui tre provider, con fallback automatico quando uno non
-  risponde.
-- Accetta ID **MyAnimeList** (MAL), **Kitsu**, **IMDb**, **TMDB** e **TVDB**.
-- Riproduce in **diretta** o tramite **EasyProxy** (HLS), con gli header
-  corretti per ogni sito.
-- Offre una configurazione web integrata: apri `/`, scegli le sorgenti e ottieni
-  il link da incollare in Stremio.
-- Rispetta i limiti dei siti: pacing per host, cache delle ricerche, stop dopo
-  un `403` o un `429`.
+- Cerca sui tre provider in parallelo, con fallback quando uno non risponde.
+- Accetta ID **MAL**, **Kitsu**, **IMDb**, **TMDB** e **TVDB**.
+- Riproduce in **diretta** o tramite **EasyProxy** (HLS).
+- Ha una pagina di configurazione: scegli le sorgenti e ottieni il link da
+  incollare in Stremio.
+- Consulta un catalogo locale dei tre siti prima di chiedere al sito: meno
+  ricerche, risposte più rapide.
+- Rispetta i limiti dei siti (pacing, cache, stop su `403`/`429`).
 
-## Installazione
+## Avvio rapido
 
-HanX si installa come **stack Docker Compose**: un servizio, un volume per i
-dati, nessuna dipendenza da installare. Lo stesso YAML funziona da CLI con
-`docker compose` e nei gestori di stack (Portainer, Dockhand) incollato in
-**Stacks → Add stack**.
-
-Requisiti: Docker con Compose v2 (`docker compose version`).
-
-### La stack
+Serve Docker con Compose v2. Salva come `compose.yaml`:
 
 ```yaml
 services:
@@ -65,91 +40,58 @@ services:
     image: lextutor/hanx:latest
     container_name: HanX
     ports:
-      - "7000:7000"
+      - "${PORT:-7000}:${PORT:-7000}"
     volumes:
       - hanx-data:/app/data
-    environment:
-      - PORT=7000
-      - ANIME_MAPPING_URL=https://raw.githubusercontent.com/Dexxtex/HanX/mapping/anime-seasons.json
-      - ANIME_MAPPING_FILE=/app/data/anime-seasons.json
-      - CATALOG_URL=https://raw.githubusercontent.com/Dexxtex/HanX/data/catalog-titles.json
-      - TMDB_API_KEY=${TMDB_API_KEY:-}
-      - TVDB_API_KEY=${TVDB_API_KEY:-}
-      - TVDB_PIN=${TVDB_PIN:-}
-      - EASYPROXY_URL=${EASYPROXY_URL:-}
-      - EASYPROXY_PASSWORD=${EASYPROXY_PASSWORD:-}
-      - PROXY=${PROXY:-}
-      - AU_PROXY=${AU_PROXY:-}
-      - AS_PROXY=${AS_PROXY:-}
-      - AW_PROXY=${AW_PROXY:-}
+    env_file:
+      - .env
     restart: unless-stopped
 
 volumes:
   hanx-data:
 ```
 
-Salva il file come `compose.yaml`, oppure incollalo nello stack manager. I
-valori `${...}` si impostano in un `.env` accanto al file oppure nel pannello
-**Environment** dello stack; le variabili principali sono in
-[`.env.example`](.env.example).
+Poi crea il `.env` e avvia:
 
 ```bash
+cp .env.example .env     # compila almeno le 3 variabili obbligatorie
 docker compose up -d
 ```
 
 Apri <http://localhost:7000>, scegli le sorgenti e installa l'addon in Stremio.
+Per aggiornare: `docker compose pull && docker compose up -d`.
 
-### Aggiornamento
+> Il volume `hanx-data` serve: contiene indice, catalogo e cache. Senza, il
+> container riscarica tutto a ogni riavvio.
 
-```bash
-docker compose pull
-docker compose up -d
-```
-
-Dalla UI dello stack è **Update the stack** / **Recreate**. Il volume
-`hanx-data` conserva indice, cache e configurazione: non si perde.
-
-### Immagine e build
-
-| Registry | Immagine |
-| --- | --- |
-| Docker Hub | `lextutor/hanx:latest` |
-| GitHub Packages | `ghcr.io/dexxtex/hanx:latest` |
-
-Ogni tag `vX.Y.Z` pubblica i tag `X.Y.Z`, `X.Y`, `X`, `latest` e una **Release**
-con le note generate dai commit. Non serve autenticarsi ai registry.
-
-Per compilare l'immagine dal sorgente (solo se modifichi il codice):
-
-```bash
-docker build -t lextutor/hanx:latest .
-docker compose up -d
-```
+Immagine su Docker Hub (`lextutor/hanx:latest`) e GitHub Packages
+(`ghcr.io/dexxtex/hanx:latest`). Per compilare dal sorgente:
+`docker build -t lextutor/hanx:latest .`
 
 ## Configurazione
 
-Le variabili sono in [`.env.example`](.env.example). Le principali:
+L'elenco completo, con descrizione e default, è in
+[`.env.example`](.env.example). Queste tre sono obbligatorie:
 
-| Variabile | Significato | Default |
-| --- | --- | --- |
-| `PORT` | Porta del server | `7000` |
-| `TMDB_API_KEY` | TMDB, per metadati e mapping | — |
-| `TVDB_API_KEY` / `TVDB_PIN` | TVDB v4, per ordine episodi e fallback | — |
-| `ANIME_MAPPING_URL` | Indice mapping scaricato all'avvio | branch `mapping` su GitHub |
-| `CATALOG_URL` | Catalogo dei titoli scaricato all'avvio (ricontrollo ogni 6 h) | branch `data` su GitHub |
-| `EASYPROXY_URL` / `EASYPROXY_PASSWORD` | Proxy HLS per la riproduzione | — |
-| `PROXY`, `AU_PROXY`, `AS_PROXY`, `AW_PROXY` | Forward proxy per lo scraping (HTTP/SOCKS) | — |
-| `ANIMEUNITY_ENABLED`, `ANIMESATURN_ENABLED`, `ANIMEWORLD_ENABLED` | Sorgenti attive | `true` |
-| `ANIME_HOST_MIN_INTERVAL_MS` | Distanza minima tra richieste allo stesso host | `2000` |
-| `DEBUG_LEVEL` | `0`–`4`, da spento a trace | `0` |
+| Variabile | A cosa serve |
+| --- | --- |
+| `ANIME_MAPPING_URL` | Traduce gli ID di Stremio in titolo e stagione. Senza, nessun ID si risolve |
+| `CATALOG_URL` | Catalogo locale delle schede: senza, ogni titolo costa una ricerca di rete |
+| `TMDB_API_KEY` | Titoli italiani e metadati: senza, si perdono i match sui siti che elencano in italiano |
 
-Le chiavi restano nel `.env` locale: non committare il file. Se esponi la
-landing su Internet, proteggila con autenticazione davanti.
+Le altre che si toccano più spesso: `PORT`, `TVDB_API_KEY`/`TVDB_PIN`,
+`EASYPROXY_URL`/`EASYPROXY_PASSWORD`, `PROXY`/`AU_PROXY`/`AS_PROXY`/`AW_PROXY`,
+`*_ENABLED` per accendere o spegnere un provider, `DEBUG_LEVEL` (`0`–`4`).
+
+Le chiavi restano nel `.env`: non committarlo. Se esponi la pagina su Internet,
+proteggila con autenticazione davanti.
 
 ### Dietro un reverse proxy
 
-La landing costruisce il link del manifest da `X-Forwarded-Host`/`-Proto`,
-quindi non serve configurare host o porta. Con Caddy basta:
+Il link del manifest si costruisce da `X-Forwarded-Host`/`-Proto`: non serve
+configurare host o porta. Il link `stremio://` richiede HTTPS (o `127.0.0.1`).
+Se **Installa in Stremio** non parte, usa **Installa da Stremio Web** o incolla
+il manifest a mano in Stremio → Addons.
 
 ```caddyfile
 hanx.example.com {
@@ -157,262 +99,40 @@ hanx.example.com {
 }
 ```
 
-Il link `stremio://` richiede HTTPS (o `127.0.0.1`). Se il pulsante **Installa
-in Stremio** non parte, usa **Installa da Stremio Web** oppure incolla il
-manifest a mano in Stremio → Addons.
-
 ## Riproduzione: diretta o con proxy
 
-La landing offre due modalità, valide per tutti e tre i provider:
+- **Diretta** — URL del sito con gli header corretti: funziona quando player e
+  server escono dallo stesso IP pubblico.
+- **Con proxy** — tutto passa da EasyProxy, che scarica manifest e segmenti dal
+  suo IP. È un servizio separato
+  ([realbestia1/EasyProxy](https://github.com/realbestia1/EasyProxy)): avvialo e
+  metti URL e password nel `.env`.
 
-- **Diretta** — URL del sito, con gli header corretti. Funziona quando il player
-  e il server escono dallo stesso IP pubblico.
-- **Con proxy** — tutto passa da EasyProxy, che risolve manifest e segmenti dal
-  suo IP.
+I proxy `PROXY`/`AU_PROXY`/`AS_PROXY`/`AW_PROXY` sono un'altra cosa: servono allo
+scraping, non alla riproduzione.
 
-EasyProxy è un servizio separato
-([realbestia1/EasyProxy](https://github.com/realbestia1/EasyProxy)): avvialo,
-poi inserisci URL e password nella landing o nel `.env`.
+## Dati che scarica
 
-EasyProxy ha bisogno di `brotli` per decodificare le risposte HTTP compresse. Se
-l'immagine non lo include, sovrascrivi l'entrypoint nel suo servizio Compose:
-installa il pacchetto e poi lancia l'entrypoint originale.
+All'avvio scarica due indici pubblici e li aggiorna da solo:
 
-```yaml
-services:
-  easyproxy:
-    # ... resto della configurazione ...
-    entrypoint:
-      - /bin/bash
-      - -c
-      - |
-        python -m pip install --no-cache-dir --quiet brotli \
-          || echo "brotli non installato: proseguo senza" >&2
-        exec /bin/bash /app/entrypoint.sh
-```
+- il **mapping** (`anime-seasons.json`), che traduce gli ID di Stremio in titolo
+  e stagione. L'addon lo scarica da `ANIME_MAPPING_URL` e tenta il controllo ogni 6 ore; il download effettivo avviene al massimo una volta ogni 24 ore (ETag). Se il download fallisce, continua con la copia locale.
+- il **catalogo** delle schede dei tre siti, che evita la ricerca sul sito
+  quando il titolo è già noto. Senza `CATALOG_URL` si usa la ricerca di rete.
 
-I proxy `PROXY`/`AU_PROXY`/`AS_PROXY`/`AW_PROXY` sono un'altra cosa: servono
-allo **scraping**, non alla riproduzione, e si attivano appena impostati.
+Un titolo assente dal catalogo non viene mai dato per inesistente: passa
+comunque dalla ricerca del sito.
 
-> **Perché il pacing.** Cloudflare risponde con una challenge quando l'uscita fa
-> raffica. Un titolo può costare fino a 15 richieste: senza limite l'IP si
-> brucia in una sera, e un `403` non si recupera insistendo.
+## Limiti noti
 
-## Mapping anime
-
-Stremio manda ID e stagione; i siti italiani vogliono un titolo. Il livello
-`src/mapping/` fa da ponte e usa solo API ufficiali:
-
-| Fonte | A cosa serve |
-| --- | --- |
-| **Kitsu** | collegamento MAL → Kitsu e relazioni `sequel`/`prequel` |
-| **TMDB** | entry TMDB da titolo + anno, e da lì IMDb/TVDB; titolo italiano |
-| **TVDB v4** | ordine episodi (`aired order`) |
-| **Tenrai** | metadati MAL a runtime, con cache SQLite ed ETag |
-
-L'indice (`anime-seasons.json`) viene costruito dalla workflow
-[`anime-mapping.yml`](.github/workflows/anime-mapping.yml): ogni notte converte
-le nuove entry del catalogo MAL e pubblica indice **e cursore** sul branch
-orfano `mapping` (un commit solo, senza storia: il repository non cresce).
-L'addon lo scarica da `ANIME_MAPPING_URL` e tenta il controllo ogni 6 ore; il
-download effettivo avviene al massimo una volta ogni 24 ore (ETag). Se il
-download fallisce, continua con la copia locale.
-
-**L'indice incluso nell'immagine è vuoto**: senza `ANIME_MAPPING_URL` servono
-`TMDB_API_KEY` e `TVDB_API_KEY` per il fallback live, che copre meno casi.
-
-### Catalogo locale dei titoli
-
-`catalogs.json` tiene le schede dei tre siti (`site`, `slug`, `url`,
-`titleSite`, titoli alternativi, anno); `catalog-titles.json` è lo stesso elenco
-ridotto a indice con la chiave compatta (`Mission-E` e `MissionE` danno la stessa
-chiave). Li aggiorna ogni giorno alle 20:00 italiane la workflow
-[`sync-catalog.yml`](.github/workflows/sync-catalog.yml) e li pubblica sul
-**branch orfano `data`**, con un solo commit sovrascritto ogni volta: i 4-7 MB
-di JSON non entrano nella storia del repository. L'addon li scarica da
-`CATALOG_URL` (ricontrollo ogni 6 ore, download al massimo una volta al giorno)
-e **l'immagine non contiene catalogo**: senza `CATALOG_URL` o senza rete i
-provider usano solo la ricerca di rete, come prima.
-
-| Sito | Sorgente | Copertura |
-| --- | --- | --- |
-| AnimeSaturn | `sitemap-anime-*.xml` | completa (6.179), titolo ricavato dallo slug |
-| AnimeWorld | `/filter?page=N` | tutte le pagine dichiarate dal sito (172 oggi, 6.864 schede), titoli reali |
-| AnimeUnity | `POST /archivio/get-animes` | completa (7.266), titoli reali it/eng/romaji; `dubbed=1` è un filtro sulle stesse schede, non un catalogo a parte |
-
-**Metadati per provider.** Cosa salviamo, cosa il sito espone, cosa costerebbe
-recuperare il resto:
-
-| campo | Saturn | World | Unity |
-|---|---|---|---|
-| titolo mostrato | dallo slug | dalla card (`a.name`) | `title`, fallback it/eng |
-| titoli alternativi | — | — | `title_it`/`title_eng` (5.278 su 7.266) |
-| lingua | dal titolo: ITA 1.256 / CR 2 / SUB 4.921 | ITA 1.273 / CR 2 / SUB 5.589 | dal titolo |
-| anno | — (solo nelle card di `/az-list`: ~325 richieste) | — (`/api/tooltip` è vietato da robots.txt) | `date`, su tutte |
-| tipo | — | — | `type`: TV 3.864, Movie 1.121, OVA 798, ONA 795, Special 384, TV Short 304 (somma esatta: 7.266) |
-| `mal_id` | — | — | salvato come `malId` (7.128 su 7.266) e usato per il **match esatto** |
-| stagione | — | — | `season` (7.260 su 7.266) |
-| episodi | — (solo `/az-list`) | — | `episodes_count` |
-
-Unity è l'unico provider che espone `mal_id`. Per le richieste `mal:<id>` il
-matcher usa quello: se l'indice ha schede con quel `malId` le serve senza fuzzy
-né tie-break (le varianti ITA/SUB della stessa opera condividono il `mal_id` e
-vengono servite entrambe). Negli altri casi si torna al confronto per titolo.
-Saturn e World non hanno id né anno nel listing.
-
-Tutti i path provati sui tre siti, i metadati disponibili e i costi per ottenerli sono
-in [`docs/provider-catalog-research.md`](docs/provider-catalog-research.md).
-
-Perché i conteggi sono quelli e non altri (verificato il 4/11/2026):
-
-- **Saturn**: una sola parte `sitemap-anime-*` (le 2 e 3 esistono ma sono
-  urlset vuoti); `/newest`, `/ongoing`, `/upcoming` e le 4 sitemap di episodi
-  non contengono nemmeno uno slug fuori dalle 6.179.
-- **World**: la pagina 172 è l'ultima (16 schede) e la 173 ripete la prima;
-  `sort=title` viene ignorato, quindi non esiste un elenco alternativo.
-- **Unity**: la somma dei `type` dà esattamente 7.266 (nessun tipo fuori dal
-  listing di default); `dubbed=1` restituisce 1.541 schede che sono un
-  sottoinsieme delle stesse 7.266 (verificato sugli slug pubblicati), non un
-  catalogo separato; `mal_id` c'è in 7.128 schede su 7.266 e `season` in 7.260.
-
-Una richiesta alla volta con 3 s di intervallo, timeout 15 s, 2 retry solo su
-5xx e rete, ~500 richieste in ~25 minuti (job a 45 minuti). Se i runner GitHub
-escono da IP di datacenter e AnimeUnity risponde 403, si può impostare il secret
-`CATALOG_PROXY` con un proxy **residenziale** (stesso IP per tutta la run,
-~65-70 MB al giorno): è un cambio di IP, non un fix del WAF. Accetta
-`http(s)://`, `socks://` e `socks5://` (anche `socks5h://`, che è equivalente:
-undici manda sempre il nome host al proxy, quindi il DNS lo risolve il proxy). `socks4` è rifiutato con un messaggio esplicito. Un `403`/`429` o una
-sitemap sotto il 70% delle schede di ieri ferma **quel sito**: il suo catalogo
-resta quello pubblicato, gli altri due si aggiornano lo stesso e il job esce
-rosso. La coppia di file si scrive prima su `.tmp` e poi si rinomina.
-
-A mano: `pnpm run sync-catalog` in locale (`--site unity --max-pages 2
---dry-run` per una prova senza scrivere) oppure **Actions → Catalog Sync → Run
-workflow** (il workflow deve essere sul branch predefinito perché la voce
-compaia). GitHub può ritardare i job schedulati di qualche minuto e **disattiva
-i workflow schedulati dopo 60 giorni senza attività nel repo**: per riattivarlo
-basta “Enable workflow” nella pagina della workflow, o un `workflow_dispatch`
-qualsiasi.
-
-Nei provider il catalogo ha la precedenza sulla ricerca del sito
-(`src/catalog/matcher.ts`): un match ≥ 0,8 apre la scheda senza chiedere nulla,
-tra 0,5 e 0,8 il risultato viene solo registrato nel log (`DEBUG_LEVEL=2`),
-sotto 0,5 si ignora. Con una richiesta `mal:<id>` il catalogo risponde prima per
-`mal_id` (esatto, senza fuzzy) e solo in mancanza ripiega sui titoli. **Il catalogo non decide mai che un titolo non esiste**:
-con le query che passa davvero il provider (titolo del mapping + titolo italiano
-+ romaji) il catalogo serve una scheda nel 57-67% dei check trovati (Saturn
-57,2%, World 58,7%, Unity 67,3%; campione 600 per sito, ±4 punti). Se la
-richiesta arriva con il solo titolo principale, spesso giapponese, si scende
-sotto il 20%: è lì che sta il resto, non in una copertura mancante. Usare il
-catalogo come verdetto di assenza azzererebbe comunque quel 40%: un'opera
-"assente" è quasi sempre una scheda che il sito ha sotto un altro nome. Quindi
-per un titolo non trovato si usa sempre la ricerca di rete di prima, con gli
-stessi due ripieghi.
-
-**Titolo appena uscito.** Il catalogo è di ieri sera: un'opera aggiunta al sito
-oggi non c'è fino al sync successivo, cioè fino a ~24 ore. In quella finestra
-l'unico ripiego è la ricerca di rete, che però non viene più saltata — il
-limite resta solo per i match positivi, che mancano fino al sync.
-
-## API
-
-| Endpoint | Descrizione |
-| --- | --- |
-| `/stream/anime/{id}.json` | Stream per anime |
-| `/stream/film/{id}.json` | Stream per film |
-| `/stream/serie/{id}.json` | Stream per serie |
-
-ID supportati: `mal:123`, `kitsu:123`, `tt1234567`, `tmdb:12345`, `tvdb:12345`.
+- Il mapping non copre tutto il catalogo MAL: per gli altri la ricerca per
+  titolo può non bastare.
+- I siti sono dietro Cloudflare: insistere dopo un `403` peggiora le cose.
+- Il catalogo è di ieri sera: un titolo appena aggiunto si trova solo con la
+  ricerca di rete.
 
 ## Sviluppo
 
-Richiede Node.js 24+ (`node:sqlite` per la cache Tenrai).
-
-```bash
-pnpm install
-pnpm run dev             # hot reload
-pnpm run build           # tsc + copia config e indice in dist/
-pnpm start               # esegue dist/ (dopo build)
-pnpm test                # build + test (node:test)
-pnpm run check:domains   # verifica i domini dei provider
-pnpm run mapping:verify  # controlla l'indice del mapping
-
-# Jev 1.13 (decision model di opencode-go, gratuito) per verdetti e scelte:
-node scripts/jev-decide.mjs --state "<evidenza>"   --predicate "nome:la frase da valutare"   --choice "nome:testo:opzione A|opzione B"
-```
-
-Senza Docker: `pnpm install && pnpm run build && pnpm start`.
-
-## Struttura
-
-```text
-src/
-  addon.ts            entry point e manifest
-  landingPage.ts      interfaccia web di configurazione
-  config.ts           parsing di env e link
-  catalog/            sync dei tre siti, matcher offline, download da CATALOG_URL
-  mapping/            risoluzione ID → titolo/stagione
-  providers/          AnimeUnity, AnimeSaturn, AnimeWorld
-  utils/              HTTP, cache, logger, normalizzazione titoli
-  types/
-scripts/
-  build/              tsc → dist (build-copy) e conversione dell'indice mapping
-  automation/         script Python delle workflow (normalizzazioni, domini)
-  ops/                check domini, verifica feature, consulente Jev
-  sync/               sync del catalogo dei tre siti
-  research/           sonde usate per la ricognizione (non girano in CI)
-config/               domini e URL dei provider
-docs/                 ricognizione dei cataloghi e note di progetto
-public/               icona e sfondo
-tests/                test (node:test), stessa forma di src/
-data/                 runtime (catalogo scaricato, cache Tenrai), non versionato
-```
-
-## Appendici
-
-### Copertura e limiti del mapping
-
-Catalogo MAL: 13.799 entry tra serie TV e film, **8.435 mappate (61,1%)** —
-passata completa e retry finale al 24/10/2026.
-
-| Esito | Significato |
-| --- | --- |
-| `ok` | allineata su TVDB (o TMDB se TVDB manca) |
-| `already` | split cour già coperto |
-| `no-kitsu` | Kitsu non ha il mapping MAL né un titolo corrispondente |
-| `no-tmdb` | titolo assente da TMDB e TVDB |
-| `no-align` | TVDB esiste ma senza episodi datati compatibili |
-
-I tre residui (`no-kitsu`, `no-tmdb`, `no-align`) sono buchi di catalogo, non
-errori di match. Ponti alternativi (AniList, AniDB, TsukiHime) sono stati
-misurati e scartati: non aggiungono ID.
-
-Ogni range dell'indice porta `titleAlt` (romaji MAL) e l'entry porta `titleIt`
-(titolo italiano TMDB): i siti listano spesso l'uno o l'altro, e con il solo
-titolo inglese la ricerca dà 0 risultati. Entrambi entrano solo dopo che
-l'inglese ha fallito.
-
-Caso non coperto: una scheda del sito che contiene l'intera serie (episodi 1..N)
-etichettata come stagione può far prendere l'episodio di un'altra stagione.
-Servirebbe l'episodio assoluto, che oggi i provider non ricevono.
-
-### Limiti noti
-
-- Il mapping non copre tutto il catalogo: i buchi sono documentati sopra.
-- I tre siti sono protetti da Cloudflare: senza pacing e cache l'IP (o il proxy)
-  viene bloccato.
-- EasyProxy è opzionale ma consigliato per la riproduzione fuori casa.
-
-### Crediti
-
-HanX riprende [StreamViX](https://github.com/qwertyuiop8899/StreamViX), addon
-Stremio/NUVIO per anime da AnimeUnity, AnimeSaturn e AnimeWorld. La base di
-partenza è StreamViX 12.4.23; da lì HanX ha modificato mapping, provider e
-landing. HanX non è affiliato a StreamViX né ai siti di streaming.
-
-Il progetto è **vibecoded**: il codice è stato prodotto con agenti AI, senza
-revisione umana sistematica. Va usato a proprio rischio.
-
----
-
-**HanX** — anime streaming, semplificato.
+Node.js 24+, `pnpm install` poi `pnpm test` (build + test) e `pnpm run dev`.
+Struttura: `src/` (addon, provider, mapping, catalogo), `scripts/` (build,
+automazione, sync), `config/` (domini), `tests/`, `docs/` (ricognizione).
