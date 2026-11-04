@@ -262,9 +262,10 @@ misurato con un replay sui check trovati dallo sweep, il catalogo serve una
 scheda per il 17-23% dei check trovati (AnimeSaturn 1.478 su 8.494, AnimeWorld
 1.549 su 8.677, AnimeUnity 2.231 su 9.634; base: check, non serie). Il numero è
 per difetto, ed è una media di due popolazioni: separando i check per titolo
-della richiesta, con un titolo latino il catalogo serve una scheda nel 53-62%
-dei casi, con un titolo CJK nel 2% (misura sulle chiavi compatte, quindi senza
-i match per prefisso e senza gli alias). In produzione il provider cerca col
+della richiesta, con un titolo latino il catalogo serve una scheda nel 67-83%
+dei casi (Saturn 66,7%, World 68,1%, Unity 83,4%; campione 320 per sito, ±5
+punti), con un titolo CJK nel 7-8%. Sulla sola chiave compatta, senza prefissi
+né alias, il tasso latino scende a 53-62%. In produzione il provider cerca col
 titolo risolto dal mapping, non con la stringa giapponese della richiesta. Usarlo comunque come verdetto di assenza
 azzererebbe il resto: un'opera "assente" è quasi sempre una scheda che il sito
 ha sotto un altro nome. Quindi per un titolo non trovato si usa sempre la
