@@ -54,7 +54,7 @@ volumes:
 Poi crea il `.env` e avvia:
 
 ```bash
-cp .env.example .env     # compila almeno le 3 variabili obbligatorie
+cp env.example .env      # compila almeno le 3 variabili obbligatorie
 docker compose up -d
 ```
 
@@ -71,7 +71,7 @@ Immagine su Docker Hub (`lextutor/hanx:latest`) e GitHub Packages
 ## Configurazione
 
 L'elenco completo, con descrizione e default, è in
-[`.env.example`](.env.example). Solo `ANIME_MAPPING_URL` è indispensabile: le altre due degradano.
+[`env.example`](env.example). Solo `ANIME_MAPPING_URL` è indispensabile: le altre due degradano.
 
 | Variabile | A cosa serve |
 | --- | --- |

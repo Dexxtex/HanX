@@ -14,7 +14,6 @@ server.log
 # --- Segreti e dati locali ---
 .env
 .env.*
-!.env.example
 /data/
 .replay/
 *.sqlite
