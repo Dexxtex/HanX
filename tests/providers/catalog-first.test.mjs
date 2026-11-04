@@ -142,12 +142,13 @@ test('titolo assente dal catalogo: si torna alla ricerca di rete', async () => {
   assert.ok(calls.some((url) => /\/api\/search|\/filter\?key/.test(url)));
 });
 
-test('catalogo vecchio: stesso comportamento, la rete resta la verità', async () => {
-  useCatalog([], OLD);
+test('catalogo vecchio: le schede si usano lo stesso, il match non guarda generatedAt', async () => {
+  useCatalog([catalogEntry('Tutor Hitman Reborn', 'x-Yy1z2')], OLD);
+  mockAnime('x-Yy1z2', 'Tutor Hitman Reborn');
   calls.length = 0;
-  const { streams } = await provider.handleTitleRequest('Titolo Che Non Esiste', 1, 1, false);
-  assert.deepEqual(streams, []);
-  assert.ok(calls.some((url) => /\/api\/search|\/filter\?key/.test(url)));
+  const { streams } = await provider.handleTitleRequest('Tutor Hitman Reborn', 1, 1, false);
+  assert.deepEqual(streams.map((stream) => stream.url), ['https://cdn.example/x-Yy1z2.mp4']);
+  assert.deepEqual(calls.filter((url) => /\/api\/search|\/filter\?key/.test(url)), []);
 });
 
 process.on('exit', () => {

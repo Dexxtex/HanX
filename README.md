@@ -71,7 +71,7 @@ Immagine su Docker Hub (`lextutor/hanx:latest`) e GitHub Packages
 ## Configurazione
 
 L'elenco completo, con descrizione e default, è in
-[`.env.example`](.env.example). Queste tre sono obbligatorie:
+[`.env.example`](.env.example). Solo `ANIME_MAPPING_URL` è indispensabile: le altre due degradano.
 
 | Variabile | A cosa serve |
 | --- | --- |

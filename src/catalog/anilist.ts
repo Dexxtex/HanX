@@ -22,16 +22,25 @@ export interface CardIds {
   anilistId: number | null;
 }
 
+export interface MalIdCheck {
+  /** anilistId → malId che AniList conferma uguale a quello della pagina. */
+  confirmed: Map<number, number>;
+  /** anilistId per cui AniList ha risposto (media presente, con `idMal` anche null). */
+  answered: Set<number>;
+}
+
 /**
- * Coppie (anilistId → malId) che AniList conferma. Un 429, un 5xx o un errore di
- * rete non confermano nulla: quelle schede restano senza `malId` e si riprovano
- * alla run successiva.
+ * Coppie (anilistId → malId) che AniList conferma, e gli id per cui ha risposto
+ * davvero. Un 429, un 5xx o un errore di rete non confermano e non rispondono:
+ * quelle schede restano senza `malId` e si riprovano alla run successiva, mentre
+ * una risposta con `idMal` null o diverso è un esito definitivo.
  */
 export async function confirmMalIds(
   pairs: CardIds[],
   fetcher: typeof fetch = fetch
-): Promise<Map<number, number>> {
+): Promise<MalIdCheck> {
   const confirmed = new Map<number, number>();
+  const answered = new Set<number>();
   const usable = pairs.filter(
     (pair): pair is { malId: number; anilistId: number } =>
       Number(pair.malId) > 0 && Number(pair.anilistId) > 0
@@ -54,12 +63,17 @@ export async function confirmMalIds(
         data?: Record<string, { idMal?: number | null } | null>;
       };
       for (const [index, pair] of chunk.entries()) {
-        const idMal = json.data?.[`a${index}`]?.idMal;
+        const alias = `a${index}`;
+        // AniList risponde per un id anche quando non lo conosce (`null`): è
+        // un no definitivo, non un silenzio da riprovare.
+        if (!json.data || !(alias in json.data)) continue;
+        answered.add(pair.anilistId);
+        const idMal = json.data[alias]?.idMal;
         if (Number(idMal) === pair.malId) confirmed.set(pair.anilistId, pair.malId);
       }
     } catch {
       // Rete o timeout: nessuna conferma da questo blocco, non è un errore fatale.
     }
   }
-  return confirmed;
+  return { confirmed, answered };
 }

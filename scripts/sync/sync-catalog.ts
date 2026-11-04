@@ -29,6 +29,7 @@ import {
   parseSaturnFilterPage,
   parseSaturnSitemapIndex,
   applyCardDetails,
+  isEnrichmentFinal,
   parseCardDetails,
   pendingEnrichment,
   saturnListingGap,
@@ -261,19 +262,32 @@ const MALID_DEADLINE_MIN = Number(process.env.CATALOG_MALID_DEADLINE_MIN) || 52;
 /**
  * Backfill del `malId` dalle pagine delle schede, una richiesta per scheda: 6.179
  * Saturn + 6.864 World, quindi si fa a rate e si riprende dalla sera dopo. Le
- * schede nuove passano davanti al backlog; i malId già presi restano (mergeSite).
+ * schede nuove passano davanti al backlog; i dati già presi restano (mergeSite).
+ * Restituisce le schede lette e quante c'erano da leggere: zero lette su un
+ * backlog non vuoto è un blocco o una deadline già scaduta.
  */
-async function enrichMalIds(catalog: CatalogFile, startedAt: number): Promise<void> {
+async function enrichMalIds(
+  catalog: CatalogFile,
+  startedAt: number
+): Promise<{ read: number; pending: number }> {
   const deadline = startedAt + MALID_DEADLINE_MIN * 60_000;
   const quota = Math.ceil(MALID_MAX_REQUESTS / 2);
   const today = new Date().toISOString().slice(0, 10);
+  let cardsRead = 0;
+  // Il backlog si conta su entrambi i siti **prima** del ciclo: se la deadline
+  // scade dopo Saturn, il backlog di World non deve sparire dai conti (era il
+  // caso in cui la guardia taceva proprio quando serviva).
+  const pendingBySite = {
+    saturn: pendingEnrichment(catalog.sites.saturn, today),
+    world: pendingEnrichment(catalog.sites.world, today),
+  };
+  const cardsPending = pendingBySite.saturn.length + pendingBySite.world.length;
   for (const site of ['saturn', 'world'] as const) {
     const entries = catalog.sites[site];
     // Prima le schede mai lette (le nuove comprese), poi le più vecchie: quelle
     // lette da poco non si rileggono, altrimenti le schede senza id AniList
     // brucerebbero la quota a ogni run.
-    const pending = pendingEnrichment(entries, today);
-    const before = entries.filter((entry) => entry.malId).length;
+    const pending = pendingBySite[site];
     const found: { entry: CatalogEntry; details: ReturnType<typeof parseCardDetails> }[] = [];
     let requests = 0;
     for (const entry of pending) {
@@ -281,7 +295,6 @@ async function enrichMalIds(catalog: CatalogFile, startedAt: number): Promise<vo
       requests += 1;
       try {
         found.push({ entry, details: parseCardDetails((await request(entry.url)).body, site) });
-        entry.enrichedAt = today;
       } catch (err) {
         // Mezzo backfill vale più di un job rosso: la fase si chiude e si riprende domani.
         console.error(`[catalog] malId ${site}: ${err instanceof BlockedError ? 'BLOCCATO' : 'errore'} — ${describeError(err)}`);
@@ -289,25 +302,39 @@ async function enrichMalIds(catalog: CatalogFile, startedAt: number): Promise<vo
       }
     }
     // Solo gli id che AniList conferma: una pagina con il link MAL sbagliato non
-    // deve entrare nel ramo esatto del matcher.
-    const confirmed = await confirmMalIds(found.map((item) => item.details));
-    let done = 0;
+    // deve entrare nel ramo esatto del matcher. `answered` dice per quali schede
+    // ha risposto davvero, anche quando la risposta è un no.
+    cardsRead += found.length;
+    const { confirmed, answered } = await confirmMalIds(found.map((item) => item.details));
+    let accepted = 0;
     let rejected = 0;
-    let enriched = 0;
+    let unanswered = 0;
+    let skipped = 0;
+    let aliased = 0;
     for (const { entry, details } of found) {
       // Tutto il resto della scheda si salva comunque: sono dati del sito, non
       // id di altri cataloghi. Solo il malId ha bisogno di conferma.
+      const aliasesBefore = entry.titles?.length || 0;
       applyCardDetails(entry, details, confirmed);
-      if (entry.malId && details.malId) done += 1;
-      else if (details.malId) rejected += 1;
-      if (entry.titles?.length) enriched += 1;
+      const answer = details.anilistId ? answered.has(details.anilistId) : false;
+      if (!details.malId || !details.anilistId) skipped += 1;
+      else if (!answer) unanswered += 1;
+      else if (confirmed.get(details.anilistId) === details.malId) accepted += 1;
+      else rejected += 1;
+      if ((entry.titles?.length || 0) > aliasesBefore) aliased += 1;
+      // `enrichedAt` solo per un esito definitivo: la scheda senza link MAL o
+      // senza link AniList non ha niente da confermare, quella muta si riprova.
+      if (isEnrichmentFinal(details, answered)) entry.enrichedAt = today;
     }
+    const withMalId = entries.filter((entry) => entry.malId).length;
     console.log(
-      `[catalog] schede ${site}: ${requests} lette, +${done} malId confermati, ${rejected} scartati, ` +
-        `${enriched} con alias nuovi (${before + done}/${entries.length} con malId)`
+      `[catalog] schede ${site}: ${found.length} lette, ${accepted} malId confermati, ${rejected} rifiutati, ` +
+        `${unanswered} in attesa di AniList, ${skipped} senza id da confermare, ${aliased} con alias nuovi ` +
+        `(${withMalId}/${entries.length} con malId)`
     );
     if (Date.now() > deadline) break;
   }
+  return { read: cardsRead, pending: cardsPending };
 }
 
 const CRAWLERS: Record<CatalogSite, (maxPages: number) => Promise<CrawlResult>> = {
@@ -372,7 +399,13 @@ async function main(): Promise<number> {
       console.error('[catalog] niente da arricchire: il catalogo locale è vuoto (serve una run di sync)');
       return 1;
     }
-    await enrichMalIds(previous, startedAt0);
+    const { read, pending } = await enrichMalIds(previous, startedAt0);
+    if (!read && pending) {
+      // Nessuna scheda letta su un backlog non vuoto: WAF o deadline già scaduta.
+      // Verde qui vorrebbe dire "arricchimento fatto" mentre non è stato letto niente.
+      console.error(`[catalog] nessuna scheda letta su ${pending} da leggere: il catalogo resta com'era`);
+      return 1;
+    }
     if (options.dryRun) {
       console.log('[catalog] dry-run: nessun file scritto');
       return 0;
@@ -428,7 +461,14 @@ async function main(): Promise<number> {
   const total = CATALOG_SITES.reduce((sum, site) => sum + catalog.sites[site].length, 0);
   // Solo con la rete libera: dopo i tre crawl, con il tempo che resta.
   if (options.sites.includes('saturn') || options.sites.includes('world')) {
-    await enrichMalIds(catalog, startedAt);
+    const { read, pending } = await enrichMalIds(catalog, startedAt);
+    // Stessa regola di `--enrich-only`: niente letto su un backlog non vuoto
+    // vuol dire WAF o deadline già scaduta, non "arricchimento fatto".
+    if (pending > 0 && read === 0) {
+      const message = `arricchimento: nessuna scheda letta su ${pending} da leggere`;
+      console.error(`[catalog] ${message}`);
+      failures.push(message);
+    }
   }
 
   if (options.dryRun) {
@@ -441,7 +481,7 @@ async function main(): Promise<number> {
   const rel = path.relative(process.cwd(), options.dataDir) || '.';
   console.log(`[catalog] ${total} schede in ${elapsed}s -> ${rel}/catalogs.json, ${rel}/catalog-titles.json`);
   if (failures.length) {
-    console.error(`[catalog] ${failures.length} siti falliti (catalogo di ieri), gli altri sono aggiornati: ${failures.join('; ')}`);
+    console.error(`[catalog] ${failures.length} problemi, run incompleta: ${failures.join('; ')}`);
     return 1;
   }
   return 0;

@@ -147,19 +147,39 @@ export function parseCardIds(html: string): { malId: number | null; anilistId: n
 }
 
 /**
- * Il crawl riparte da sitemap e listing, che i `malId` non li hanno: senza
- * questo, ogni notte si perderebbe il backfill fatto finora.
+ * Il crawl riparte da sitemap e listing, che gli id e i dati delle schede non li
+ * hanno: senza questo, ogni notte si perderebbe tutto l'arricchimento fatto
+ * finora. Si riporta solo ciò che la entry fresca non ha già: titolo, url, slug
+ * e tipo restano quelli del crawl di oggi.
  */
-export function carryOverMalIds(previous: CatalogEntry[], entries: CatalogEntry[]): number {
+export function carryOverProgress(previous: CatalogEntry[], entries: CatalogEntry[]): number {
   const bySlug = new Map<string, CatalogEntry>();
-  for (const entry of previous) if (entry.malId) bySlug.set(entry.slug, entry);
+  for (const entry of previous) bySlug.set(entry.slug, entry);
   let carried = 0;
   for (const entry of entries) {
-    if (entry.malId) continue;
     const old = bySlug.get(entry.slug);
-    if (!old?.malId) continue;
-    entry.malId = old.malId;
-    carried += 1;
+    if (!old) continue;
+    let touched = false;
+    const field = <K extends keyof CatalogEntry>(key: K, value: CatalogEntry[K] | undefined): void => {
+      if (value === undefined || entry[key] !== undefined) return;
+      entry[key] = value;
+      touched = true;
+    };
+    field('malId', old.malId);
+    field('anilistId', old.anilistId);
+    field('enrichedAt', old.enrichedAt);
+    field('language', old.language);
+    field('episodes', old.episodes);
+    field('startDate', old.startDate);
+    field('year', old.year);
+    // I titoli si sommano: gli alias presi dalla scheda e quelli di ieri sono
+    // tutti veri, e un titolo diverso già presente non si sovrascrive.
+    const titles = new Set([...(entry.titles || []), ...(old.titles || [])]);
+    if (titles.size > (entry.titles?.length || 0)) {
+      entry.titles = [...titles];
+      touched = true;
+    }
+    if (touched) carried += 1;
   }
   return carried;
 }
@@ -282,6 +302,15 @@ export function applyCardDetails(entry: CatalogEntry, details: CardDetails, conf
   if (details.malId && details.anilistId && confirmed.get(details.anilistId) === details.malId) {
     entry.malId = details.malId;
   }
+}
+
+/**
+ * Esito definitivo: nessun id da verificare, oppure AniList ha risposto.
+ * Senza link AniList non c'è niente da verificare: aspettare una risposta che
+ * non arriverà mai rimetterebbe la scheda in testa alla coda a ogni run.
+ */
+export function isEnrichmentFinal(details: CardDetails, answered: Set<number>): boolean {
+  return !details.malId || !details.anilistId || answered.has(details.anilistId);
 }
 
 /** Il listing deve coprire almeno questa quota delle schede della sitemap. */
@@ -480,7 +509,7 @@ export function mergeSite(
       reason: `${site}: ${next.length} schede contro ${previous.length} di ieri (sotto il ${Math.round(minRatio * 100)}%)`,
     };
   }
-  carryOverMalIds(previous, next);
+  carryOverProgress(previous, next);
   return { entries: next, accepted: true };
 }
 

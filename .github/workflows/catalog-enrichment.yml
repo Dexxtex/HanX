@@ -6,17 +6,20 @@ name: Catalog Enrichment
 #
 # Perché esiste: la run notturna ha poco tempo, e col budget di 300 schede/notte
 # il backlog di 13.043 schede richiederebbe ~45 notti. Qui 600 ogni 6 ore lo
-# drenano in pochi giorni. Poi si autolimita: una scheda letta non viene ripresa
-# per 30 giorni, quindi quando il backlog è finito ogni run costa pochi minuti e
-# pubblica solo se c'è davvero qualcosa di nuovo (le schede appena uscite).
+# drenano in pochi giorni. Poi si autolimita: le schede si riprendono dopo 30
+# giorni, salvo quelle in attesa di una risposta di AniList; quando il backlog è
+# finito ogni run costa pochi minuti e pubblica solo se c'è davvero qualcosa di
+# nuovo (le schede appena uscite).
 #
 # Non tocca il crawler: nessun rischio di pubblicare un catalogo peggiore, la
 # guardia del 70% e quella del 98% restano dove sono.
 
 on:
   schedule:
-    # Ogni 6 ore, sfalsato di 17 minuti rispetto al sync delle 20:00.
-    - cron: '17 */6 * * *'
+    # Ogni 6 ore al minuto 17; la run delle 20:17 UTC sta fuori dalle due
+    # finestre del sync (18:00 e 19:00 UTC). Gli orari non devono collidere: una
+    # run in coda nello stesso gruppo può essere cancellata dalla successiva.
+    - cron: '17 0,6,12,20 * * *'
   workflow_dispatch: {}
 
 # Il job riscrive il branch `data`: serve solo contents: write.
@@ -32,6 +35,9 @@ concurrency:
 jobs:
   enrich:
     runs-on: ubuntu-latest
+    # Stessa rete del sync: i secret dell'environment `CATALOG` (CATALOG_PROXY)
+    # arrivano solo se il job lo dichiara, e servono lo stesso IP residenziale.
+    environment: CATALOG
     # 600 schede a 3 s sono ~30 minuti; la deadline interna è a 32.
     timeout-minutes: 40
     steps:
@@ -55,6 +61,7 @@ jobs:
       # Il catalogo vive sul branch `data`: senza ripristino non ci sarebbe
       # niente da arricchire.
       - name: Ripristina il catalogo pubblicato
+        id: restore
         run: |
           mkdir -p data
           if git fetch -q --depth=1 origin data 2>/dev/null; then
@@ -62,14 +69,16 @@ jobs:
             git show FETCH_HEAD:catalog-titles.json > data/catalog-titles.json
             echo "Ripristinate $(node -e "const d=require('./data/catalogs.json');console.log(Object.values(d.sites).reduce((n,l)=>n+l.length,0))") schede dal branch data."
           else
-            echo "Branch data assente: niente da arricchire, esco verde." >&2
-            exit 0
+            echo "Branch data assente: salto l'arricchimento, la run resta verde." >&2
+            echo "restored=false" >> "$GITHUB_OUTPUT"
           fi
 
       # Le schede lette da meno di 30 giorni non si rileggono: quando il backlog
       # è finito questa fase costa quasi nulla e prende solo le schede nuove.
       - name: Arricchisci il catalogo
+        if: steps.restore.outputs.restored != 'false'
         env:
+          CATALOG_PROXY: ${{ secrets.CATALOG_PROXY }}
           CATALOG_MALID_MAX_REQUESTS: 600
           CATALOG_MALID_DEADLINE_MIN: 32
         run: pnpm run enrich-catalog
@@ -112,4 +121,4 @@ jobs:
             exit 0
           fi
           git push -q -f origin data
-          echo "Pubblicato su data: $(jq '[.sites[].malId] | map(select(. != null)) | length' catalogs.json) schede con malId"
+          echo "Pubblicato su data: $(jq '[.sites[][] | .malId | select(. != null)] | length' catalogs.json) schede con malId"

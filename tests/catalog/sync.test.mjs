@@ -7,12 +7,13 @@ import {
   buildTitleIndex,
   diffEntries,
   emptyCatalog,
-  carryOverMalIds,
+  carryOverProgress,
   mergeSite,
   parseCardDetails,
   pendingEnrichment,
   parseCardIds,
   applyCardDetails,
+  isEnrichmentFinal,
   parseSaturnAnimeSitemap,
   parseSaturnSitemapIndex,
   parseWorldMaxPage,
@@ -214,6 +215,18 @@ test('scheda: i dati si fondono senza toccare il titolo del listing e il malId v
   assert.equal(confirmed.anilistId, 1604);
 });
 
+test('arricchimento: esito definitivo solo se c\'era da chiedere e AniList ha risposto', () => {
+  const malIdOnly = { malId: 738, anilistId: null };
+  const anilistOnly = { malId: null, anilistId: 97938 };
+  const both = { malId: 34566, anilistId: 97938 };
+  // Senza link AniList non c'è niente da confermare: la scheda va chiusa, o
+  // tornerebbe in testa alla coda a ogni run senza mai ottenere il malId.
+  assert.equal(isEnrichmentFinal(malIdOnly, new Set()), true);
+  assert.equal(isEnrichmentFinal(anilistOnly, new Set()), true);
+  assert.equal(isEnrichmentFinal(both, new Set([97938])), true);
+  assert.equal(isEnrichmentFinal(both, new Set()), false);
+});
+
 test('saturn: la copertura del listing sotto il 98% è un guasto, non un dettaglio', () => {
   assert.equal(saturnListingGap(6179, 6179), null);
   assert.equal(saturnListingGap(6055, 6179), null); // 98,0%
@@ -341,13 +354,44 @@ test('malId: il crawl non li porta con sé, quindi si riprendono da ieri', () =>
     { site: 'saturn', slug: 'b', url: '', titleSite: 'B', malId: 99 },
     { site: 'saturn', slug: 'nuova', url: '', titleSite: 'N' },
   ];
-  assert.equal(carryOverMalIds(previous, next), 1);
+  assert.equal(carryOverProgress(previous, next), 1);
   assert.equal(next[0].malId, 1);
   assert.equal(next[1].malId, 99); // il dato fresco non si sovrascrive
   assert.equal(next[2].malId, undefined);
 
   const accepted = mergeSite('saturn', previous, next);
   assert.equal(accepted.entries[0].malId, 1);
+});
+
+test('mergeSite: la entry nuda del crawl non perde l arricchimento di ieri', () => {
+  const previous = [
+    {
+      site: 'world',
+      slug: 'a',
+      url: 'u',
+      titleSite: 'A',
+      malId: 100,
+      anilistId: 1,
+      enrichedAt: '2026-11-04',
+      language: 'ITA',
+      episodes: 12,
+      startDate: '2026-01-08',
+      year: 2026,
+      titles: ['Alias vecchio'],
+    },
+  ];
+  const next = [
+    { site: 'world', slug: 'a', url: 'u', titleSite: 'A', titles: ['Alias nuovo'] },
+  ];
+  const { entries } = mergeSite('world', previous, next);
+  assert.equal(entries[0].enrichedAt, '2026-11-04');
+  assert.equal(entries[0].language, 'ITA');
+  assert.equal(entries[0].episodes, 12);
+  assert.equal(entries[0].anilistId, 1);
+  assert.equal(entries[0].malId, 100);
+  assert.equal(entries[0].startDate, '2026-01-08');
+  assert.equal(entries[0].year, 2026);
+  assert.deepEqual(entries[0].titles, ['Alias nuovo', 'Alias vecchio']);
 });
 
 test('protezione: sotto il 70% il catalogo di ieri resta', () => {
