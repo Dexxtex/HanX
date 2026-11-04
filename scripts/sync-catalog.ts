@@ -15,7 +15,8 @@
  */
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { fetch as undiciFetch, ProxyAgent } from 'undici';
+import { fetch as undiciFetch } from 'undici';
+import { proxyDispatcher, redactProxy } from '../src/catalog/proxy.js';
 import {
   CATALOG_SITES,
   buildTitleIndex,
@@ -41,24 +42,18 @@ const RETRIES = 2;
 const BACKOFF_MS = [1_500, 4_000];
 
 /**
- * Proxy per l'intero crawl (IP residenziale), solo HTTP(S): `undici` non sa usare
- * un http.Agent come dispatcher, quindi un socks:// fallirebbe a ogni richiesta.
- * Un solo IP per tutta la run, altrimenti il cookie di sessione di Unity si
- * rompe: se il pool ruota, chiedere una sessione sticky. Non è un fix del WAF,
- * è un cambio di IP.
+ * Proxy per l'intero crawl (IP residenziale): http(s) o socks5, gestiti da
+ * undici. Un solo IP per tutta la run, altrimenti il cookie di sessione di
+ * Unity si rompe: se il pool ruota, chiedere una sessione sticky. Non è un fix
+ * del WAF, è un cambio di IP.
  */
 const PROXY = String(process.env.CATALOG_PROXY || process.env.AU_PROXY || '').trim();
-const DISPATCHER = PROXY && !/^socks/i.test(PROXY) ? new ProxyAgent(PROXY) : undefined;
-
-/** Le credenziali del proxy non devono finire nei log. */
-function redact(text: string): string {
-  return String(text || '').replace(/\/\/[^/@\s]+@/g, '//***@');
-}
+const DISPATCHER = proxyDispatcher(PROXY);
 
 /** `fetch failed` da solo non dice niente: la causa (ECONNREFUSED, 407, DNS) sta in err.cause. */
 function describeError(err: any): string {
   const cause = err?.cause?.message || err?.cause?.code || '';
-  return redact(`${err?.message || err}${cause ? ` (${cause})` : ''}`);
+  return redactProxy(`${err?.message || err}${cause ? ` (${cause})` : ''}`);
 }
 
 const BASES = {
@@ -252,11 +247,6 @@ function parseArgs(argv: string[]): Options {
 
 async function main(): Promise<number> {
   const options = parseArgs(process.argv.slice(2));
-  if (PROXY && /^socks/i.test(PROXY)) {
-    console.error('[catalog] CATALOG_PROXY è un proxy SOCKS: il fetch di undici accetta solo HTTP(S).');
-    console.error('[catalog] Usa l'endpoint HTTP(S) dello stesso proxy (di solito la stessa porta -1) o un bridge locale.');
-    return 1;
-  }
   const previous = readCatalog(options.dataDir);
   const catalog = emptyCatalog();
   const startedAt = Date.now();
