@@ -151,6 +151,6 @@ comunque dalla ricerca del sito.
 
 ## Sviluppo
 
-Node.js 24+, `pnpm install` poi `pnpm test` (build + test) e `pnpm run dev`.
+Node.js 26+, `pnpm install` poi `pnpm test` (build + test) e `pnpm run dev`.
 Struttura: `src/` (addon, provider, mapping, catalogo), `scripts/` (build,
 automazione, sync), `config/` (domini), `tests/`.
