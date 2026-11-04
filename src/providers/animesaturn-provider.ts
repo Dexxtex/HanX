@@ -128,11 +128,13 @@ function sanitizeAnimeTitle(rawTitle: string | null | undefined): string | null 
   return text || null;
 }
 
-function decodeHtmlEntities(value: string | null | undefined): string {
+export function decodeHtmlEntities(value: string | null | undefined): string {
   return String(value || '')
     .replace(/&quot;/gi, '"')
-    .replace(/&#34;/g, '"')
-    .replace(/&#39;/g, "'")
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex: string) => String.fromCodePoint(Number.parseInt(hex, 16)))
+    // Il sito scrive le entità con lo zero davanti (`&#039;`), quindi il decodificatore
+    // non può elencare `&#39;`: qualunque entità numerica va convertita.
+    .replace(/&#0*(\d+);/g, (_, dec: string) => String.fromCodePoint(Number(dec)))
     .replace(/&apos;/gi, "'")
     .replace(/&amp;/gi, '&')
     .replace(/&lt;/gi, '<')

@@ -88,3 +88,16 @@ test('il match esatto continua a vincere', () => {
   const out = filterAnimeResults(results, ['La malinconia di Haruhi Suzumiya 2']);
   assert.deepEqual(out.map(r => r.version.url), ['u1']);
 });
+
+const { decodeHtmlEntities } = await import('../../dist/providers/animesaturn-provider.js');
+
+test('le entità numeriche con lo zero davanti vengono decodificate', () => {
+  // Visto in produzione: il titolo arrivava come "The World&#039;s Strongest Witch",
+  // perché il sito scrive &#039; e il decoder elencava solo &#39;.
+  assert.equal(decodeHtmlEntities('The World&#039;s Strongest Witch'), "The World's Strongest Witch");
+  assert.equal(decodeHtmlEntities('&#8217;'), '\u2019');
+  assert.equal(decodeHtmlEntities('&#x27;'), "'");
+  assert.equal(decodeHtmlEntities('&quot;A&quot; &amp; B &lt;c&gt;&nbsp;d'), '"A" & B <c> d');
+  // Doppia codifica: si decodifica una volta sola, non fino a esaurimento.
+  assert.equal(decodeHtmlEntities('&amp;#039;'), '&#039;');
+});
