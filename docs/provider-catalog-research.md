@@ -118,6 +118,18 @@ Copertura misurata: **57-67%** dei check trovati dai provider usando le query de
 (titolo + italiano + romaji). Col solo titolo principale (spesso giapponese) scende sotto il 20%.
 Dettaglio in `README.md`, sezione "Catalogo locale dei titoli".
 
+## Run verificate (4/11/2026)
+
+| run | durata | risultato |
+|---|---:|---|
+| `41822506940` (primo, Unity dietro SOCKS) | 26,3 min | `data` → `432d863`: 6.179 / 6.864 / 7.266 |
+| `41826771697` (codice ripulito, niente di nuovo) | 23,1 min | stessi conteggi, **nessun commit**: "Solo generatedAt" |
+
+Tempi: Saturn 4,6 s, World 562 s (172 pagine), Unity 795 s (243 richieste da 30).
+Il run delle 11:38 falliva con `403` su `/archivio` (Unity, IP datacenter); quello
+delle 12:38 con `CATALOG_PROXY` SOCKS5 è passato. Il run fallito **non** ha
+pubblicato nulla: il confronto senza `generatedAt` ha funzionato.
+
 ## Proposte non implementate (con il costo)
 
 | idea | guadagno | costo |

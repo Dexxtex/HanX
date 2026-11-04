@@ -237,7 +237,7 @@ provider usano solo la ricerca di rete, come prima.
 | Sito | Sorgente | Copertura |
 | --- | --- | --- |
 | AnimeSaturn | `sitemap-anime-*.xml` | completa (6.179), titolo ricavato dallo slug |
-| AnimeWorld | `/filter?page=N` | tutte le pagine dichiarate dal sito (172 oggi, ~6.880 schede), titoli reali |
+| AnimeWorld | `/filter?page=N` | tutte le pagine dichiarate dal sito (172 oggi, 6.864 schede), titoli reali |
 | AnimeUnity | `POST /archivio/get-animes` | completa (7.266), titoli reali it/eng/romaji; `dubbed=1` è un filtro sulle stesse schede, non un catalogo a parte |
 
 **Metadati per provider.** Cosa salviamo, cosa il sito espone, cosa costerebbe
@@ -255,8 +255,9 @@ recuperare il resto:
 | episodi | — (solo `/az-list`) | — | `episodes_count` |
 
 Unity è l'unico provider che espone `mal_id`: è la chiave per un match esatto
-quando il titolo non basta, e lo salviamo già per non dover ri-crawelare 8.807
-schede quando servirà. Saturn e World non hanno id né anno nel listing.
+quando il titolo non basta, e lo salviamo già (7.128 schede su 7.266) per non
+dover ri-crawelare quando servirà. Saturn e World non hanno id né anno nel
+listing.
 
 Tutti i path provati sui tre siti, i metadati disponibili e i costi per ottenerli sono
 in [`docs/provider-catalog-research.md`](docs/provider-catalog-research.md).
