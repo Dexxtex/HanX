@@ -259,12 +259,14 @@ Nei provider il catalogo ha la precedenza sulla ricerca del sito
 tra 0,5 e 0,8 il risultato viene solo registrato nel log (`DEBUG_LEVEL=2`),
 sotto 0,5 si ignora. **Il catalogo non decide mai che un titolo non esiste**:
 misurato con un replay sui check trovati dallo sweep, il catalogo serve una
-scheda solo per il 17-23% dei titoli che i siti hanno davvero (AnimeSaturn
-1.478 su 8.494, AnimeWorld 1.549 su 8.677, AnimeUnity 2.231 su 9.634; base:
-check, non serie). Usarlo come verdetto di assenza azzererebbe il resto: un
-match "assente" è quasi sempre un titolo che il sito ha sotto un altro nome.
-Quindi per un titolo non trovato si usa sempre la ricerca di rete di prima,
-con gli stessi due ripieghi.
+scheda per il 17-23% dei check trovati (AnimeSaturn 1.478 su 8.494, AnimeWorld
+1.549 su 8.677, AnimeUnity 2.231 su 9.634; base: check, non serie). Il numero è
+per difetto: il replay interroga il matcher con il titolo della richiesta, che
+spesso è giapponese e non produce token utili, mentre in produzione il provider
+cerca col titolo risolto dal mapping. Usarlo comunque come verdetto di assenza
+azzererebbe il resto: un'opera "assente" è quasi sempre una scheda che il sito
+ha sotto un altro nome. Quindi per un titolo non trovato si usa sempre la
+ricerca di rete di prima, con gli stessi due ripieghi.
 
 **Titolo appena uscito.** Il catalogo è di ieri sera: un'opera aggiunta al sito
 oggi non c'è fino al sync successivo, cioè fino a ~24 ore. In quella finestra
@@ -293,6 +295,9 @@ pnpm start               # esegue dist/ (dopo build)
 pnpm test                # build + test (node:test)
 pnpm run check:domains   # verifica i domini dei provider
 pnpm run mapping:verify  # controlla l'indice del mapping
+
+# Jev 1.13 (decision model di opencode-go, gratuito) per verdetti e scelte:
+node scripts/jev-decide.mjs --state "<evidenza>"   --predicate "nome:la frase da valutare"   --choice "nome:testo:opzione A|opzione B"
 ```
 
 Senza Docker: `pnpm install && pnpm run build && pnpm start`.
