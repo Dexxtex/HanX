@@ -238,7 +238,7 @@ provider usano solo la ricerca di rete, come prima.
 | --- | --- | --- |
 | AnimeSaturn | `sitemap-anime-*.xml` | completa (6.179), titolo ricavato dallo slug |
 | AnimeWorld | `/filter?page=N` | tutte le pagine dichiarate dal sito (172 oggi, ~6.880 schede), titoli reali |
-| AnimeUnity | `POST /archivio/get-animes` | completa (7.266), titoli reali it/eng/romaji |
+| AnimeUnity | `POST /archivio/get-animes` (due passate: normale e `dubbed=1`) | completa (8.807 = 7.266 normali + 1.541 doppiate), titoli reali it/eng/romaji |
 
 Una richiesta alla volta con 3 s di intervallo, timeout 15 s, 2 retry solo su
 5xx e rete, ~460 richieste in ~23 minuti (job a 45 minuti). Un `403`/`429` o una
