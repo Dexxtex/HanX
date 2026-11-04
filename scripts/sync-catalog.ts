@@ -223,6 +223,7 @@ async function main(): Promise<number> {
   for (const site of CATALOG_SITES) {
     if (!options.sites.includes(site)) {
       catalog.sites[site] = previous.sites[site];
+      if (previous.truncated[site]) catalog.truncated[site] = true;
       continue;
     }
     const siteStart = Date.now();
@@ -234,6 +235,7 @@ async function main(): Promise<number> {
       console.error(`[catalog] ${site}: ${isBlocked ? 'BLOCCATO' : 'errore'} — ${err?.message || err}`);
       console.error(`[catalog] ${site}: catalogo precedente mantenuto (${previous.sites[site].length} schede)`);
       catalog.sites[site] = previous.sites[site];
+      if (previous.truncated[site]) catalog.truncated[site] = true;
       if (isBlocked) {
         blocked = true;
         break;
@@ -244,11 +246,13 @@ async function main(): Promise<number> {
     if (!merged.accepted) {
       console.error(`[catalog] ${site}: ${merged.reason}`);
       catalog.sites[site] = previous.sites[site];
+      if (previous.truncated[site]) catalog.truncated[site] = true;
       failure = merged.reason || `${site}: catalogo incompleto`;
       continue;
     }
     const diff = diffEntries(previous.sites[site] || [], merged.entries);
     catalog.sites[site] = merged.entries;
+    if (result.capped) catalog.truncated[site] = true;
     const capped = result.capped ? ` (tetto ${options.maxPages[site]} pagine raggiunto)` : '';
     console.log(
       `[catalog] ${site.padEnd(6)} ${String(merged.entries.length).padStart(6)} schede  ` +

@@ -17,11 +17,15 @@ export interface CatalogEntry {
   /** Titoli alternativi (italiano/inglese/romaji) quando il sito li pubblica. */
   titles?: string[];
   year?: number | null;
+  /** Solo AnimeUnity: TV/Movie. Un film non è l'episodio di una serie. */
+  type?: string;
 }
 
 export interface CatalogFile {
   generatedAt: string | null;
   sites: Record<CatalogSite, CatalogEntry[]>;
+  /** Il tetto di pagine ha tagliato il catalogo: non è completo. */
+  truncated: Partial<Record<CatalogSite, boolean>>;
 }
 
 export interface TitleIndexEntry {
@@ -30,15 +34,18 @@ export interface TitleIndexEntry {
   title: string;
   /** compactKey(title): evita di rinormalizzare 15k titoli a ogni match. */
   key: string;
+  aliases?: string[];
+  type?: string;
 }
 
 export interface TitleIndexFile {
   generatedAt: string | null;
   sites: Record<CatalogSite, TitleIndexEntry[]>;
+  truncated: Partial<Record<CatalogSite, boolean>>;
 }
 
 export function emptyCatalog(): CatalogFile {
-  return { generatedAt: null, sites: { saturn: [], world: [], unity: [] } };
+  return { generatedAt: null, sites: { saturn: [], world: [], unity: [] }, truncated: {} };
 }
 
 /** Il token finale alfabetico/numerico di Saturn e World è casuale: non fa parte dello slug. */
@@ -106,6 +113,7 @@ interface UnityRecord {
   title_eng?: string;
   title_it?: string;
   date?: string;
+  type?: string;
 }
 
 /** POST /archivio/get-animes: { tot, records: [...] }, 30 schede per risposta. */
@@ -132,6 +140,7 @@ export function parseUnityRecords(payload: unknown): { total: number; entries: C
       titleSite,
       ...(titles.length ? { titles } : {}),
       ...(year ? { year } : {}),
+      ...(record.type ? { type: record.type } : {}),
     });
   }
   return { total: Number(data.tot) || 0, entries };
@@ -176,9 +185,11 @@ export function buildTitleIndex(catalog: CatalogFile): TitleIndexFile {
       url: entry.url,
       title: entry.titleSite,
       key: compactKey(entry.titleSite),
+      ...(entry.titles?.length ? { aliases: entry.titles } : {}),
+      ...(entry.type ? { type: entry.type } : {}),
     }));
   }
-  return { generatedAt: catalog.generatedAt, sites };
+  return { generatedAt: catalog.generatedAt, sites, truncated: catalog.truncated || {} };
 }
 
 /** Scrive prima i due temporanei, poi rinomina: un crash non lascia file a metà. */
@@ -202,6 +213,7 @@ export function readCatalog(dir: string): CatalogFile {
     catalog.generatedAt = typeof raw?.generatedAt === 'string' ? raw.generatedAt : null;
     for (const site of CATALOG_SITES) {
       if (Array.isArray(raw?.sites?.[site])) catalog.sites[site] = raw.sites[site] as CatalogEntry[];
+      if (raw?.truncated?.[site]) catalog.truncated[site] = true;
     }
     return catalog;
   } catch {
