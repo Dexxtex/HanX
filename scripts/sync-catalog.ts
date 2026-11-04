@@ -163,42 +163,35 @@ async function crawlUnity(maxPages: number): Promise<CrawlResult> {
   if (!xsrf && !token) throw new Error('nessun token CSRF su /archivio');
   const entries: CatalogEntry[] = [];
   const seen = new Set<string>();
-  let capped = false;
-  // Due cataloghi disgiunti: `dubbed:''` è il normale, `dubbed:'1'` sono le
-  // schede doppiate in italiano (1.541 il 4/11, 0 slug in comune su un campione
-  // di 30). Senza il secondo pass le ITA dedicate non entrano nel catalogo.
-  for (const dubbed of ['', '1']) {
-    let offset = 0;
-    let total = Number.POSITIVE_INFINITY;
-    for (let chunk = 0; chunk < maxPages && offset < total; chunk += 1) {
-      const response = await request(`${BASES.unity}/archivio/get-animes`, {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          'x-requested-with': 'XMLHttpRequest',
-          referer: `${BASES.unity}/archivio`,
-          ...(xsrf ? { 'x-xsrf-token': xsrf } : {}),
-          ...(token ? { 'x-csrf-token': token } : {}),
-          cookie: cookieHeader(),
-        },
-        body: JSON.stringify({
-          title: '', type: '', year: '', order: '', status: '', genres: [], dubbed, season: '',
-          offset,
-        }),
-      });
-      const parsed = parseUnityRecords(JSON.parse(response.body));
-      if (parsed.total) total = parsed.total;
-      if (!parsed.entries.length) break;
-      for (const entry of parsed.entries) {
-        if (seen.has(entry.slug)) continue;
-        seen.add(entry.slug);
-        entries.push(entry);
-      }
-      offset += parsed.entries.length;
+  let offset = 0;
+  let total = Number.POSITIVE_INFINITY;
+  for (let chunk = 0; chunk < maxPages && offset < total; chunk += 1) {
+    const response = await request(`${BASES.unity}/archivio/get-animes`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-requested-with': 'XMLHttpRequest',
+        referer: `${BASES.unity}/archivio`,
+        ...(xsrf ? { 'x-xsrf-token': xsrf } : {}),
+        ...(token ? { 'x-csrf-token': token } : {}),
+        cookie: cookieHeader(),
+      },
+      body: JSON.stringify({
+        title: '', type: '', year: '', order: '', status: '', genres: [], dubbed: '', season: '',
+        offset,
+      }),
+    });
+    const parsed = parseUnityRecords(JSON.parse(response.body));
+    if (parsed.total) total = parsed.total;
+    if (!parsed.entries.length) break;
+    for (const entry of parsed.entries) {
+      if (seen.has(entry.slug)) continue;
+      seen.add(entry.slug);
+      entries.push(entry);
     }
-    if (offset < total) capped = true;
+    offset += parsed.entries.length;
   }
-  return { entries, capped };
+  return { entries, capped: offset < total };
 }
 
 const CRAWLERS: Record<CatalogSite, (maxPages: number) => Promise<CrawlResult>> = {

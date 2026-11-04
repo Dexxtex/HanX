@@ -238,7 +238,7 @@ provider usano solo la ricerca di rete, come prima.
 | --- | --- | --- |
 | AnimeSaturn | `sitemap-anime-*.xml` | completa (6.179), titolo ricavato dallo slug |
 | AnimeWorld | `/filter?page=N` | tutte le pagine dichiarate dal sito (172 oggi, ~6.880 schede), titoli reali |
-| AnimeUnity | `POST /archivio/get-animes` (due passate: normale e `dubbed=1`) | completa (8.807 = 7.266 normali + 1.541 doppiate), titoli reali it/eng/romaji |
+| AnimeUnity | `POST /archivio/get-animes` | completa (7.266), titoli reali it/eng/romaji; `dubbed=1` è un filtro sulle stesse schede, non un catalogo a parte |
 
 **Metadati per provider.** Cosa salviamo, cosa il sito espone, cosa costerebbe
 recuperare il resto:
@@ -251,7 +251,7 @@ recuperare il resto:
 | anno | — (solo nelle card di `/az-list`: ~325 richieste) | — (`/api/tooltip` è vietato da robots.txt) | `date`, su tutte |
 | tipo | — | — | `type`: TV 3.864, Movie 1.121, OVA 798, ONA 795, Special 384, TV Short 304 (somma esatta: 7.266) |
 | `mal_id` | — | — | presente, salvato come `malId` |
-| stagione | — | — | `season` (`dubbed=1` ha il suo catalogo, 1.541) |
+| stagione | — | — | `season` (7.260 su 7.266) |
 | episodi | — (solo `/az-list`) | — | `episodes_count` |
 
 Unity è l'unico provider che espone `mal_id`: è la chiave per un match esatto
@@ -266,8 +266,9 @@ Perché i conteggi sono quelli e non altri (verificato il 4/11/2026):
 - **World**: la pagina 172 è l'ultima (16 schede) e la 173 ripete la prima;
   `sort=title` viene ignorato, quindi non esiste un elenco alternativo.
 - **Unity**: la somma dei `type` dà esattamente 7.266 (nessun tipo fuori dal
-  listing di default) e `dubbed=1` è un catalogo a parte di 1.541; `mal_id` è
-  presente nel 98% delle schede campionate, anni dal 1979 al 2026.
+  listing di default); `dubbed=1` restituisce 1.541 schede che sono un
+  sottoinsieme delle stesse 7.266 (verificato sugli slug pubblicati), non un
+  catalogo separato; `mal_id` c'è in 7.128 schede su 7.266 e `season` in 7.260.
 
 Una richiesta alla volta con 3 s di intervallo, timeout 15 s, 2 retry solo su
 5xx e rete, ~500 richieste in ~25 minuti (job a 45 minuti). Se i runner GitHub
