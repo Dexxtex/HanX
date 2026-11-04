@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-const { animeWorldDisplayName, animeWorldStreamName, awResultsRelateToQuery, filterWorldVersionsByQuery, isSingleFallbackHit } = await import('../../dist/providers/animeworld-provider.js');
+const { animeWorldDisplayName, animeWorldStreamName, awResultsRelateToQuery, filterWorldVersionsByQuery, isSingleFallbackHit, worldPlayPath } = await import('../../dist/providers/animeworld-provider.js');
 
 // AnimeWorld restituisce il listone "ultimi arrivi" quando il filtro non ha
 // corrispondenze: se viene preso per vero, il fallback produce stream di un
@@ -100,4 +100,14 @@ test('unico risultato da query di ripiego: accettato senza match di slug', () =>
   assert.equal(isSingleFallbackHit([...beast, ...JUNK], [], true), false);
   // Se il filtro ha gia' trovato qualcosa, nessun bisogno dell'eccezione.
   assert.equal(isSingleFallbackHit(beast, beast, true), false);
+});
+
+test('il play path del catalogo riprende il token del link', () => {
+  // Misurato 04/11/2026: /play/absolute-duo risponde 200 con "Pagina non trovata"
+  // e zero episodi; /play/absolute-duo.yMPjX porta alla scheda con gli episodi.
+  assert.equal(worldPlayPath('https://www.animeworld.ac/play/absolute-duo.yMPjX', 'absolute-duo'), 'absolute-duo.yMPjX');
+  assert.equal(worldPlayPath('https://www.animeworld.ac/play/taboo-tattoo.SL-3H', 'taboo-tattoo'), 'taboo-tattoo.SL-3H');
+  // Link sparito o malformato: resta lo slug, che era il comportamento di prima.
+  assert.equal(worldPlayPath('', 'absolute-duo'), 'absolute-duo');
+  assert.equal(worldPlayPath('https://www.animeworld.ac/filter?keyword=x', 'absolute-duo'), 'absolute-duo');
 });

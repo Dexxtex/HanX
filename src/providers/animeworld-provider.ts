@@ -294,14 +294,28 @@ export function awResultsRelateToQuery(results: AnimeWorldResult[], query: strin
 
 /** Catalogo locale: zero richieste quando il titolo c'è. */
 function catalogWorldVersions(queries: string[], options: CatalogQueryOptions): AnimeWorldResult[] {
-  return lookupTitle('world', queries, options).hits.map((hit) => ({
-    id: hit.slug,
-    slug: hit.slug,
-    name: hit.title,
-    searchTitle: hit.title,
-    episodes_count: 0,
-    language_type: hit.language,
-  }));
+  return lookupTitle('world', queries, options).hits.map((hit) => {
+    const path = worldPlayPath(hit.url, hit.slug);
+    return {
+      id: path,
+      slug: path,
+      name: hit.title,
+      searchTitle: hit.title,
+      episodes_count: 0,
+      language_type: hit.language,
+    };
+  });
+}
+
+/**
+ * Il catalogo tiene lo slug **senza** il token finale (`absolute-duo`), ma il
+ * sito serve la scheda solo su `/play/<slug>.<token>`: lo slug nudo risponde
+ * 200 con "Pagina non trovata" e zero episodi (misurato 04/11/2026). Quindi si
+ * riparte dal link completo del catalogo, come fa già la ricerca.
+ */
+export function worldPlayPath(url: string, slug: string): string {
+  const path = String(url || '').split('/play/')[1];
+  return (path || '').split(/[?#]/)[0] || slug;
 }
 
 /**
