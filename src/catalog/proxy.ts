@@ -2,8 +2,9 @@ import { ProxyAgent, type Dispatcher } from 'undici';
 
 /**
  * Dispatcher per il crawl: undici 8 gestisce http(s) e socks5 in proprio
- * (`Socks5ProxyAgent` interno). `socks5h://` (DNS risolto dal proxy) si
- * normalizza a `socks5://`: undici manda comunque il nome host al proxy.
+ * (`Socks5ProxyAgent` interno). `socks5h://` si normalizza a `socks5://` perché
+ * con undici sono equivalenti: manda sempre il nome host al proxy (ATYP=3),
+ * quindi il DNS lo risolve il proxy. Test: tests/catalog/proxy.test.mjs.
  * Vuoto = nessun proxy.
  */
 export function proxyDispatcher(raw: string | null | undefined): Dispatcher | undefined {

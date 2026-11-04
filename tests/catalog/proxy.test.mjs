@@ -21,7 +21,7 @@ test('proxy: le credenziali sono redatte', () => {
 });
 
 /** Finto proxy SOCKS5 (senza autenticazione) che apre un tunnel verso il target. */
-function fakeSocks5() {
+function fakeSocks5(seen = []) {
   const server = net.createServer((client) => {
     let stage = 0;
     let buffer = Buffer.alloc(0);
@@ -52,6 +52,7 @@ function fakeSocks5() {
           return;
         }
         const port = buffer.readUInt16BE(need - 2);
+        seen.push({ atyp, host, port });
         buffer = buffer.subarray(need);
         client.off('data', onData);
         const upstream = net.connect(port, host, () => {
@@ -72,18 +73,22 @@ function fakeSocks5() {
 test('proxy: il fetch passa davvero da un SOCKS5 (tunnel verificato in locale)', async () => {
   const target = http.createServer((req, res) => res.end(`ok:${req.url}`));
   await new Promise((resolve) => target.listen(0, '127.0.0.1', resolve));
-  const socks = fakeSocks5();
+  const seen = [];
+  const socks = fakeSocks5(seen);
   await new Promise((resolve) => socks.listen(0, '127.0.0.1', resolve));
   try {
     const targetPort = target.address().port;
     const socksPort = socks.address().port;
     const dispatcher = proxyDispatcher(`socks5h://127.0.0.1:${socksPort}`);
-    const response = await fetch(`http://127.0.0.1:${targetPort}/tunnel`, {
+    // `localhost` invece dell'IP: se undici risolvesse in locale manderebbe
+    // 127.0.0.1 (ATYP=1), se manda il nome (ATYP=3) il DNS lo fa il proxy.
+    const response = await fetch(`http://localhost:${targetPort}/tunnel`, {
       dispatcher,
       signal: AbortSignal.timeout(5000),
     });
     assert.equal(response.status, 200);
     assert.equal(await response.text(), 'ok:/tunnel');
+    assert.deepEqual(seen[0], { atyp: 3, host: 'localhost', port: targetPort }, 'hostname al proxy = DNS remoto');
   } finally {
     await new Promise((resolve) => target.close(resolve));
     await new Promise((resolve) => socks.close(resolve));
