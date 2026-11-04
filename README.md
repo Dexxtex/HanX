@@ -258,11 +258,13 @@ Nei provider il catalogo ha la precedenza sulla ricerca del sito
 (`src/catalog/matcher.ts`): un match ≥ 0,8 apre la scheda senza chiedere nulla,
 tra 0,5 e 0,8 il risultato viene solo registrato nel log (`DEBUG_LEVEL=2`),
 sotto 0,5 si ignora. **Il catalogo non decide mai che un titolo non esiste**:
-misurato con un replay sui 26.097 check trovati dallo sweep, il catalogo
-riconosce il 2-7% delle serie che i siti hanno davvero (AnimeSaturn 110 su 8.494,
-AnimeUnity 624 su 9.634, AnimeWorld 1.062 su 8.677): usarlo come verdetto di
-assenza azzererebbe il resto. Quindi per un titolo non trovato si usa sempre la
-ricerca di rete di prima, con gli stessi due ripieghi.
+misurato con un replay sui check trovati dallo sweep, il catalogo serve una
+scheda solo per il 17-23% dei titoli che i siti hanno davvero (AnimeSaturn
+1.478 su 8.494, AnimeWorld 1.549 su 8.677, AnimeUnity 2.231 su 9.634; base:
+check, non serie). Usarlo come verdetto di assenza azzererebbe il resto: un
+match "assente" è quasi sempre un titolo che il sito ha sotto un altro nome.
+Quindi per un titolo non trovato si usa sempre la ricerca di rete di prima,
+con gli stessi due ripieghi.
 
 **Titolo appena uscito.** Il catalogo è di ieri sera: un'opera aggiunta al sito
 oggi non c'è fino al sync successivo, cioè fino a ~24 ore. In quella finestra
