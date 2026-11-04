@@ -160,7 +160,8 @@ export function lookupTitle(site: CatalogSite, queries: string[], options?: Cata
   const entries = index?.sites?.[site] || [];
   const generatedAt = typeof index?.generatedAt === 'string' ? index.generatedAt : null;
   const wantedSeason = Number.isInteger(options?.season) && Number(options?.season) > 0 ? Number(options?.season) : null;
-  const isFilm = options?.isMovie === true || Number(options?.season) === 0;
+  // `season: null` non è un film: solo 0 esplicito lo è.
+  const isFilm = options?.isMovie === true || options?.season === 0;
 
   const all: Scored[] = [];
   if (clean.length) {

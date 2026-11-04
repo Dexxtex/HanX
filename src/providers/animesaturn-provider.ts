@@ -5,7 +5,7 @@ import { getDomain } from '../utils/domains.js';
 import { debug, redactUrl } from '../utils/logger.js';
 import { checkIsAnimeById, applyUniversalAnimeTitleNormalization } from '../utils/animeGate.js';
 import { buildEasyProxyHlsUrl, buildEasyProxyStreamUrl } from '../utils/easyproxy.js';
-import { lookupTitle } from '../catalog/matcher.js';
+import { lookupTitle, type CatalogQueryOptions } from '../catalog/matcher.js';
 import {
   buildTitleFallbackQueries,
   normalizeTitleForSearch,
@@ -583,20 +583,15 @@ function normalizeApostrophes(str: string): string {
   return str.replace(/['’‘]/g, "'");
 }
 
-/**
- * Catalogo locale: zero richieste quando il titolo c'è, o quando il catalogo
- * aggiornato dice che non c'è. Stessa forma di searchAllVersions.
- */
-function catalogSaturnVersions(queries: string[]): { versions: { version: AnimeSaturnResult; language_type: string }[]; authoritative: boolean } {
-  const lookup = lookupTitle('saturn', queries);
-  const versions = lookup.hits.map((hit) => {
-    const nameLower = hit.title.toLowerCase();
-    return {
-      version: { title: hit.title, url: hit.url },
-      language_type: nameLower.includes('cr') ? 'CR ITA' : nameLower.includes('ita') ? 'ITA' : 'SUB ITA',
-    };
-  });
-  return { versions, authoritative: lookup.authoritative };
+/** Catalogo locale: zero richieste quando il titolo c'è. Stessa forma di searchAllVersions. */
+function catalogSaturnVersions(
+  queries: string[],
+  options: CatalogQueryOptions
+): { version: AnimeSaturnResult; language_type: string }[] {
+  return lookupTitle('saturn', queries, options).hits.map((hit) => ({
+    version: { title: hit.title, url: hit.url },
+    language_type: hit.language,
+  }));
 }
 
 export function filterAnimeResults(
@@ -1110,13 +1105,9 @@ export class AnimeSaturnProvider {
     const itQuery = sameQuery(itQueryRaw, normalizedTitle) ? '' : itQueryRaw;
     const titles = [normalizedTitle];
     if (itQuery) titles.push(itQuery);
-    const catalog = catalogSaturnVersions([normalizedTitle, itQuery, altQuery]);
-    if (!catalog.versions.length && catalog.authoritative) {
-      debug(1, 'AnimeSaturn', `[catalog] "${normalizedTitle}" non è nel catalogo aggiornato: nessuna ricerca di rete`);
-      return { streams: [] };
-    }
-    const rawVersions = catalog.versions.length ? [] : await this.searchAllVersions(normalizedTitle);
-    let animeVersions = catalog.versions.length ? catalog.versions : filterAnimeResults(rawVersions, titles);
+    const catalogVersions = catalogSaturnVersions([normalizedTitle, itQuery, altQuery], { season: seasonNumber, isMovie });
+    const rawVersions = catalogVersions.length ? [] : await this.searchAllVersions(normalizedTitle);
+    let animeVersions = catalogVersions.length ? catalogVersions : filterAnimeResults(rawVersions, titles);
     if (!animeVersions.length && altQuery) {
       titles.push(altQuery);
       animeVersions = filterAnimeResults(rawVersions, titles);

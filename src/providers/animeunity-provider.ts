@@ -19,7 +19,7 @@ import { SocksProxyAgent } from 'socks-proxy-agent';
 import { ProxyAgent as UndiciProxyAgent } from 'undici';
 import { checkIsAnimeById, applyUniversalAnimeTitleNormalization } from '../utils/animeGate.js';
 import { providerLabel } from '../utils/unifiedNames.js';
-import { lookupTitle } from '../catalog/matcher.js';
+import { lookupTitle, type CatalogQueryOptions } from '../catalog/matcher.js';
 import {
   buildTitleFallbackQueries,
   normalizeTitleForSearch as normalizeAnimeTitleForSearch,
@@ -532,21 +532,22 @@ async function getUnityCoStreamData(
   }
 }
 
-/** Catalogo locale: zero richieste quando il titolo c'è, o quando il catalogo aggiornato dice che non c'è. */
-function catalogUnityVersions(queries: string[]): { versions: { version: AnimeUnitySearchResult; language_type: string }[]; authoritative: boolean } {
-  const lookup = lookupTitle('unity', queries);
+/** Catalogo locale: zero richieste quando il titolo c'è. */
+function catalogUnityVersions(
+  queries: string[],
+  options: CatalogQueryOptions
+): { version: AnimeUnitySearchResult; language_type: string }[] {
   const versions: { version: AnimeUnitySearchResult; language_type: string }[] = [];
-  for (const hit of lookup.hits) {
+  for (const hit of lookupTitle('unity', queries, options).hits) {
     const id = Number(String(hit.slug).split('-')[0]);
     const slug = String(hit.slug).replace(/^\d+-/, '');
     if (!Number.isFinite(id) || id <= 0 || !slug) continue;
-    const nameLower = hit.title.toLowerCase();
     versions.push({
       version: { id, slug, name: hit.title, episodes_count: 0, ...(hit.type ? { type: hit.type } : {}) },
-      language_type: nameLower.includes('cr') ? 'CR ITA' : nameLower.includes('ita') ? 'ITA' : 'SUB ITA',
+      language_type: hit.language,
     });
   }
-  return { versions, authoritative: lookup.authoritative };
+  return versions;
 }
 
 function filterAnimeResults(results: { version: AnimeUnitySearchResult; language_type: string }[], queryTitles: string[]) {
@@ -1019,12 +1020,8 @@ export class AnimeUnityProvider {
     if (skipFilter) {
       debug(3, 'AnimeUnity', `[AnimeUnity][ExactMap] Skip filtro: titolo di input corrisponde a chiave exactMap -> "${title}"`);
     }
-    const catalog = catalogUnityVersions([normalizedTitle, itQuery, altQuery]);
-    if (!catalog.versions.length && catalog.authoritative) {
-      debug(1, 'AnimeUnity', `[catalog] "${normalizedTitle}" non è nel catalogo aggiornato: nessuna ricerca di rete`);
-      return { streams: [] };
-    }
-    let animeVersions = catalog.versions.length ? catalog.versions : await this.searchAllVersions(normalizedTitle);
+    const catalogVersions = catalogUnityVersions([normalizedTitle, itQuery, altQuery], { season: seasonNumber, isMovie });
+    let animeVersions = catalogVersions.length ? catalogVersions : await this.searchAllVersions(normalizedTitle);
     if (!skipFilter) {
       const rawVersions = animeVersions;
       animeVersions = filterAnimeResults(rawVersions, queryTitles);
