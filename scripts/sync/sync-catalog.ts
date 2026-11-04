@@ -30,6 +30,7 @@ import {
   parseSaturnSitemapIndex,
   applyCardDetails,
   parseCardDetails,
+  pendingEnrichment,
   saturnListingGap,
   SATURN_TYPES,
   parseWorldMaxPage,
@@ -262,16 +263,17 @@ const MALID_DEADLINE_MIN = Number(process.env.CATALOG_MALID_DEADLINE_MIN) || 52;
  * Saturn + 6.864 World, quindi si fa a rate e si riprende dalla sera dopo. Le
  * schede nuove passano davanti al backlog; i malId già presi restano (mergeSite).
  */
-async function enrichMalIds(catalog: CatalogFile, previous: CatalogFile, startedAt: number): Promise<void> {
+async function enrichMalIds(catalog: CatalogFile, startedAt: number): Promise<void> {
   const deadline = startedAt + MALID_DEADLINE_MIN * 60_000;
   const quota = Math.ceil(MALID_MAX_REQUESTS / 2);
+  const today = new Date().toISOString().slice(0, 10);
   for (const site of ['saturn', 'world'] as const) {
-    const yesterday = new Set(previous.sites[site].map((entry) => entry.slug));
     const entries = catalog.sites[site];
-    const pending = entries.filter((entry) => !entry.malId);
-    // Le nuove prima: l'indice non le conosce e le vorrebbe subito.
-    pending.sort((a, b) => Number(yesterday.has(a.slug)) - Number(yesterday.has(b.slug)));
-    const before = entries.length - pending.length;
+    // Prima le schede mai lette (le nuove comprese), poi le più vecchie: quelle
+    // lette da poco non si rileggono, altrimenti le schede senza id AniList
+    // brucerebbero la quota a ogni run.
+    const pending = pendingEnrichment(entries, today);
+    const before = entries.filter((entry) => entry.malId).length;
     const found: { entry: CatalogEntry; details: ReturnType<typeof parseCardDetails> }[] = [];
     let requests = 0;
     for (const entry of pending) {
@@ -279,6 +281,7 @@ async function enrichMalIds(catalog: CatalogFile, previous: CatalogFile, started
       requests += 1;
       try {
         found.push({ entry, details: parseCardDetails((await request(entry.url)).body, site) });
+        entry.enrichedAt = today;
       } catch (err) {
         // Mezzo backfill vale più di un job rosso: la fase si chiude e si riprende domani.
         console.error(`[catalog] malId ${site}: ${err instanceof BlockedError ? 'BLOCCATO' : 'errore'} — ${describeError(err)}`);
@@ -318,6 +321,8 @@ interface Options {
   maxPages: Record<CatalogSite, number>;
   dryRun: boolean;
   dataDir: string;
+  /** Solo arricchimento del catalogo già presente: nessun crawl. */
+  enrichOnly: boolean;
 }
 
 function parseArgs(argv: string[]): Options {
@@ -330,10 +335,12 @@ function parseArgs(argv: string[]): Options {
     },
     dryRun: false,
     dataDir: DATA_DIR,
+    enrichOnly: false,
   };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--dry-run') options.dryRun = true;
+    else if (arg === '--enrich-only') options.enrichOnly = true;
     else if (arg === '--site') {
       const site = argv[++i] as CatalogSite;
       if (!CATALOG_SITES.includes(site)) throw new Error(`sito sconosciuto: ${site}`);
@@ -354,6 +361,27 @@ function parseArgs(argv: string[]): Options {
 async function main(): Promise<number> {
   const options = parseArgs(process.argv.slice(2));
   const previous = readCatalog(options.dataDir);
+  const startedAt0 = Date.now();
+
+  // Modalità del workflow "Catalog Enrichment": i cataloghi sono già pubblicati,
+  // si leggono solo le schede da arricchire. Nessun crawl, nessun rischio di
+  // pubblicare un catalogo peggiore.
+  if (options.enrichOnly) {
+    const sites = (['saturn', 'world'] as const).filter((site) => previous.sites[site].length > 0);
+    if (!sites.length) {
+      console.error('[catalog] niente da arricchire: il catalogo locale è vuoto (serve una run di sync)');
+      return 1;
+    }
+    await enrichMalIds(previous, startedAt0);
+    if (options.dryRun) {
+      console.log('[catalog] dry-run: nessun file scritto');
+      return 0;
+    }
+    previous.generatedAt = new Date().toISOString();
+    writeCatalogsAtomic(options.dataDir, previous, buildTitleIndex(previous));
+    console.log(`[catalog] arricchito in ${((Date.now() - startedAt0) / 1000).toFixed(1)}s`);
+    return 0;
+  }
   const catalog = emptyCatalog();
   const startedAt = Date.now();
   const failures: string[] = [];
@@ -400,7 +428,7 @@ async function main(): Promise<number> {
   const total = CATALOG_SITES.reduce((sum, site) => sum + catalog.sites[site].length, 0);
   // Solo con la rete libera: dopo i tre crawl, con il tempo che resta.
   if (options.sites.includes('saturn') || options.sites.includes('world')) {
-    await enrichMalIds(catalog, previous, startedAt);
+    await enrichMalIds(catalog, startedAt);
   }
 
   if (options.dryRun) {

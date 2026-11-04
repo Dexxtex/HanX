@@ -19,7 +19,8 @@
     "mapping:verify": "pnpm run mapping:check && node --test tests/mapping/index.test.mjs tests/mapping/generator.test.mjs",
     "verify:status": "node scripts/ops/verify-feature.mjs status",
     "check:domains": "node scripts/ops/check_domains.cjs",
-    "sync-catalog": "node --import tsx scripts/sync/sync-catalog.ts"
+    "sync-catalog": "node --import tsx scripts/sync/sync-catalog.ts",
+    "enrich-catalog": "node --import tsx scripts/sync/sync-catalog.ts --enrich-only"
   },
   "dependencies": {
     "cheerio": "^1.1.2",

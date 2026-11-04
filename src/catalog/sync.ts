@@ -34,6 +34,32 @@ export interface CatalogEntry {
   episodes?: number;
   /** Id AniList: valida il `malId` delle schede e regge un futuro join `anilist:`. */
   anilistId?: number;
+  /**
+   * Giorno in cui la scheda è stata letta l'ultima volta (`YYYY-MM-DD`). Senza
+   * questo, una scheda senza id AniList verrebbe riletta a ogni run per sempre.
+   */
+  enrichedAt?: string;
+}
+
+/** Quante schede si rileggono al giorno oltre al backlog: rinfresco, non ricorsa. */
+const ENRICH_REFRESH_DAYS = 30;
+
+/**
+ * Schede da leggere, in ordine: prima quelle mai lette (le nuove incluse), poi
+ * le più vecchie. Una scheda letta da meno di `refreshDays` non si rilegge, così
+ * le schede senza id AniList non consumano la quota all'infinito.
+ */
+export function pendingEnrichment(
+  entries: CatalogEntry[],
+  today: string,
+  refreshDays = ENRICH_REFRESH_DAYS
+): CatalogEntry[] {
+  const cutoff = new Date(`${today}T00:00:00Z`);
+  cutoff.setUTCDate(cutoff.getUTCDate() - refreshDays);
+  const limit = cutoff.toISOString().slice(0, 10);
+  return entries
+    .filter((entry) => !entry.enrichedAt || entry.enrichedAt < limit)
+    .sort((a, b) => (a.enrichedAt || '').localeCompare(b.enrichedAt || ''));
 }
 
 export interface CatalogFile {

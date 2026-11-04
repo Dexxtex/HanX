@@ -10,6 +10,7 @@ import {
   carryOverMalIds,
   mergeSite,
   parseCardDetails,
+  pendingEnrichment,
   parseCardIds,
   applyCardDetails,
   parseSaturnAnimeSitemap,
@@ -306,6 +307,15 @@ test('unity: titolo, titoli alternativi deduplicati, anno e url della scheda', (
     year: 2006,
   });
   assert.deepEqual(parseUnityRecords({ tot: 'x' }), { total: 0, entries: [] });
+});
+
+test('arricchimento: prima le schede mai lette, e le fresche non si rileggono', () => {
+  const e = (slug, enrichedAt) => ({ site: 'saturn', slug, url: '', titleSite: slug, ...(enrichedAt ? { enrichedAt } : {}) });
+  const pending = pendingEnrichment(
+    [e('vecchia', '2025-01-01'), e('nuova'), e('recente', '2026-11-03'), e('media', '2026-06-01')],
+    '2026-11-05'
+  );
+  assert.deepEqual(pending.map((x) => x.slug), ['nuova', 'vecchia', 'media']);
 });
 
 test('ids della scheda: MAL e AniList, anche doppi come su World', () => {

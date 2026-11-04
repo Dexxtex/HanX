@@ -1,0 +1,115 @@
+name: Catalog Enrichment
+
+# Arricchisce le schede già pubblicate: titoli alternativi, anno, episodi,
+# lingua e `malId` (confermato da AniList). Non fa crawl: parte dal catalogo del
+# branch `data`, lo legge scheda per scheda e riscrive solo quello che cambia.
+#
+# Perché esiste: la run notturna ha poco tempo, e col budget di 300 schede/notte
+# il backlog di 13.043 schede richiederebbe ~45 notti. Qui 600 ogni 6 ore lo
+# drenano in pochi giorni. Poi si autolimita: una scheda letta non viene ripresa
+# per 30 giorni, quindi quando il backlog è finito ogni run costa pochi minuti e
+# pubblica solo se c'è davvero qualcosa di nuovo (le schede appena uscite).
+#
+# Non tocca il crawler: nessun rischio di pubblicare un catalogo peggiore, la
+# guardia del 70% e quella del 98% restano dove sono.
+
+on:
+  schedule:
+    # Ogni 6 ore, sfalsato di 17 minuti rispetto al sync delle 20:00.
+    - cron: '17 */6 * * *'
+  workflow_dispatch: {}
+
+# Il job riscrive il branch `data`: serve solo contents: write.
+permissions:
+  contents: write
+
+# Stesso gruppo del workflow di sync: due scrittori sullo stesso branch non
+# devono mai sovrapporsi (il gruppo è condiviso apposta).
+concurrency:
+  group: sync-catalog
+  cancel-in-progress: false
+
+jobs:
+  enrich:
+    runs-on: ubuntu-latest
+    # 600 schede a 3 s sono ~30 minuti; la deadline interna è a 32.
+    timeout-minutes: 40
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 12.15.0
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # Il catalogo vive sul branch `data`: senza ripristino non ci sarebbe
+      # niente da arricchire.
+      - name: Ripristina il catalogo pubblicato
+        run: |
+          mkdir -p data
+          if git fetch -q --depth=1 origin data 2>/dev/null; then
+            git show FETCH_HEAD:catalogs.json > data/catalogs.json
+            git show FETCH_HEAD:catalog-titles.json > data/catalog-titles.json
+            echo "Ripristinate $(node -e "const d=require('./data/catalogs.json');console.log(Object.values(d.sites).reduce((n,l)=>n+l.length,0))") schede dal branch data."
+          else
+            echo "Branch data assente: niente da arricchire, esco verde." >&2
+            exit 0
+          fi
+
+      # Le schede lette da meno di 30 giorni non si rileggono: quando il backlog
+      # è finito questa fase costa quasi nulla e prende solo le schede nuove.
+      - name: Arricchisci il catalogo
+        env:
+          CATALOG_MALID_MAX_REQUESTS: 600
+          CATALOG_MALID_DEADLINE_MIN: 32
+        run: pnpm run enrich-catalog
+
+      # Pubblica solo se il contenuto è cambiato: `generatedAt` non conta.
+      - name: Pubblica sul branch data
+        # Se il ripristino non ha trovato il branch `data`, non c'è niente da
+        # pubblicare: la run resta verde invece di fallire sul commit.
+        if: always() && hashFiles('data/catalogs.json') != ''
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO_URL: https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+        run: |
+          set -euo pipefail
+          if [ ! -f data/catalog-titles.json ] || [ ! -f data/catalogs.json ]; then
+            echo "Nessun catalogo scritto: niente da pubblicare."
+            exit 1
+          fi
+          work=$(mktemp -d)
+          cp data/catalogs.json data/catalog-titles.json "$work"/
+          cd "$work"
+          git init -q -b data
+          git add catalogs.json catalog-titles.json
+          git -c user.name='github-actions[bot]' \
+              -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+              commit -qm "chore(catalog): arricchimento $(TZ=Europe/Rome date +%F' '%H:%M)"
+          git remote add origin "$REPO_URL"
+          changed=true
+          if git fetch -q --depth=1 origin data 2>/dev/null; then
+            changed=false
+            for file in catalogs.json catalog-titles.json; do
+              git show "FETCH_HEAD:$file" | jq 'del(.generatedAt)' > old.json
+              if ! jq 'del(.generatedAt)' "$file" | diff -q - old.json > /dev/null; then
+                changed=true
+              fi
+            done
+          fi
+          if [ "$changed" = false ]; then
+            echo "Nessuna scheda nuova: il catalogo è identico a quello pubblicato."
+            exit 0
+          fi
+          git push -q -f origin data
+          echo "Pubblicato su data: $(jq '[.sites[].malId] | map(select(. != null)) | length' catalogs.json) schede con malId"
