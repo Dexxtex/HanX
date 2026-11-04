@@ -92,8 +92,14 @@ jobs:
       # Se un sito risponde 403/429 o scende sotto il 70% delle schede, il suo
       # catalogo resta quello di ieri; gli altri si aggiornano lo stesso e lo
       # script esce 1, così il job è rosso (GitHub manda la notifica).
+      # CATALOG_PROXY è un IP residenziale: i runner escono da datacenter e il
+      # WAF di AnimeUnity risponde 403. Va in un secret (contiene credenziali),
+      # serve una sessione sticky (stesso IP per tutta la run) e non è un fix
+      # del blocco. Vuoto = nessun proxy.
       - name: Sync catalogo
         if: steps.guard.outputs.should_run == 'true'
+        env:
+          CATALOG_PROXY: ${{ secrets.CATALOG_PROXY }}
         run: pnpm run sync-catalog
 
       # `always()`: anche con il sync rosso i siti riusciti vanno pubblicati.

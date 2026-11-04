@@ -15,6 +15,8 @@
  */
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { fetch as undiciFetch, ProxyAgent } from 'undici';
+import { SocksProxyAgent } from 'socks-proxy-agent';
 import {
   CATALOG_SITES,
   buildTitleIndex,
@@ -38,6 +40,14 @@ const TIMEOUT_MS = Number(process.env.CATALOG_TIMEOUT_MS) || 15_000;
 const INTERVAL_MS = Math.max(3_000, Number(process.env.CATALOG_INTERVAL_MS) || 3_000);
 const RETRIES = 2;
 const BACKOFF_MS = [1_500, 4_000];
+
+/**
+ * Proxy per l'intero crawl (IP residenziale): http(s) o socks. Un solo IP per
+ * tutta la run, altrimenti il cookie di sessione di Unity si rompe: se il pool
+ * ruota, chiedere una sessione sticky. Non è un fix del WAF, è un cambio di IP.
+ */
+const PROXY = String(process.env.CATALOG_PROXY || process.env.AU_PROXY || '').trim();
+const DISPATCHER = PROXY ? (/^socks/i.test(PROXY) ? new SocksProxyAgent(PROXY) : new ProxyAgent(PROXY)) : undefined;
 
 const BASES = {
   saturn: 'https://www.animesaturn.net',
@@ -70,10 +80,11 @@ async function request(url: string, init: RequestInit = {}): Promise<{ body: str
     if (wait > 0) await sleep(wait);
     let response: Response;
     try {
-      response = await fetch(url, {
+      response = await undiciFetch(url, {
         ...init,
         signal: AbortSignal.timeout(TIMEOUT_MS),
         headers: { 'user-agent': UA, 'accept-language': 'it-IT,it;q=0.9', ...(init.headers as Record<string, string>) },
+        ...(DISPATCHER ? { dispatcher: DISPATCHER } : {}),
       });
     } catch (err) {
       if (attempt >= RETRIES) throw err;

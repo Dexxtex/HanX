@@ -241,7 +241,10 @@ provider usano solo la ricerca di rete, come prima.
 | AnimeUnity | `POST /archivio/get-animes` (due passate: normale e `dubbed=1`) | completa (8.807 = 7.266 normali + 1.541 doppiate), titoli reali it/eng/romaji |
 
 Una richiesta alla volta con 3 s di intervallo, timeout 15 s, 2 retry solo su
-5xx e rete, ~460 richieste in ~23 minuti (job a 45 minuti). Un `403`/`429` o una
+5xx e rete, ~500 richieste in ~25 minuti (job a 45 minuti). Se i runner GitHub
+escono da IP di datacenter e AnimeUnity risponde 403, si può impostare il secret
+`CATALOG_PROXY` con un proxy **residenziale** (stesso IP per tutta la run,
+~65-70 MB al giorno): è un cambio di IP, non un fix del WAF. Un `403`/`429` o una
 sitemap sotto il 70% delle schede di ieri ferma **quel sito**: il suo catalogo
 resta quello pubblicato, gli altri due si aggiornano lo stesso e il job esce
 rosso. La coppia di file si scrive prima su `.tmp` e poi si rinomina.
