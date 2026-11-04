@@ -258,6 +258,17 @@ Unity è l'unico provider che espone `mal_id`: è la chiave per un match esatto
 quando il titolo non basta, e lo salviamo già per non dover ri-crawelare 8.807
 schede quando servirà. Saturn e World non hanno id né anno nel listing.
 
+Perché i conteggi sono quelli e non altri (verificato il 4/11/2026):
+
+- **Saturn**: una sola parte `sitemap-anime-*` (le 2 e 3 esistono ma sono
+  urlset vuoti); `/newest`, `/ongoing`, `/upcoming` e le 4 sitemap di episodi
+  non contengono nemmeno uno slug fuori dalle 6.179.
+- **World**: la pagina 172 è l'ultima (16 schede) e la 173 ripete la prima;
+  `sort=title` viene ignorato, quindi non esiste un elenco alternativo.
+- **Unity**: la somma dei `type` dà esattamente 7.266 (nessun tipo fuori dal
+  listing di default) e `dubbed=1` è un catalogo a parte di 1.541; `mal_id` è
+  presente nel 98% delle schede campionate, anni dal 1979 al 2026.
+
 Una richiesta alla volta con 3 s di intervallo, timeout 15 s, 2 retry solo su
 5xx e rete, ~500 richieste in ~25 minuti (job a 45 minuti). Se i runner GitHub
 escono da IP di datacenter e AnimeUnity risponde 403, si può impostare il secret
