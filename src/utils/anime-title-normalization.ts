@@ -180,6 +180,13 @@ const FORMAT_SUFFIX_TOKENS = new Set([
 ]);
 
 function titleTokens(title: string): string[] {
+  return cleanTokens(title).filter(
+    (token) => !TITLE_STOP_WORDS.has(token) && !TITLE_LANGUAGE_WORDS.has(token)
+  );
+}
+
+/** Token senza filtri di stopword: serve per confrontare "Mission-E" con "MissionE". */
+function cleanTokens(title: string): string[] {
   const tokens = normalizeHomoglyphs(String(title || ''))
     .normalize('NFKD')
     .replace(/[\u0300-\u036f]/g, '')
@@ -187,7 +194,7 @@ function titleTokens(title: string): string[] {
     .replace(/[^a-z0-9]+/g, ' ')
     .trim()
     .split(/\s+/)
-    .filter((token) => token && !TITLE_STOP_WORDS.has(token) && !TITLE_LANGUAGE_WORDS.has(token))
+    .filter(Boolean)
     // "II" e "2" sono la stessa stagione: senza questo, il titolo trovato viene scartato dal filtro.
     .map((token) => ROMAN_NUMERALS[token] || token.replace(/^(\d+)(?:st|nd|rd|th)$/, '$1'));
   // "Tenjiku-hen" e "Tenjiku Arc" sono lo stesso sottotitolo.
@@ -212,6 +219,20 @@ export function titleMatchScore(requested: string, candidate: string): number {
   // "Kurumi-chan" e "Kurumichan" sono lo stesso titolo: le normalizzazioni dei
   // provider tolgono il trattino dalla query ma non dal titolo del sito.
   if (query.join('') === found.join('')) return 1;
+  // Stesso confronto sulla forma grezza: "Mission-E" perde la "E" come stopword
+  // italiana ("e"), quindi la query "MissionE" non combacia con i soli token
+  // filtrati. Riprodotto dal vivo il 3/11/2026: il sito risponde "Mission-E",
+  // il filtro lo scarta e lo stream manca.
+  if (cleanTokens(requested).join('') === cleanTokens(candidate).join('')) return 1;
+
+  // Il sito antepone parole al titolo invece di aggiungerle: "Reborn!" lì è
+  // "Tutor Hitman Reborn!" (Saturn) e "Katekyo Hitman Reborn!" (World). La
+  // query resta l'identità dell'opera e il prefisso è rumore, quindi vale 0.9:
+  // meno di un match esatto, così una scheda precisa vince sempre.
+  if (found.length > query.length) {
+    const tail = found.slice(found.length - query.length);
+    if (tail.every((token, index) => token === query[index])) return 0.9;
+  }
 
   // A bare series title must not match a season that only adds a subtitle.
   const bothHaveSubtitle = /:|\s+-\s+/.test(requested) && /:|\s+-\s+/.test(candidate);

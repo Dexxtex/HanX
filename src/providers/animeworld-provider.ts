@@ -966,8 +966,13 @@ export class AnimeWorldProvider {
       // sito usa il sottotitolo: resta romaji + varianti storiche. Senza
       // sottotitolo vince l'italiano.
       const hasSubtitle = /:|\s+-\s+/.test(normalized);
+      // Col sottotitolo l'italiano composto è sbagliato ("Tokyo Revengers 4":
+      // sul sito l'arco sta nella scheda base), ma quello nudo è l'unica chance
+      // sui siti che indicizzano in italiano.
+      const bareItRaw = titleIt ? normalizeTitleForSearch(titleIt, animeWorldTitleNormalization) : '';
+      const bareItQuery = sameQuery(bareItRaw, normalized) || sameQuery(bareItRaw, itQuery) ? '' : bareItRaw;
       const candidates = hasSubtitle
-        ? [altQuery, ...buildTitleFallbackQueries(normalized, seasonNumber)]
+        ? [altQuery, bareItQuery, ...buildTitleFallbackQueries(normalized, seasonNumber)]
         : [itQuery, altQuery, ...buildTitleFallbackQueries(normalized, seasonNumber)];
       for (const fallbackQuery of candidates.filter((q, i, all) => q && !sameQuery(q, normalized) && all.indexOf(q) === i).slice(0, 2)) {
         const res = await this.searchAllVersions(fallbackQuery, () => false);

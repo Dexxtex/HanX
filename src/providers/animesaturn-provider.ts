@@ -1108,8 +1108,13 @@ export class AnimeSaturnProvider {
       // un titolo con sottotitolo il primo candidato è il romaji, e i siti che
       // indicizzano in italiano restavano senza seconda possibilità.
       const hasSubtitle = /:|\s+-\s+/.test(normalizedTitle);
+      // Col sottotitolo l'italiano composto è sbagliato ("Tokyo Revengers 4":
+      // sul sito l'arco sta nella scheda base), ma quello nudo è l'unica chance
+      // sui siti che indicizzano in italiano: "La malinconia di Haruhi Suzumiya".
+      const bareItRaw = titleIt ? normalizeTitleForSearch(titleIt, animeSaturnTitleNormalization) : '';
+      const bareItQuery = sameQuery(bareItRaw, normalizedTitle) || sameQuery(bareItRaw, itQuery) ? '' : bareItRaw;
       const candidates = hasSubtitle
-        ? [altQuery, ...buildTitleFallbackQueries(normalizedTitle, seasonNumber)]
+        ? [altQuery, bareItQuery, ...buildTitleFallbackQueries(normalizedTitle, seasonNumber)]
         : [itQuery, altQuery, ...buildTitleFallbackQueries(normalizedTitle, seasonNumber)];
       for (const fallbackQuery of candidates.filter((q, i, all) => q && !sameQuery(q, normalizedTitle) && all.indexOf(q) === i).slice(0, 2)) {
         titles.push(fallbackQuery);

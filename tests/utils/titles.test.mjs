@@ -264,6 +264,17 @@ test('un sottotitolo nuovo non è un match 0.9 (Prince of Tennis)', () => {
   );
 });
 
+test('il titolo che finisce con la query è la stessa opera (Reborn!)', () => {
+  // Sonde del 3/11/2026 sui due siti: la query "Reborn!" prendeva 0 sia su
+  // "Tutor Hitman Reborn!" (Saturn) sia su "Katekyo Hitman Reborn!" (World),
+  // perché il match partiva dal primo token. Il prefisso è rumore.
+  assert.equal(titleMatchScore('Reborn!', 'Tutor Hitman Reborn!'), 0.9);
+  assert.equal(titleMatchScore('Reborn!', 'Katekyo Hitman Reborn!'), 0.9);
+  // Un'opera diversa che contiene la parola non deve passare.
+  assert.equal(titleMatchScore('Reborn!', 'Reborn as a Vending Machine, I Now Wander the Dungeon'), 0);
+  assert.equal(titleMatchScore('Major S6', 'Major 2nd'), 0);
+});
+
 test('gli omoglifi cirillici di Kitsu non rompono ricerca e match', () => {
   // Dato reale di Kitsu 50991: "Jyuоu" con la о cirillica (U+043E).
   const dirty = 'Jyu\u043Eu Mujin Dandivine';
@@ -279,4 +290,15 @@ test('il trattino tolto dalla query non fa perdere il risultato (Kurumi-chan)', 
   // AnimeUnity cerca "FX Fighter Kurumichan", la scheda del sito è
   // "FX Fighter Kurumi-chan": stessi token, cambia solo il trattino.
   assert.equal(titleMatchScore('FX Fighter Kurumichan', 'FX Fighter Kurumi-chan'), 1);
+});
+
+test('la stopword dentro un composto non rompe il match (Mission-E)', () => {
+  // Riprodotto dal vivo su AnimeUnity il 3/11/2026: la query normalizzata è
+  // "MissionE", il sito restituisce "Mission-E" e la "E" veniva scartata come
+  // stopword italiana, quindi il filtro buttava via l'unico risultato.
+  assert.equal(titleMatchScore('MissionE', 'Mission-E'), 1);
+  assert.equal(titleMatchScore('Ninja Hattori-kun', 'Ninja Hattori-kun'), 1);
+  // Opere diverse restano distinte.
+  assert.equal(titleMatchScore('Mission-E', 'Mission Impossible'), 0);
+  assert.equal(titleMatchScore('Code-E', 'Mission-E'), 0);
 });
