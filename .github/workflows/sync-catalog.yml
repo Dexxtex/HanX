@@ -37,7 +37,10 @@ concurrency:
 jobs:
   sync:
     runs-on: ubuntu-latest
-    # 460 richieste a 3 s sono ~23 minuti: 45 lasciano spazio a retry e code.
+    # I secret dell'environment `CATALOG` (CATALOG_PROXY) arrivano solo se il job
+    # lo dichiara. L'environment non ha regole di protezione: il cron gira da solo.
+    environment: CATALOG
+    # ~500 richieste a 3 s sono ~25 minuti: 45 lasciano spazio a retry e code.
     timeout-minutes: 45
     steps:
       # Il workflow gira due volte al giorno per coprire l'ora legale: qui si
