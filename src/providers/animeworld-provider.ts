@@ -5,6 +5,7 @@ import { debug, redactUrl } from '../utils/logger.js';
 import { AnimeWorldConfig, AnimeWorldResult, AnimeWorldEpisode, StreamForStremio } from '../types/animeunity.js';
 import { checkIsAnimeById, applyUniversalAnimeTitleNormalization } from '../utils/animeGate.js';
 import { buildEasyProxyHlsUrl, buildEasyProxyStreamUrl } from '../utils/easyproxy.js';
+import { lookupTitle } from '../catalog/matcher.js';
 import {
   animeSlugBase as animeWorldSlugBase,
   buildTitleFallbackQueries,
@@ -289,6 +290,23 @@ export function awResultsRelateToQuery(results: AnimeWorldResult[], query: strin
     const hay = normalizeSearchTitleKey(`${r.searchTitle || ''} ${r.name || ''} ${r.slug || ''}`);
     return keys.some(k => hay.includes(k));
   });
+}
+
+/**
+ * Catalogo locale: zero richieste quando il titolo c'è. AnimeWorld è troncato
+ * dal tetto di pagine, quindi il catalogo non dice mai "non c'è".
+ */
+function catalogWorldVersions(queries: string[]): { versions: AnimeWorldResult[]; authoritative: boolean } {
+  const lookup = lookupTitle('world', queries);
+  const versions = lookup.hits.map((hit) => ({
+    id: hit.slug,
+    slug: hit.slug,
+    name: hit.title,
+    searchTitle: hit.title,
+    episodes_count: 0,
+    language_type: /(?:^|-)cr(?:-ita)?$/i.test(hit.slug) ? 'CR ITA' : /-ita$/i.test(hit.slug) ? 'ITA' : 'SUB ITA',
+  }));
+  return { versions, authoritative: lookup.authoritative };
 }
 
 /**
@@ -957,7 +975,12 @@ export class AnimeWorldProvider {
     debug(3, 'AnimeWorld', '[AnimeWorld] Title original:', title);
     debug(3, 'AnimeWorld', '[AnimeWorld] Title normalized:', normalized);
 
-    let versions = await searchWithLogging(normalized);
+    const catalog = catalogWorldVersions([normalized, itQuery, altQuery]);
+    if (!catalog.versions.length && catalog.authoritative) {
+      debug(1, 'AnimeWorld', `[catalog] "${normalized}" non è nel catalogo aggiornato: nessuna ricerca di rete`);
+      return { streams: [] };
+    }
+    let versions = catalog.versions.length ? catalog.versions : await searchWithLogging(normalized);
     let versionsFromFallback = false;
 
     if (!skipExtraNormalization && !versions.length) {

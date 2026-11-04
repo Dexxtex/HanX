@@ -246,6 +246,14 @@ workflow**. GitHub può ritardare i job schedulati di qualche minuto e
 riattivarlo basta “Enable workflow” nella pagina della workflow, o un
 `workflow_dispatch` qualsiasi.
 
+Nei provider il catalogo ha la precedenza sulla ricerca del sito
+(`src/catalog/matcher.ts`): un match ≥ 0,8 apre la scheda senza chiedere nulla,
+tra 0,5 e 0,8 il risultato viene solo registrato nel log (`DEBUG_LEVEL=2`),
+sotto 0,5 si ignora. Se il catalogo ha meno di 48 ore ed è completo, un titolo
+che non c'è chiude la richiesta **senza rete**; altrimenti vale la ricerca di
+prima, con gli stessi due ripieghi. AnimeWorld resta sempre sulla ricerca di
+rete perché il suo catalogo è troncato.
+
 ## API
 
 | Endpoint | Descrizione |
