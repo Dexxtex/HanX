@@ -108,6 +108,24 @@ hanx.example.com {
   ([realbestia1/EasyProxy](https://github.com/realbestia1/EasyProxy)): avvialo e
   metti URL e password nel `.env`.
 
+### EasyProxy e brotli
+
+EasyProxy ha bisogno di `brotli` per decodificare le risposte HTTP compresse. Se
+l'immagine non lo include, aggiungilo nell'entrypoint del suo servizio:
+
+```yaml
+services:
+  easyproxy:
+    # ... resto della configurazione ...
+    entrypoint:
+      - /bin/bash
+      - -c
+      - |
+        python -m pip install --no-cache-dir --quiet brotli \
+          || echo "brotli non installato: proseguo senza" >&2
+        exec /bin/bash /app/entrypoint.sh
+```
+
 I proxy `PROXY`/`AU_PROXY`/`AS_PROXY`/`AW_PROXY` sono un'altra cosa: servono allo
 scraping, non alla riproduzione.
 
