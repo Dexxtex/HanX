@@ -3,6 +3,10 @@ name: Catalog Sync
 # Catalogo locale dei tre siti (AnimeSaturn, AnimeWorld, AnimeUnity), usato dai
 # provider per il match offline dei titoli.
 #
+# Il catalogo NON vive sul branch del codice: viene pubblicato sul branch orfano
+# `data` con un solo commit (force-push, niente storia), così i 4-7 MB di JSON
+# non gonfiano il repository. L'addon lo scarica da CATALOG_URL.
+#
 # Due cron perché GitHub li vuole in UTC e l'ora legale sposta l'offset:
 #   18:00 UTC = 20:00 CEST (estate)   19:00 UTC = 20:00 CET (inverno)
 # Lo step "guard" lascia passare solo la run che a Roma segna le 20: l'altra
@@ -21,7 +25,7 @@ on:
     - cron: '0 19 * * *' # 20:00 CET
   workflow_dispatch: {}
 
-# Il job scrive data/*.json nel repository: serve solo contents: write.
+# Il job scrive il branch `data`: serve solo contents: write.
 permissions:
   contents: write
 
@@ -33,7 +37,8 @@ concurrency:
 jobs:
   sync:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # 460 richieste a 3 s sono ~23 minuti: 45 lasciano spazio a retry e code.
+    timeout-minutes: 45
     steps:
       # Il workflow gira due volte al giorno per coprire l'ora legale: qui si
       # scarta la run che a Roma non è delle 20:00.
@@ -48,8 +53,6 @@ jobs:
             echo "should_run=true" >> "$GITHUB_OUTPUT"
           fi
 
-      # Le credenziali di checkout contengono GITHUB_TOKEN: il push finale usa
-      # quelle, senza secret aggiuntivi.
       - name: Checkout
         if: steps.guard.outputs.should_run == 'true'
         uses: actions/checkout@v7
@@ -71,22 +74,64 @@ jobs:
         if: steps.guard.outputs.should_run == 'true'
         run: pnpm install --frozen-lockfile
 
-      # Un errore qui fa fallire il job (e GitHub manda la notifica): i file
-      # committati ieri restano quelli validi, lo script non scrive nulla se un
-      # sito scende sotto il 70% delle schede o risponde 403/429.
+      # Il catalogo di ieri vive sul branch `data`, non nel workspace: senza
+      # questo ripristino la guardia 70% non avrebbe termine di confronto e un
+      # sito bloccato pubblicherebbe una lista vuota al posto dei suoi dati.
+      - name: Ripristina il catalogo pubblicato
+        if: steps.guard.outputs.should_run == 'true'
+        run: |
+          mkdir -p data
+          if git fetch -q --depth=1 origin data 2>/dev/null; then
+            git show FETCH_HEAD:catalogs.json > data/catalogs.json
+            git show FETCH_HEAD:catalog-titles.json > data/catalog-titles.json
+            echo "Ripristinate $(node -e "const d=require('./data/catalogs.json');console.log(Object.values(d.sites).reduce((n,l)=>n+l.length,0))") schede dal branch data."
+          else
+            echo "Branch data assente: primo sync, il catalogo parte vuoto."
+          fi
+
+      # Se un sito risponde 403/429 o scende sotto il 70% delle schede, il suo
+      # catalogo resta quello di ieri; gli altri si aggiornano lo stesso e lo
+      # script esce 1, così il job è rosso (GitHub manda la notifica).
       - name: Sync catalogo
         if: steps.guard.outputs.should_run == 'true'
         run: pnpm run sync-catalog
 
-      - name: Commit e push se cambiato
-        if: steps.guard.outputs.should_run == 'true'
+      # `always()`: anche con il sync rosso i siti riusciti vanno pubblicati.
+      - name: Pubblica sul branch data
+        if: always() && steps.guard.outputs.should_run == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO_URL: https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
         run: |
-          if git diff --quiet -- data/catalogs.json data/catalog-titles.json; then
-            echo "Nessuna modifica al catalogo."
+          set -euo pipefail
+          if [ ! -f data/catalog-titles.json ] || [ ! -f data/catalogs.json ]; then
+            echo "Nessun catalogo scritto: niente da pubblicare."
+            exit 1
+          fi
+          work=$(mktemp -d)
+          cp data/catalogs.json data/catalog-titles.json "$work"/
+          cd "$work"
+          git init -q -b data
+          git add catalogs.json catalog-titles.json
+          git -c user.name='github-actions[bot]' \
+              -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+              commit -qm "chore(catalog): sync $(TZ=Europe/Rome date +%F)"
+          git remote add origin "$REPO_URL"
+          # generatedAt cambia ogni sera: senza escluderlo si pubblicherebbe
+          # una versione nuova anche quando le schede sono identiche.
+          changed=true
+          if git fetch -q --depth=1 origin data 2>/dev/null; then
+            changed=false
+            for file in catalogs.json catalog-titles.json; do
+              git show "FETCH_HEAD:$file" | jq 'del(.generatedAt)' > old.json
+              if ! jq 'del(.generatedAt)' "$file" | diff -q - old.json > /dev/null; then
+                changed=true
+              fi
+            done
+          fi
+          if [ "$changed" = false ]; then
+            echo "Solo generatedAt: il catalogo è identico a quello pubblicato."
             exit 0
           fi
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add data/catalogs.json data/catalog-titles.json
-          git commit -m "chore(catalog): sync $(TZ=Europe/Rome date +%F)"
-          git push
+          git push -q -f origin data
+          echo "Pubblicato su data: $(jq '.sites' catalogs.json | jq -c 'map_values(length)')"
