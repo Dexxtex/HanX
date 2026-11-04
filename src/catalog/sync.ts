@@ -194,6 +194,7 @@ export function buildTitleIndex(catalog: CatalogFile): TitleIndexFile {
 
 /** Scrive prima i due temporanei, poi rinomina: un crash non lascia file a metà. */
 export function writeCatalogsAtomic(dir: string, catalog: CatalogFile, index: TitleIndexFile): void {
+  fs.mkdirSync(dir, { recursive: true });
   const files: [string, unknown][] = [
     [path.join(dir, 'catalogs.json'), catalog],
     [path.join(dir, 'catalog-titles.json'), index],

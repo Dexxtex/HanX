@@ -272,7 +272,8 @@ async function main(): Promise<number> {
   }
   catalog.generatedAt = new Date().toISOString();
   writeCatalogsAtomic(options.dataDir, catalog, buildTitleIndex(catalog));
-  console.log(`[catalog] ${total} schede in ${elapsed}s -> data/catalogs.json, data/catalog-titles.json`);
+  const rel = path.relative(process.cwd(), options.dataDir) || '.';
+  console.log(`[catalog] ${total} schede in ${elapsed}s -> ${rel}/catalogs.json, ${rel}/catalog-titles.json`);
   return 0;
 }
 
