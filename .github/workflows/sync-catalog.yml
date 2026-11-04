@@ -1,0 +1,92 @@
+name: Catalog Sync
+
+# Catalogo locale dei tre siti (AnimeSaturn, AnimeWorld, AnimeUnity), usato dai
+# provider per il match offline dei titoli.
+#
+# Due cron perché GitHub li vuole in UTC e l'ora legale sposta l'offset:
+#   18:00 UTC = 20:00 CEST (estate)   19:00 UTC = 20:00 CET (inverno)
+# Lo step "guard" lascia passare solo la run che a Roma segna le 20: l'altra
+# esce verde senza fare nulla. GitHub può ritardare i job schedulati di qualche
+# minuto (nei picchi fino a ~1 h): il controllo è sull'ora intera, quindi un
+# ritardo sotto l'ora non salta la run.
+#
+# GitHub disattiva i workflow schedulati dopo 60 giorni senza attività nel
+# repository. Per riattivarlo: Actions -> "Catalog Sync" -> "Enable workflow",
+# oppure lanciare una volta "Run workflow" (workflow_dispatch), che non è
+# soggetto al guard e aggiorna subito il catalogo.
+
+on:
+  schedule:
+    - cron: '0 18 * * *' # 20:00 CEST
+    - cron: '0 19 * * *' # 20:00 CET
+  workflow_dispatch: {}
+
+# Il job scrive data/*.json nel repository: serve solo contents: write.
+permissions:
+  contents: write
+
+# Due run sullo stesso catalogo si sovrascriverebbero.
+concurrency:
+  group: sync-catalog
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      # Il workflow gira due volte al giorno per coprire l'ora legale: qui si
+      # scarta la run che a Roma non è delle 20:00.
+      - name: Guard ora di Roma
+        id: guard
+        run: |
+          hour=$(TZ=Europe/Rome date +%H)
+          if [ "${{ github.event_name }}" = "schedule" ] && [ "$hour" != "20" ]; then
+            echo "Sono le $hour a Roma: è il cron dell'altra stagione, esco."
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Le credenziali di checkout contengono GITHUB_TOKEN: il push finale usa
+      # quelle, senza secret aggiuntivi.
+      - name: Checkout
+        if: steps.guard.outputs.should_run == 'true'
+        uses: actions/checkout@v7
+
+      - name: Set up pnpm
+        if: steps.guard.outputs.should_run == 'true'
+        uses: pnpm/action-setup@v6
+        with:
+          version: 12.15.0
+
+      - name: Set up Node
+        if: steps.guard.outputs.should_run == 'true'
+        uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: pnpm
+
+      - name: Install
+        if: steps.guard.outputs.should_run == 'true'
+        run: pnpm install --frozen-lockfile
+
+      # Un errore qui fa fallire il job (e GitHub manda la notifica): i file
+      # committati ieri restano quelli validi, lo script non scrive nulla se un
+      # sito scende sotto il 70% delle schede o risponde 403/429.
+      - name: Sync catalogo
+        if: steps.guard.outputs.should_run == 'true'
+        run: pnpm run sync-catalog
+
+      - name: Commit e push se cambiato
+        if: steps.guard.outputs.should_run == 'true'
+        run: |
+          if git diff --quiet -- data/catalogs.json data/catalog-titles.json; then
+            echo "Nessuna modifica al catalogo."
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add data/catalogs.json data/catalog-titles.json
+          git commit -m "chore(catalog): sync $(TZ=Europe/Rome date +%F)"
+          git push

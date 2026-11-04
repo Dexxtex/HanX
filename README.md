@@ -219,6 +219,33 @@ download fallisce, continua con la copia locale.
 **L'indice incluso nell'immagine è vuoto**: senza `ANIME_MAPPING_URL` servono
 `TMDB_API_KEY` e `TVDB_API_KEY` per il fallback live, che copre meno casi.
 
+### Catalogo locale dei titoli
+
+`data/catalogs.json` tiene le schede dei tre siti (`site`, `slug`, `url`,
+`titleSite`, titoli alternativi, anno); `data/catalog-titles.json` è lo stesso
+elenco ridotto a indice con la chiave compatta (`Mission-E` e `MissionE` danno
+la stessa chiave). Li aggiorna la workflow
+[`sync-catalog.yml`](.github/workflows/sync-catalog.yml) ogni giorno alle 20:00
+italiane e li committa solo se cambiano.
+
+| Sito | Sorgente | Copertura |
+| --- | --- | --- |
+| AnimeSaturn | `sitemap-anime-*.xml` | completa; il titolo è ricavato dallo slug |
+| AnimeWorld | `/filter?page=N` | prime 160 pagine (~6.400 schede), titoli reali |
+| AnimeUnity | `POST /archivio/get-animes` | completa, titoli reali it/eng/romaji |
+
+Una richiesta alla volta con 3 s di intervallo, timeout 15 s, 2 retry solo su
+5xx e rete; un `403` o un `429` ferma la run. Se un sito restituisce meno del
+70% delle schede di ieri, o la run fallisce, il catalogo committato non viene
+toccato: i file si scrivono prima su `.tmp` e poi si rinominano.
+
+A mano: `pnpm run sync-catalog` in locale (`--site unity --max-pages 2
+--dry-run` per una prova senza scrivere) oppure **Actions → Catalog Sync → Run
+workflow**. GitHub può ritardare i job schedulati di qualche minuto e
+**disattiva i workflow schedulati dopo 60 giorni senza attività nel repo**: per
+riattivarlo basta “Enable workflow” nella pagina della workflow, o un
+`workflow_dispatch` qualsiasi.
+
 ## API
 
 | Endpoint | Descrizione |
