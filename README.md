@@ -135,4 +135,4 @@ comunque dalla ricerca del sito.
 
 Node.js 24+, `pnpm install` poi `pnpm test` (build + test) e `pnpm run dev`.
 Struttura: `src/` (addon, provider, mapping, catalogo), `scripts/` (build,
-automazione, sync), `config/` (domini), `tests/`, `docs/` (ricognizione).
+automazione, sync), `config/` (domini), `tests/`.

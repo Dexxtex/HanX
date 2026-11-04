@@ -68,4 +68,11 @@ __pycache__
 Thumbs.db
 desktop.ini
 
+# --- Materiale di ricerca (locale, mai nel contesto di build) ---
 sweep-blocks/
+sweep-*/
+scripts/research
+docs/*research*
+*.vtt
+*.srt
+*.ass

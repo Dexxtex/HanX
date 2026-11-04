@@ -60,4 +60,19 @@ PENDING_COMMITS.md
 
 # --- OpenCode: gli artefatti delle sessioni restano locali, gli agenti si versionano ---
 .opencode/orchestra/
-sweep-blocks/
+.opencode/*.json
+
+# --- Materiale di ricerca: resta locale, non va su GitHub ---
+# Misure sui tre siti, sonde e dump: servono a chi indaga, non al progetto.
+/sweep-blocks/
+/sweep-*/
+/scripts/research/
+/docs/provider-catalog-research.md
+# Trascrizioni e trascrizioni di analisi (yt-dlp, script ad hoc)
+*.vtt
+*.srt
+*.ass
+
+# --- Istruzioni e appunti dell'agente: locali, non del repo ---
+AGENTS.md
+DECISIONS.md
