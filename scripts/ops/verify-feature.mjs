@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Verifica ripetibile di una feature HanX. Oggi supporta: status, mapping-stale.
- * Uso: node scripts/verify-feature.mjs status|mapping-stale [--out file.json]
+ * Uso: node scripts/ops/verify-feature.mjs status|mapping-stale [--out file.json]
  *      [--fingerprint hex] [--skip-build] [--network --stream-id tt...:S:E]
  *
  * Offline per default: avvia il server compilato su una porta libera, env
@@ -15,10 +15,10 @@ import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const feature = process.argv[2];
 if (feature !== 'status' && feature !== 'mapping-stale') {
-  console.error('feature non supportata. Uso: node scripts/verify-feature.mjs status|mapping-stale [opzioni]');
+  console.error('feature non supportata. Uso: node scripts/ops/verify-feature.mjs status|mapping-stale [opzioni]');
   process.exit(2);
 }
 

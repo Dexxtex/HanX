@@ -11,12 +11,12 @@
  *   pagine (30 schede). Totale massimo ~545, ~29 minuti; il tetto di World è
  *   solo una sicurezza, `truncated` scatta se il dichiarato lo supera.
  *
- * Uso: npm run sync-catalog [-- --site unity --max-pages 2 --dry-run]
+ * Uso: pnpm run sync-catalog [-- --site unity --max-pages 2 --dry-run]
  */
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { fetch as undiciFetch } from 'undici';
-import { proxyDispatcher, redactProxy } from '../src/catalog/proxy.js';
+import { proxyDispatcher, redactProxy } from '../../src/catalog/proxy.js';
 import {
   CATALOG_SITES,
   buildTitleIndex,
@@ -32,9 +32,9 @@ import {
   writeCatalogsAtomic,
   type CatalogEntry,
   type CatalogSite,
-} from '../src/catalog/sync.js';
+} from '../../src/catalog/sync.js';
 
-const DATA_DIR = path.resolve(fileURLToPath(new URL('../data', import.meta.url)));
+const DATA_DIR = path.resolve(fileURLToPath(new URL('../../data', import.meta.url)));
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36';
 const TIMEOUT_MS = Number(process.env.CATALOG_TIMEOUT_MS) || 15_000;
 const INTERVAL_MS = Math.max(3_000, Number(process.env.CATALOG_INTERVAL_MS) || 3_000);

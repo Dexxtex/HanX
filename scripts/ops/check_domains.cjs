@@ -3,9 +3,9 @@
  * Domain reachability & challenge checker — ANIME ONLY.
  * Reads config/domains.json and probes anime domains.
  * Usage:
- *   node scripts/check_domains.cjs            (pretty table)
- *   node scripts/check_domains.cjs --json     (raw JSON output)
- *   node scripts/check_domains.cjs --timeout=5000 --concurrency=4
+ *   node scripts/ops/check_domains.cjs            (pretty table)
+ *   node scripts/ops/check_domains.cjs --json     (raw JSON output)
+ *   node scripts/ops/check_domains.cjs --timeout=5000 --concurrency=4
  */
 const fs = require('fs');
 const path = require('path');
@@ -86,7 +86,7 @@ async function probe(key, host) {
 }
 
 (async () => {
-  const domainsPath = path.join(__dirname, '..', 'config', 'domains.json');
+  const domainsPath = path.join(__dirname, '..', '..', 'config', 'domains.json');
   let map;
   try {
     map = JSON.parse(fs.readFileSync(domainsPath, 'utf8'));

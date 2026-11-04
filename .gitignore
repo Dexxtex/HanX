@@ -16,6 +16,7 @@ server.log
 .env.*
 !.env.example
 /data/
+.replay/
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal

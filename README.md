@@ -348,14 +348,22 @@ src/
   addon.ts            entry point e manifest
   landingPage.ts      interfaccia web di configurazione
   config.ts           parsing di env e link
+  catalog/            sync dei tre siti, matcher offline, download da CATALOG_URL
   mapping/            risoluzione ID → titolo/stagione
   providers/          AnimeUnity, AnimeSaturn, AnimeWorld
   utils/              HTTP, cache, logger, normalizzazione titoli
   types/
-scripts/              converter del mapping e utility
+scripts/
+  build/              tsc → dist (build-copy) e conversione dell'indice mapping
+  automation/         script Python delle workflow (normalizzazioni, domini)
+  ops/                check domini, verifica feature, consulente Jev
+  sync/               sync del catalogo dei tre siti
+  research/           sonde usate per la ricognizione (non girano in CI)
 config/               domini e URL dei provider
+docs/                 ricognizione dei cataloghi e note di progetto
 public/               icona e sfondo
-tests/                test (node:test)
+tests/                test (node:test), stessa forma di src/
+data/                 runtime (catalogo scaricato, cache Tenrai), non versionato
 ```
 
 ## Appendici

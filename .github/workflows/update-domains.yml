@@ -22,11 +22,11 @@ jobs:
           python-version: '3.x'
 
       - name: Test updater
-        run: python3 scripts/test_update_domains.py
+        run: python3 scripts/automation/test_update_domains.py
 
       - name: Run updater
         id: runupd
-        run: python3 scripts/update_domains.py
+        run: python3 scripts/automation/update_domains.py
 
       - name: Detect changes
         run: |

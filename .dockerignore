@@ -31,8 +31,8 @@ graphify-out
 
 # --- Script: nel container servono solo build e converter del mapping ---
 scripts/*
-!scripts/build-copy.js
-!scripts/build-anime-mapping.mjs
+!scripts/build/build-copy.js
+!scripts/build/build-anime-mapping.mjs
 
 # --- Backup generati a runtime ---
 config/*.jsonbk

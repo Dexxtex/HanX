@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { alignEntries, alignTmdbEpisodes, pickKitsuResult, pickTmdbResult, rangesFrom, titleVariants, tmdbQuery, tvdbSeriesIdFromMappings, pickTvdbSeries, tvdbQueries, tvdbIdFromSearch, tmdbIdFromMdblistMap, kitsuIdFromSimklMap, singleSeasonRanges, validateIndex, applyOverrides } from '../../scripts/build-anime-mapping.mjs';
+import { alignEntries, alignTmdbEpisodes, pickKitsuResult, pickTmdbResult, rangesFrom, titleVariants, tmdbQuery, tvdbSeriesIdFromMappings, pickTvdbSeries, tvdbQueries, tvdbIdFromSearch, tmdbIdFromMdblistMap, kitsuIdFromSimklMap, singleSeasonRanges, validateIndex, applyOverrides } from '../../scripts/build/build-anime-mapping.mjs';
 
 const entry = (overrides = {}) => ({
   id: '100',

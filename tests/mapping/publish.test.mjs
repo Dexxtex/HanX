@@ -16,7 +16,7 @@ process.env.GITHUB_MAPPING_BRANCH = 'mapping';
 process.env.ANIME_MAPPING_FILE = indexFile;
 process.env.ANIME_MAPPING_STATE = stateFile;
 
-const { publishIndex } = await import('../../scripts/build-anime-mapping.mjs');
+const { publishIndex } = await import('../../scripts/build/build-anime-mapping.mjs');
 
 function json(body, status = 200) {
   return new Response(JSON.stringify(body), {

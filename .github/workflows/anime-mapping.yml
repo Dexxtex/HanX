@@ -77,7 +77,7 @@ jobs:
           fi
 
       - name: Converti e pubblica
-        run: node scripts/build-anime-mapping.mjs --limit=${{ inputs.limit || 100 }} --publish
+        run: node scripts/build/build-anime-mapping.mjs --limit=${{ inputs.limit || 100 }} --publish
 
       # La release conteneva solo gli asset: ora vivono sul branch.
       - name: Ritira la vecchia release mapping

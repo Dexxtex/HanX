@@ -5,7 +5,7 @@
  * TMDB (title + year) -> IMDb/TVDB ids -> TVDB episode order.
  *
  * Usage:
- *   node scripts/build-anime-mapping.mjs [--limit=N] [--type=tv|movie|ova|ona|special|tv_special] [--publish]
+ *   node scripts/build/build-anime-mapping.mjs [--limit=N] [--type=tv|movie|ova|ona|special|tv_special] [--publish]
  *                                        [--status] [--reset] [--retry=status,...] [--check]
  *                                        [--backfill-titles]
  *
@@ -33,18 +33,18 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const root = path.resolve(__dirname, '..');
+const root = path.resolve(__dirname, '..', '..');
 const isDirectRun = Boolean(process.argv[1]) && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 const dataFile = path.join(root, 'src', 'mapping', 'data', 'anime-seasons.json');
 const overridesFile = path.join(root, 'src', 'mapping', 'overrides.json');
 // Ponte MAL -> TMDB risolto una volta con MDBList: dato statico, così la build
 // non ha bisogno della chiave MDBList. Sta in scripts/ perché l'immagine Docker
 // copia scripts/ ma non src/: qui il backfill lo trova anche nel container.
-const mdblistTmdbFile = path.join(root, 'scripts', 'mdblist-tmdb.json');
+const mdblistTmdbFile = path.join(root, 'scripts', 'build', 'mdblist-tmdb.json');
 // Ponte MAL -> Kitsu per i titoli che il mapping ufficiale di Kitsu non ha ma
 // SimKL conosce (via AniDB). Anche questo è un dato statico: la build non
 // chiama SimKL e non ha bisogno della chiave.
-const simklKitsuFile = path.join(root, 'scripts', 'simkl-kitsu.json');
+const simklKitsuFile = path.join(root, 'scripts', 'build', 'simkl-kitsu.json');
 
 const KITSU = 'https://kitsu.io/api/edge';
 const TMDB = 'https://api.themoviedb.org/3';
@@ -239,7 +239,7 @@ if (isDirectRun && checkOnly) {
   if (seriesCount === 0 && movieCount === 0) {
     console.warn('! mapping index is EMPTY (' + outputFile + ').');
     console.warn('  Only live official resolution works; multi-season/split-cour needs a built index.');
-    console.warn('  Run: docker exec HanX node scripts/build-anime-mapping.mjs --limit=200');
+    console.warn('  Run: docker exec HanX node scripts/build/build-anime-mapping.mjs --limit=200');
     process.exit(0);
   }
   console.log('OK mapping index valid (' + seriesCount + ' series, ' + movieCount + ' movies)');

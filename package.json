@@ -10,16 +10,16 @@
   },
   "scripts": {
     "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
-    "build": "pnpm run clean && tsc && node scripts/build-copy.js",
+    "build": "pnpm run clean && tsc && node scripts/build/build-copy.js",
     "start": "node --env-file-if-exists=.env dist/addon.js",
     "dev": "node --env-file-if-exists=.env --import tsx src/addon.ts",
     "test": "pnpm run build && node --import ./tests/setup.mjs --test \"tests/**/*.test.mjs\"",
-    "mapping:build": "node scripts/build-anime-mapping.mjs",
-    "mapping:check": "node scripts/build-anime-mapping.mjs --check",
+    "mapping:build": "node scripts/build/build-anime-mapping.mjs",
+    "mapping:check": "node scripts/build/build-anime-mapping.mjs --check",
     "mapping:verify": "pnpm run mapping:check && node --test tests/mapping/index.test.mjs tests/mapping/generator.test.mjs",
-    "verify:status": "node scripts/verify-feature.mjs status",
-    "check:domains": "node scripts/check_domains.cjs",
-    "sync-catalog": "node --import tsx scripts/sync-catalog.ts"
+    "verify:status": "node scripts/ops/verify-feature.mjs status",
+    "check:domains": "node scripts/ops/check_domains.cjs",
+    "sync-catalog": "node --import tsx scripts/sync/sync-catalog.ts"
   },
   "dependencies": {
     "cheerio": "^1.1.2",
