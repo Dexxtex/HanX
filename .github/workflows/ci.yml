@@ -30,6 +30,11 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
+      # `tsconfig.json` ha rootDir src: gli script fuori da src/ non passerebbero
+      # dal type-check. Qui si controllano anche quelli, prima dei test.
+      - name: Type-check scripts
+        run: pnpm run typecheck:scripts
+
       # `pnpm test` compila in dist/ e poi esegue node --test: i test importano
       # i moduli compilati, quindi il build non e' opzionale.
       - name: Test

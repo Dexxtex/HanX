@@ -30,6 +30,67 @@ export interface MalIdCheck {
 }
 
 /**
+ * Una richiesta per blocco, con il dimezzamento sul 404.
+ *
+ * AniList risponde **404 per tutto il blocco** quando un solo id non esiste, e
+ * azzera anche i validi (`data.a0: null`): provato il 04/11/2026, `Media(id:21)`
+ * da sola risponde 200 `{idMal:21}`, `21 + 999999999` risponde 404 con entrambi
+ * i campi a null. Quindi sul 404 il blocco si divide in due finché resta un id:
+ * quello è il colpevole e si marca come risposto (esito definitivo), le metà che
+ * rispondono tengono le loro conferme. Costo: ~2·log₂(n) richieste, una volta
+ * sola per blocco, invece di buttare 25 schede (e i loro malId) a ogni run.
+ */
+async function queryPairs(
+  pairs: { malId: number; anilistId: number }[],
+  fetcher: typeof fetch,
+  out: MalIdCheck,
+  pause: () => Promise<void>
+): Promise<void> {
+  if (!pairs.length) return;
+  const query = `query{${pairs
+    .map((pair, index) => `a${index}:Media(id:${pair.anilistId},type:ANIME){idMal}`)
+    .join(' ')}}`;
+  await pause();
+  let response: Response;
+  try {
+    response = await fetcher(ENDPOINT, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept: 'application/json' },
+      body: JSON.stringify({ query }),
+      signal: AbortSignal.timeout(20_000),
+    });
+  } catch {
+    // Rete o timeout: nessun esito da questo blocco, non è un errore fatale.
+    return;
+  }
+  if (response.status === 404) {
+    if (pairs.length === 1) {
+      // Un id solo che risponde 404: AniList non lo conosce. Esito definitivo,
+      // altrimenti quella scheda resta in testa alla coda per sempre.
+      out.answered.add(pairs[0].anilistId);
+      return;
+    }
+    const middle = Math.ceil(pairs.length / 2);
+    await queryPairs(pairs.slice(0, middle), fetcher, out, pause);
+    await queryPairs(pairs.slice(middle), fetcher, out, pause);
+    return;
+  }
+  if (!response.ok) return; // 429/5xx: silenzio, non si moltiplicano le richieste
+  const json = (await response.json()) as {
+    data?: Record<string, { idMal?: number | null } | null>;
+  };
+  for (const [index, pair] of pairs.entries()) {
+    const alias = `a${index}`;
+    // AniList risponde per un id anche quando non lo conosce (`null`): è un no
+    // definitivo, non un silenzio da riprovare.
+    if (!json.data || !(alias in json.data)) continue;
+    out.answered.add(pair.anilistId);
+    const idMal = json.data[alias]?.idMal;
+    if (Number(idMal) === pair.malId) out.confirmed.set(pair.anilistId, pair.malId);
+  }
+}
+
+/**
  * Coppie (anilistId → malId) che AniList conferma, e gli id per cui ha risposto
  * davvero. Un 429, un 5xx o un errore di rete non confermano e non rispondono:
  * quelle schede restano senza `malId` e si riprovano alla run successiva, mentre
@@ -37,43 +98,26 @@ export interface MalIdCheck {
  */
 export async function confirmMalIds(
   pairs: CardIds[],
-  fetcher: typeof fetch = fetch
+  fetcher: typeof fetch = fetch,
+  /** Pausa fra le richieste: 0 nei test, il default rispetta il tetto di AniList. */
+  options: { delayMs?: number } = {}
 ): Promise<MalIdCheck> {
+  const delayMs = options.delayMs ?? BATCH_DELAY_MS;
   const confirmed = new Map<number, number>();
   const answered = new Set<number>();
   const usable = pairs.filter(
     (pair): pair is { malId: number; anilistId: number } =>
       Number(pair.malId) > 0 && Number(pair.anilistId) > 0
   );
+  // Una pausa prima di ogni richiesta, tranne la prima: vale anche per le
+  // richieste extra del dimezzamento, che altrimenti arriverebbero a raffica.
+  let first = true;
+  const pause = async () => {
+    if (!first) await sleep(delayMs);
+    first = false;
+  };
   for (let start = 0; start < usable.length; start += BATCH) {
-    const chunk = usable.slice(start, start + BATCH);
-    if (start > 0) await sleep(BATCH_DELAY_MS);
-    const query = `query{${chunk
-      .map((pair, index) => `a${index}:Media(id:${pair.anilistId},type:ANIME){idMal}`)
-      .join(' ')}}`;
-    try {
-      const response = await fetcher(ENDPOINT, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', accept: 'application/json' },
-        body: JSON.stringify({ query }),
-        signal: AbortSignal.timeout(20_000),
-      });
-      if (!response.ok) continue;
-      const json = (await response.json()) as {
-        data?: Record<string, { idMal?: number | null } | null>;
-      };
-      for (const [index, pair] of chunk.entries()) {
-        const alias = `a${index}`;
-        // AniList risponde per un id anche quando non lo conosce (`null`): è
-        // un no definitivo, non un silenzio da riprovare.
-        if (!json.data || !(alias in json.data)) continue;
-        answered.add(pair.anilistId);
-        const idMal = json.data[alias]?.idMal;
-        if (Number(idMal) === pair.malId) confirmed.set(pair.anilistId, pair.malId);
-      }
-    } catch {
-      // Rete o timeout: nessuna conferma da questo blocco, non è un errore fatale.
-    }
+    await queryPairs(usable.slice(start, start + BATCH), fetcher, { confirmed, answered }, pause);
   }
   return { confirmed, answered };
 }

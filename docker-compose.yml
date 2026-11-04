@@ -3,9 +3,15 @@ services:
     container_name: HanX
     # Immagine pubblicata dalla CI su Docker Hub (amd64 + arm64).
     image: lextutor/hanx:latest
-    # PORT nel .env decide anche la mappatura della porta.
+    # PORT nel .env decide anche la mappatura della porta. La stessa
+    # interpolazione va passata **al container** (sotto): compose legge il .env
+    # per `ports`, ma la shell che esporta PORT la scavalca. Senza questa riga,
+    # `PORT=9999 docker compose up` pubblicava 9999 mentre l'addon — che riceve
+    # PORT da `env_file` — ascoltava 8123.
     ports:
       - "${PORT:-7000}:${PORT:-7000}"
+    environment:
+      PORT: "${PORT:-7000}"
     volumes:
       - hanx-data:/app/data
     # Tutte le variabili stanno in .env (obbligatorie e opzionali, vedi

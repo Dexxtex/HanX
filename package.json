@@ -14,6 +14,7 @@
     "start": "node --env-file-if-exists=.env dist/addon.js",
     "dev": "node --env-file-if-exists=.env --import tsx src/addon.ts",
     "test": "pnpm run build && node --import ./tests/setup.mjs --test \"tests/**/*.test.mjs\"",
+    "typecheck:scripts": "tsc -p tsconfig.scripts.json",
     "mapping:build": "node scripts/build/build-anime-mapping.mjs",
     "mapping:check": "node scripts/build/build-anime-mapping.mjs --check",
     "mapping:verify": "pnpm run mapping:check && node --test tests/mapping/index.test.mjs tests/mapping/generator.test.mjs",

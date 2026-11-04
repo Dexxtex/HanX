@@ -1,0 +1,11 @@
+{
+  // Type-check degli script: `tsconfig.json` ha `rootDir: src` e `include: ["src"]`,
+  // quindi `scripts/` compilava solo a runtime (tsx non controlla i tipi).
+  // Qui niente emit e niente rootDir: serve solo a far fallire la CI.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "."
+  },
+  "include": ["src", "scripts/**/*.ts"]
+}

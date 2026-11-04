@@ -77,8 +77,58 @@ test('oltre 25 coppie si spezza in blocchi', async () => {
   const answers = Object.fromEntries(Array.from({ length: 30 }, (_, i) => [i + 1, i + 1]));
   const { fetcher, calls } = fakeAniList(answers);
   const pairs = Array.from({ length: 30 }, (_, i) => ({ malId: i + 1, anilistId: i + 1 }));
-  const { confirmed, answered } = await confirmMalIds(pairs, fetcher);
+  const { confirmed, answered } = await confirmMalIds(pairs, fetcher, { delayMs: 0 });
   assert.equal(calls.length, 2);
   assert.equal(confirmed.size, 30);
   assert.equal(answered.size, 30);
+});
+
+// Finto AniList che riproduce il comportamento vero sul 404: se il blocco
+// contiene un id inesistente risponde 404 e azzera **tutti** gli alias.
+function fakeAniListPicky(known, bogus) {
+  const calls = [];
+  const fetcher = async (url, init) => {
+    const query = JSON.parse(init.body).query;
+    const ids = [...query.matchAll(/Media\(id:(\d+),type:ANIME\)/g)].map((m) => Number(m[1]));
+    calls.push(ids);
+    if (ids.some((id) => bogus.has(id))) {
+      return {
+        ok: false,
+        status: 404,
+        json: async () => ({ errors: [{ message: 'Not Found.' }], data: Object.fromEntries(ids.map((_, i) => [`a${i}`, null])) }),
+      };
+    }
+    const data = {};
+    ids.forEach((id, i) => {
+      data[`a${i}`] = known[id] === undefined ? null : { idMal: known[id] };
+    });
+    return { ok: true, status: 200, json: async () => ({ data }) };
+  };
+  return { fetcher, calls };
+}
+
+test('un id inesistente non fa perdere le conferme degli altri (404 → dimezza)', async () => {
+  // 30 coppie con un anilistId inesistente **dentro** il primo blocco: la query
+  // da 25 risponde 404 e senza dimezzamento si perderebbero 24 malId buoni.
+  const bogus = 999_999_999;
+  const pairs = Array.from({ length: 30 }, (_, i) => ({ malId: i + 1, anilistId: i + 1 }));
+  pairs[12] = { malId: 9_999, anilistId: bogus };
+  const known = Object.fromEntries(Array.from({ length: 30 }, (_, i) => [i + 1, i + 1]));
+  const { fetcher, calls } = fakeAniListPicky(known, new Set([bogus]));
+  const { confirmed, answered } = await confirmMalIds(pairs, fetcher, { delayMs: 0 });
+  assert.equal(confirmed.size, 29, 'tutti i validi confermati, anche quelli del blocco avvelenato');
+  assert.equal(answered.size, 30, 'il colpevole è risposto (no definitivo), così esce dalla coda');
+  assert.equal(answered.has(bogus), true);
+  assert.equal(confirmed.has(bogus), false);
+  // Dimezzamento: ~2·log₂(25) richieste una volta sola, non 25.
+  assert.ok(calls.length > 2 && calls.length <= 14, `richieste: ${calls.length}`);
+});
+
+test('un 5xx non moltiplica le richieste (niente dimezzamento)', async () => {
+  const { fetcher, calls } = fakeAniList({}, { status: 503 });
+  const pairs = Array.from({ length: 25 }, (_, i) => ({ malId: i + 1, anilistId: i + 1 }));
+  const { confirmed, answered } = await confirmMalIds(pairs, fetcher, { delayMs: 0 });
+  assert.equal(calls.length, 1);
+  assert.equal(confirmed.size, 0);
+  assert.equal(answered.size, 0);
 });
