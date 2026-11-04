@@ -258,6 +258,9 @@ Unity è l'unico provider che espone `mal_id`: è la chiave per un match esatto
 quando il titolo non basta, e lo salviamo già per non dover ri-crawelare 8.807
 schede quando servirà. Saturn e World non hanno id né anno nel listing.
 
+Tutti i path provati sui tre siti, i metadati disponibili e i costi per ottenerli sono
+in [`docs/provider-catalog-research.md`](docs/provider-catalog-research.md).
+
 Perché i conteggi sono quelli e non altri (verificato il 4/11/2026):
 
 - **Saturn**: una sola parte `sitemap-anime-*` (le 2 e 3 esistono ma sono
