@@ -32,13 +32,10 @@ export interface MalIdCheck {
 /**
  * Una richiesta per blocco, con il dimezzamento sul 404.
  *
- * AniList risponde **404 per tutto il blocco** quando un solo id non esiste, e
- * azzera anche i validi (`data.a0: null`): provato il 04/11/2026, `Media(id:21)`
- * da sola risponde 200 `{idMal:21}`, `21 + 999999999` risponde 404 con entrambi
- * i campi a null. Quindi sul 404 il blocco si divide in due finché resta un id:
- * quello è il colpevole e si marca come risposto (esito definitivo), le metà che
- * rispondono tengono le loro conferme. Costo: ~2·log₂(n) richieste, una volta
- * sola per blocco, invece di buttare 25 schede (e i loro malId) a ogni run.
+ * AniList risponde 404 per **tutto il blocco** quando un solo id non esiste, e
+ * azzera anche i validi. Quindi sul 404 il blocco si divide in due finché resta
+ * un id: quello è il colpevole e si marca come risposto (esito definitivo), le
+ * metà che rispondono tengono le loro conferme.
  */
 async function queryPairs(
   pairs: { malId: number; anilistId: number }[],

@@ -100,7 +100,7 @@ export async function getEnglishTitleFromAnyId(
       if (tmdbTitle) return tmdbTitle;
     } catch { }
   }
-  // Opt-in documentato in .env.example (solo AnimeWorld): meglio un titolo
+  // Opt-in documentato in env.example (solo AnimeWorld): meglio un titolo
   // placeholder che zero stream.
   if (allowEmptyTitle) {
     console.warn('[UniversalTitle] Fallback placeholder title for id', id);

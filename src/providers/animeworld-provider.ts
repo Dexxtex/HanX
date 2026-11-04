@@ -310,8 +310,8 @@ function catalogWorldVersions(queries: string[], options: CatalogQueryOptions): 
 /**
  * Il catalogo tiene lo slug **senza** il token finale (`absolute-duo`), ma il
  * sito serve la scheda solo su `/play/<slug>.<token>`: lo slug nudo risponde
- * 200 con "Pagina non trovata" e zero episodi (misurato 04/11/2026). Quindi si
- * riparte dal link completo del catalogo, come fa già la ricerca.
+ * 200 con "Pagina non trovata" e zero episodi. Quindi si riparte dal link
+ * completo del catalogo, come fa già la ricerca.
  */
 export function worldPlayPath(url: string, slug: string): string {
   const path = String(url || '').split('/play/')[1];
