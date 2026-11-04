@@ -17,8 +17,12 @@ export interface CatalogEntry {
   /** Titoli alternativi (italiano/inglese/romaji) quando il sito li pubblica. */
   titles?: string[];
   year?: number | null;
-  /** Solo AnimeUnity: TV/Movie. Un film non è l'episodio di una serie. */
+  /** Solo AnimeUnity: TV/Movie/OVA/ONA/Special/TV Short. */
   type?: string;
+  /** Solo AnimeUnity: id MAL della scheda, per il join esatto quando il titolo non basta. */
+  malId?: number;
+  /** Solo AnimeUnity: stagione dichiarata dal sito. */
+  season?: string;
 }
 
 export interface CatalogFile {
@@ -124,6 +128,8 @@ interface UnityRecord {
   title_it?: string;
   date?: string;
   type?: string;
+  mal_id?: number | null;
+  season?: string | null;
 }
 
 /** POST /archivio/get-animes: { tot, records: [...] }, 30 schede per risposta. */
@@ -151,6 +157,8 @@ export function parseUnityRecords(payload: unknown): { total: number; entries: C
       ...(titles.length ? { titles } : {}),
       ...(year ? { year } : {}),
       ...(record.type ? { type: record.type } : {}),
+      ...(Number(record.mal_id) > 0 ? { malId: Number(record.mal_id) } : {}),
+      ...(record.season ? { season: String(record.season) } : {}),
     });
   }
   return { total: Number(data.tot) || 0, entries };

@@ -61,6 +61,7 @@ const UNITY_PAYLOAD = {
       title_it: 'Mou Ippon! Sub ITA',
       date: '2023',
       season: 'inverno',
+      mal_id: 52034,
     },
     // Titolo principale vuoto (bug del sito su .hack): si usa l'italiano.
     { id: 830, slug: 'hackgu-returner', title: null, title_it: 'hack//G.U. Returner', title_eng: null, date: '2006' },
@@ -127,6 +128,8 @@ test('unity: titolo, titoli alternativi deduplicati, anno e url della scheda', (
     titleSite: 'Mou Ippon!',
     titles: ['Mou Ippon! Sub ITA'],
     year: 2023,
+    malId: 52034,
+    season: 'inverno',
   });
   assert.deepEqual(entries[1], {
     site: 'unity',

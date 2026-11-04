@@ -240,6 +240,24 @@ provider usano solo la ricerca di rete, come prima.
 | AnimeWorld | `/filter?page=N` | tutte le pagine dichiarate dal sito (172 oggi, ~6.880 schede), titoli reali |
 | AnimeUnity | `POST /archivio/get-animes` (due passate: normale e `dubbed=1`) | completa (8.807 = 7.266 normali + 1.541 doppiate), titoli reali it/eng/romaji |
 
+**Metadati per provider.** Cosa salviamo, cosa il sito espone, cosa costerebbe
+recuperare il resto:
+
+| campo | Saturn | World | Unity |
+|---|---|---|---|
+| titolo mostrato | dallo slug | dalla card (`a.name`) | `title`, fallback it/eng |
+| titoli alternativi | — | — | `title_it`/`title_eng` (5.278 su 7.266) |
+| lingua | dal titolo: ITA 1.256 / CR 2 / SUB 4.921 | ITA 1.273 / CR 2 / SUB 5.589 | dal titolo |
+| anno | — (solo nelle card di `/az-list`: ~325 richieste) | — (`/api/tooltip` è vietato da robots.txt) | `date`, su tutte |
+| tipo | — | — | `type`: TV 3.864, Movie 1.121, OVA 798, ONA 795, Special 384, TV Short 304 (somma esatta: 7.266) |
+| `mal_id` | — | — | presente, salvato come `malId` |
+| stagione | — | — | `season` (`dubbed=1` ha il suo catalogo, 1.541) |
+| episodi | — (solo `/az-list`) | — | `episodes_count` |
+
+Unity è l'unico provider che espone `mal_id`: è la chiave per un match esatto
+quando il titolo non basta, e lo salviamo già per non dover ri-crawelare 8.807
+schede quando servirà. Saturn e World non hanno id né anno nel listing.
+
 Una richiesta alla volta con 3 s di intervallo, timeout 15 s, 2 retry solo su
 5xx e rete, ~500 richieste in ~25 minuti (job a 45 minuti). Se i runner GitHub
 escono da IP di datacenter e AnimeUnity risponde 403, si può impostare il secret
