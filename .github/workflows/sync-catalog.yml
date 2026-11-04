@@ -7,11 +7,9 @@ name: Catalog Sync
 # `data` con un solo commit (force-push, niente storia), così i 4-7 MB di JSON
 # non gonfiano il repository. L'addon lo scarica da CATALOG_URL.
 #
-# Due cron perché GitHub li vuole in UTC e l'ora legale sposta l'offset:
-#   18:00 UTC = 20:00 CEST (estate)   19:00 UTC = 20:00 CET (inverno)
-# Lo step "guard" lascia passare solo la run che a Roma segna le 20: l'altra
-# esce verde senza fare nulla. GitHub può ritardare i job schedulati di qualche
-# minuto (nei picchi fino a ~1 h): il controllo è sull'ora intera, quindi un
+# Due cron perché GitHub li vuole in UTC e l'ora legale sposta l'offset
+# (18:37 UTC = 20:37 CEST, 19:37 UTC = 20:37 CET). Lo step "guard" lascia passare
+# solo la run che a Roma segna le 20: l'altra esce verde senza fare nulla, e un
 # ritardo sotto l'ora non salta la run.
 #
 # GitHub disattiva i workflow schedulati dopo 60 giorni senza attività nel
@@ -21,8 +19,13 @@ name: Catalog Sync
 
 on:
   schedule:
-    - cron: '0 18 * * *' # 20:00 CEST
-    - cron: '0 19 * * *' # 20:00 CET
+    # Due finestre per stagione, mai al minuto 0: il cron di GitHub in picco
+    # ritarda o scarta le run in silenzio, e la seconda finestra è la copia di
+    # riserva. Il guard "già sincronizzato oggi" impedisce il doppio crawl.
+    - cron: '07 19 * * *' # 20:07 CET
+    - cron: '37 19 * * *' # 20:37 CET
+    - cron: '07 18 * * *' # 20:07 CEST
+    - cron: '37 18 * * *' # 20:37 CEST
   workflow_dispatch: {}
 
 # Il job scrive il branch `data`: serve solo contents: write.
@@ -93,6 +96,26 @@ jobs:
             echo "Branch data assente: primo sync, il catalogo parte vuoto."
           fi
 
+      # Due finestre per stagione: se la prima ha già pubblicato stasera, questa è
+      # la copia di riserva e non deve rifare ~700 richieste ai siti.
+      - name: Guard già sincronizzato oggi
+        id: fresh
+        if: steps.guard.outputs.should_run == 'true'
+        run: |
+          set -euo pipefail
+          generated=$(node -e "try{console.log(require('./data/catalogs.json').generatedAt||'')}catch{console.log('')}")
+          today=$(TZ=Europe/Rome date +%F)
+          if [ -n "$generated" ]; then
+            day=$(TZ=Europe/Rome date -d "$generated" +%F 2>/dev/null || true)
+            hour=$(TZ=Europe/Rome date -d "$generated" +%H 2>/dev/null || true)
+            if [ -n "$day" ] && [ -n "$hour" ] && [ "$day" = "$today" ] && [ "$((10#$hour))" -ge 20 ]; then
+              echo "Catalogo già pubblicato oggi alle $hour ($generated): nessun crawl."
+              echo "should_run=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+          echo "should_run=true" >> "$GITHUB_OUTPUT"
+
       # Se un sito risponde 403/429 o scende sotto il 70% delle schede, il suo
       # catalogo resta quello di ieri; gli altri si aggiornano lo stesso e lo
       # script esce 1, così il job è rosso (GitHub manda la notifica).
@@ -101,7 +124,7 @@ jobs:
       # serve una sessione sticky (stesso IP per tutta la run) e non è un fix
       # del blocco. Vuoto = nessun proxy.
       - name: Sync catalogo
-        if: steps.guard.outputs.should_run == 'true'
+        if: steps.guard.outputs.should_run == 'true' && steps.fresh.outputs.should_run == 'true'
         env:
           CATALOG_PROXY: ${{ secrets.CATALOG_PROXY }}
           # Backfill malId: 300 schede per run, stop a 52' (il job ha 60').
@@ -111,7 +134,7 @@ jobs:
 
       # `always()`: anche con il sync rosso i siti riusciti vanno pubblicati.
       - name: Pubblica sul branch data
-        if: always() && steps.guard.outputs.should_run == 'true'
+        if: always() && steps.guard.outputs.should_run == 'true' && steps.fresh.outputs.should_run == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO_URL: https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
