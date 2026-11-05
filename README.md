@@ -4,20 +4,20 @@
 
 <h2 align="center">Addon Stremio per anime</h2>
 
+<p align="center">Stream da <b>AnimeUnity</b>, <b>AnimeSaturn</b> e <b>AnimeWorld</b> in un'unica interfaccia.</p>
+
 <p align="center">
-  Stream da AnimeUnity, AnimeSaturn e AnimeWorld in un'unica interfaccia.
+  <a href="https://nodejs.org/"><img src="https://img.shields.io/badge/node-%3E%3D26-green" alt="Node 26+"></a>
+  <a href="https://hub.docker.com/r/lextutor/hanx"><img src="https://img.shields.io/badge/docker-ready-blue" alt="Docker"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT"></a>
 </p>
 
-| AnimeUnity | AnimeSaturn | AnimeWorld |
-|:---:|:---:|:---:|
-| <img src="public/provider-animeunity.jpg" alt="AnimeUnity" width="250"> | <img src="public/provider-animesaturn.jpg" alt="AnimeSaturn" width="250"> | <img src="public/provider-animeworld.jpg" alt="AnimeWorld" width="250"> |
+> [!IMPORTANT]
+> **Progetto vibecoded.** Derivato di [StreamViX](https://github.com/qwertyuiop8899/StreamViX) e
+> scritto con agenti AI: nessuna garanzia di stabilità o supporto, va usato a proprio
+> rischio. Non è affiliato a StreamViX, a Stremio né ai siti di streaming.
 
-![Node](https://img.shields.io/badge/node-%3E%3D26-green)
-![Docker](https://img.shields.io/badge/docker-ready-blue)
-
-> **Progetto vibecoded.** Derivato di [StreamViX](https://github.com/qwertyuiop8899/StreamViX)
-> e scritto con agenti AI: nessuna garanzia di stabilità o supporto. Va usato a
-> proprio rischio. Non è affiliato a StreamViX né ai siti di streaming.
+---
 
 ## Cosa fa
 
@@ -30,48 +30,64 @@
   ricerche, risposte più rapide.
 - Rispetta i limiti dei siti (pacing, cache, stop su `403`/`429`).
 
+| AnimeUnity | AnimeSaturn | AnimeWorld |
+|:---:|:---:|:---:|
+| <img src="public/provider-animeunity.jpg" alt="AnimeUnity" width="250"> | <img src="public/provider-animesaturn.jpg" alt="AnimeSaturn" width="250"> | <img src="public/provider-animeworld.jpg" alt="AnimeWorld" width="250"> |
+
 ## Avvio rapido
 
-Serve Docker con Compose v2. Salva come `compose.yaml`:
+Serve Docker con Compose v2.
 
-```yaml
-services:
-  hanx:
-    image: lextutor/hanx:latest
-    container_name: HanX
-    ports:
-      - "${PORT:-7000}:${PORT:-7000}"
-    volumes:
-      - hanx-data:/app/data
-    env_file:
-      - .env
-    restart: unless-stopped
+1. **Salva questo file come `compose.yaml`:**
 
-volumes:
-  hanx-data:
-```
+   ```yaml
+   services:
+     hanx:
+       image: lextutor/hanx:latest
+       container_name: HanX
+       ports:
+         - "${PORT:-7000}:${PORT:-7000}"
+       volumes:
+         - hanx-data:/app/data
+       env_file:
+         - .env
+       restart: unless-stopped
 
-Poi crea il `.env` e avvia:
+   volumes:
+     hanx-data:
+   ```
 
-```bash
-cp env.example .env      # compila almeno le 3 variabili obbligatorie
-docker compose up -d
-```
+2. **Crea il `.env` e compila le variabili indicate:**
 
-Apri <http://localhost:7000>, scegli le sorgenti e installa l'addon in Stremio.
+   ```bash
+   cp env.example .env
+   ```
+
+   `ANIME_MAPPING_URL` è indispensabile; senza `CATALOG_URL` e `TMDB_API_KEY`
+   l'addon funziona ma degrada.
+
+3. **Avvia:**
+
+   ```bash
+   docker compose up -d
+   ```
+
+4. **Configura:** apri <http://localhost:7000>, scegli le sorgenti e installa
+   l'addon in Stremio.
+
+> [!NOTE]
+> Il volume `hanx-data` contiene indice, catalogo e cache. Senza, il container
+> riscarica tutto a ogni riavvio.
+
 Per aggiornare: `docker compose pull && docker compose up -d`.
 
-> Il volume `hanx-data` serve: contiene indice, catalogo e cache. Senza, il
-> container riscarica tutto a ogni riavvio.
-
-Immagine su Docker Hub (`lextutor/hanx:latest`) e GitHub Packages
-(`ghcr.io/dexxtex/hanx:latest`). Per compilare dal sorgente:
+Immagini: [Docker Hub](https://hub.docker.com/r/lextutor/hanx) (`lextutor/hanx:latest`)
+e GitHub Packages (`ghcr.io/dexxtex/hanx:latest`). Per compilare dal sorgente:
 `docker build -t lextutor/hanx:latest .`
 
 ## Configurazione
 
-L'elenco completo, con descrizione e default, è in
-[`env.example`](env.example). Solo `ANIME_MAPPING_URL` è indispensabile: le altre due degradano.
+L'elenco completo, con descrizione e default, è in [`env.example`](env.example).
 
 | Variabile | A cosa serve |
 | --- | --- |
@@ -83,8 +99,9 @@ Le altre che si toccano più spesso: `PORT`, `TVDB_API_KEY`/`TVDB_PIN`,
 `EASYPROXY_URL`/`EASYPROXY_PASSWORD`, `PROXY`/`AU_PROXY`/`AS_PROXY`/`AW_PROXY`,
 `*_ENABLED` per accendere o spegnere un provider, `DEBUG_LEVEL` (`0`–`4`).
 
-Le chiavi restano nel `.env`: non committarlo. Se esponi la pagina su Internet,
-proteggila con autenticazione davanti.
+> [!WARNING]
+> Le chiavi restano nel `.env`: non committarlo. Se esponi la pagina su Internet,
+> proteggila con autenticazione davanti.
 
 ### Dietro un reverse proxy
 
@@ -133,7 +150,14 @@ comunque dalla ricerca del sito.
 
 ## Sviluppo
 
-Node.js 26+, `pnpm install` poi `pnpm test` (build + test) e `pnpm run dev`.
+Node.js 26+.
+
+```bash
+pnpm install            # dipendenze
+pnpm test               # build + test
+pnpm run dev            # sviluppo con tsx
+```
+
 Struttura: `src/` (addon, provider, mapping, catalogo), `scripts/` (build,
 automazione, sync), `config/` (domini), `tests/`.
 
