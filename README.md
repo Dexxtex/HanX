@@ -108,34 +108,6 @@ hanx.example.com {
   ([realbestia1/EasyProxy](https://github.com/realbestia1/EasyProxy)): avvialo e
   metti URL e password nel `.env`.
 
-### EasyProxy e brotli
-
-EasyProxy chiede `br` fra le codifiche (`extractors/generic.py`,
-`"gzip, deflate, br"`), ma l'immagine non ha un decoder Brotli: `aiohttp` si ferma
-con `Can not decode content-encoding: br`.
-
-Non serve un fork né un pacchetto in più: si toglie `br` in build, sopra l'immagine
-ufficiale. Il `grep` fa fallire la build se un giorno la riga cambia o sparisce,
-invece di lasciare l'errore in silenzio.
-
-```dockerfile
-# easyproxy-no-br/Dockerfile
-FROM ghcr.io/realbestia1/easyproxy:latest
-RUN sed -i 's/"gzip, deflate, br"/"gzip, deflate"/' /app/extractors/generic.py \
- && grep -q 'accept-encoding"\] = "gzip, deflate"' /app/extractors/generic.py
-```
-
-```yaml
-# nel compose di EasyProxy
-services:
-  easyproxy:
-    build: ./easyproxy-no-br
-    image: easyproxy:no-br
-```
-
-Se costruisci già dai sorgenti (`build: .`), la stessa modifica è la sola riga in
-`extractors/generic.py`.
-
 I proxy `PROXY`/`AU_PROXY`/`AS_PROXY`/`AW_PROXY` sono un'altra cosa: servono allo
 scraping, non alla riproduzione.
 
