@@ -136,3 +136,20 @@ comunque dalla ricerca del sito.
 Node.js 26+, `pnpm install` poi `pnpm test` (build + test) e `pnpm run dev`.
 Struttura: `src/` (addon, provider, mapping, catalogo), `scripts/` (build,
 automazione, sync), `config/` (domini), `tests/`.
+
+## Licenza e avvertenze
+
+Codice sotto licenza [MIT](LICENSE): usalo, modificalo e ridistribuiscilo, senza
+garanzie di alcun tipo.
+
+HanX non ospita, non memorizza e non trasmette contenuti: interroga i siti
+configurati e restituisce i link che quei siti espongono. Non è affiliato ai siti,
+ai titolari dei diritti, a Stremio o a StreamViX.
+
+Chi installa l'addon verifica da sé di poter accedere ai contenuti nella propria
+giurisdizione e di rispettare i termini d'uso delle fonti. Il progetto non aggira
+misure tecniche di protezione e non fornisce nulla a questo scopo. Un'informativa
+non esclude la responsabilità prevista dalla legge.
+
+Chi è titolare di diritti può chiedere la rimozione di un riferimento scrivendo
+alla pagina delle issue: qui non è ospitato nessun file.
