@@ -12,7 +12,7 @@
 |:---:|:---:|:---:|
 | <img src="public/provider-animeunity.jpg" alt="AnimeUnity" width="250"> | <img src="public/provider-animesaturn.jpg" alt="AnimeSaturn" width="250"> | <img src="public/provider-animeworld.jpg" alt="AnimeWorld" width="250"> |
 
-![Node](https://img.shields.io/badge/node-%3E%3D24-green)
+![Node](https://img.shields.io/badge/node-%3E%3D26-green)
 ![Docker](https://img.shields.io/badge/docker-ready-blue)
 
 > **Progetto vibecoded.** Derivato di [StreamViX](https://github.com/qwertyuiop8899/StreamViX)
@@ -128,8 +128,8 @@ comunque dalla ricerca del sito.
 - Il mapping non copre tutto il catalogo MAL: per gli altri la ricerca per
   titolo può non bastare.
 - I siti sono dietro Cloudflare: insistere dopo un `403` peggiora le cose.
-- Il catalogo è di ieri sera: un titolo appena aggiunto si trova solo con la
-  ricerca di rete.
+- Il catalogo si aggiorna una volta al giorno: un titolo aggiunto dopo l'ultimo
+  aggiornamento non è ancora indicizzato e passa dalla ricerca di rete.
 
 ## Sviluppo
 
