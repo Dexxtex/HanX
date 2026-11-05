@@ -147,3 +147,29 @@ test('backlog vuoto: niente da leggere non è un guasto', async () => {
   assert.equal(result.pending, 0);
   assert.equal(enrichmentStalled(result), false);
 });
+
+test('arricchimento: i siti senza backfill compaiono nei log', async () => {
+  // Unity porta il malId dall'API: non si legge, ma nei log deve esserci, altrimenti
+  // la run sembra avere solo due siti.
+  const catalog = catalogWith([{ anilistId: 7 }]);
+  catalog.sites.unity = [
+    { site: 'unity', slug: 'u-1', url: 'https://unity.test/u-1', titleSite: 'Uno', malId: 11 },
+    { site: 'unity', slug: 'u-2', url: 'https://unity.test/u-2', titleSite: 'Due' },
+  ];
+  const lines = [];
+  await enrichMalIds(catalog, {
+    readPage: async () => PAGE,
+    isBlocked: () => false,
+    quota: 10,
+    deadline: Date.now() + 60_000,
+    describe: () => '',
+    today: TODAY,
+    fetcher: fakeAniList(),
+    delayMs: 0,
+    log: (line) => lines.push(line),
+  });
+  const unity = lines.find((line) => line.includes('unity'));
+  assert.ok(unity, 'manca la riga di unity');
+  assert.match(unity, /nessun backfill/);
+  assert.match(unity, /1\/2 con malId/);
+});

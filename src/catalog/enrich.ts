@@ -10,6 +10,7 @@
 import { confirmMalIds } from './anilist.js';
 import {
   applyCardDetails,
+  CATALOG_SITES,
   isEnrichmentFinal,
   parseCardDetails,
   pendingEnrichment,
@@ -118,6 +119,14 @@ export async function enrichMalIds(catalog: CatalogFile, options: EnrichOptions)
         `(${withMalId}/${entries.length} con malId)`
     );
     if (now() > options.deadline) break;
+  }
+  // Unity non è nella lista perché il suo `malId` arriva già dall'API: senza
+  // questa riga nei log sembrerebbe un sito che non è stato letto.
+  for (const site of CATALOG_SITES) {
+    if ((ENRICH_SITES as readonly string[]).includes(site)) continue;
+    const entries = catalog.sites[site];
+    const withMalId = entries.filter((entry) => entry.malId).length;
+    log(`[catalog] schede ${site}: nessun backfill (malId dall'API del sito), ${withMalId}/${entries.length} con malId`);
   }
   return { read, pending };
 }
