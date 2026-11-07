@@ -67,6 +67,10 @@ jobs:
           if git fetch -q --depth=1 origin data 2>/dev/null; then
             git show FETCH_HEAD:catalogs.json > data/catalogs.json
             git show FETCH_HEAD:catalog-titles.json > data/catalog-titles.json
+            # Il marcatore del sync si ripristina e si ripubblica: il branch
+            # viene rimpiazzato per intero e senza lui la finestra di riserva
+            # rifarebbe il crawl.
+            git show FETCH_HEAD:last-sync.txt > data/last-sync.txt 2>/dev/null || true
             echo "Ripristinate $(node -e "const d=require('./data/catalogs.json');console.log(Object.values(d.sites).reduce((n,l)=>n+l.length,0))") schede dal branch data."
           else
             echo "Branch data assente: salto l'arricchimento, la run resta verde." >&2
@@ -99,9 +103,15 @@ jobs:
           fi
           work=$(mktemp -d)
           cp data/catalogs.json data/catalog-titles.json "$work"/
+          if [ -f data/last-sync.txt ]; then
+            cp data/last-sync.txt "$work"/
+          fi
           cd "$work"
           git init -q -b data
           git add catalogs.json catalog-titles.json
+          if [ -f last-sync.txt ]; then
+            git add last-sync.txt
+          fi
           git -c user.name='github-actions[bot]' \
               -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
               commit -qm "chore(catalog): arricchimento $(TZ=Europe/Rome date +%F' '%H:%M)"

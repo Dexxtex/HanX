@@ -8,9 +8,10 @@ name: Catalog Sync
 # non gonfiano il repository. L'addon lo scarica da CATALOG_URL.
 #
 # Due cron perché GitHub li vuole in UTC e l'ora legale sposta l'offset
-# (18:37 UTC = 20:37 CEST, 19:37 UTC = 20:37 CET). Lo step "guard" lascia passare
-# solo la run che a Roma segna le 20: l'altra esce verde senza fare nulla, e un
-# ritardo sotto l'ora non salta la run.
+# (18:37 UTC = 20:37 CEST, 19:37 UTC = 20:37 CET). Il rilevo del crawl è affidato
+# al guard "già sincronizzato oggi", non all'ora di Roma: GitHub ritarda le
+# partenze schedulate anche di ore, e a metà notte il controllo dell'ora scartava
+# in silenzio tutte le run.
 #
 # GitHub disattiva i workflow schedulati dopo 60 giorni senza attività nel
 # repository. Per riattivarlo: Actions -> "Catalog Sync" -> "Enable workflow",
@@ -47,18 +48,12 @@ jobs:
     # fino a 300 (15 min). 60 lascia spazio a retry e code.
     timeout-minutes: 60
     steps:
-      # Il workflow gira due volte al giorno per coprire l'ora legale: qui si
-      # scarta la run che a Roma non è delle 20:00.
+      # GitHub può partire la run ore dopo il cron, anche a metà notte: il
+      # lavoro vero lo decide il guard "già sincronizzato oggi", qui non si
+      # scarta nessuno.
       - name: Guard ora di Roma
         id: guard
-        run: |
-          hour=$(TZ=Europe/Rome date +%H)
-          if [ "${{ github.event_name }}" = "schedule" ] && [ "$hour" != "20" ]; then
-            echo "Sono le $hour a Roma: è il cron dell'altra stagione, esco."
-            echo "should_run=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "should_run=true" >> "$GITHUB_OUTPUT"
-          fi
+        run: echo "should_run=true" >> "$GITHUB_OUTPUT"
 
       - name: Checkout
         if: steps.guard.outputs.should_run == 'true'
@@ -91,30 +86,29 @@ jobs:
           if git fetch -q --depth=1 origin data 2>/dev/null; then
             git show FETCH_HEAD:catalogs.json > data/catalogs.json
             git show FETCH_HEAD:catalog-titles.json > data/catalog-titles.json
+            git show FETCH_HEAD:last-sync.txt > data/last-sync.txt 2>/dev/null || true
             echo "Ripristinate $(node -e "const d=require('./data/catalogs.json');console.log(Object.values(d.sites).reduce((n,l)=>n+l.length,0))") schede dal branch data."
           else
             echo "Branch data assente: primo sync, il catalogo parte vuoto."
           fi
 
       # Due finestre per stagione: se la prima ha già pubblicato stasera, questa è
-      # la copia di riserva e non deve rifare ~700 richieste ai siti.
+      # la copia di riserva e non deve rifare ~700 richieste ai siti. Il criterio
+      # è il marcatore scritto solo dal sync (l'arricchimento non lo tocca): un
+      # crawl già partito ore dopo l'ora di Roma è comunque di oggi.
       - name: Guard già sincronizzato oggi
         id: fresh
         if: steps.guard.outputs.should_run == 'true'
         run: |
           set -euo pipefail
-          generated=$(node -e "try{console.log(require('./data/catalogs.json').generatedAt||'')}catch{console.log('')}")
           today=$(TZ=Europe/Rome date +%F)
-          if [ -n "$generated" ]; then
-            day=$(TZ=Europe/Rome date -d "$generated" +%F 2>/dev/null || true)
-            hour=$(TZ=Europe/Rome date -d "$generated" +%H 2>/dev/null || true)
-            if [ -n "$day" ] && [ -n "$hour" ] && [ "$day" = "$today" ] && [ "$((10#$hour))" -ge 20 ]; then
-              echo "Catalogo già pubblicato oggi alle $hour ($generated): nessun crawl."
-              echo "should_run=false" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
+          last=$(tr -d '[:space:]' < data/last-sync.txt 2>/dev/null || true)
+          if [ "$last" = "$today" ]; then
+            echo "Catalogo già sincronizzato oggi ($last): nessun crawl."
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
           fi
-          echo "should_run=true" >> "$GITHUB_OUTPUT"
 
       # Se un sito risponde 403/429 o scende sotto il 70% delle schede, il suo
       # catalogo resta quello di ieri; gli altri si aggiornano lo stesso e lo
@@ -146,9 +140,12 @@ jobs:
           fi
           work=$(mktemp -d)
           cp data/catalogs.json data/catalog-titles.json "$work"/
+          # Marcatore "già sincronizzato oggi": è l'unica prova che oggi è già
+          # girato un crawl, l'arricchimento non lo scrive e lo conserva se c'è.
+          TZ=Europe/Rome date +%F > "$work/last-sync.txt"
           cd "$work"
           git init -q -b data
-          git add catalogs.json catalog-titles.json
+          git add catalogs.json catalog-titles.json last-sync.txt
           git -c user.name='github-actions[bot]' \
               -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
               commit -qm "chore(catalog): sync $(TZ=Europe/Rome date +%F)"
@@ -164,6 +161,12 @@ jobs:
                 changed=true
               fi
             done
+            # Il marcatore deve aggiornarsi anche quando il catalogo è identico,
+            # altrimenti la finestra di riserva rifarebbe il crawl.
+            last=$(git show FETCH_HEAD:last-sync.txt 2>/dev/null || date +%F)
+            if [ "$(tr -d '[:space:]' <<< "$last")" != "$(cat last-sync.txt)" ]; then
+              changed=true
+            fi
           fi
           if [ "$changed" = false ]; then
             echo "Solo generatedAt: il catalogo è identico a quello pubblicato."
