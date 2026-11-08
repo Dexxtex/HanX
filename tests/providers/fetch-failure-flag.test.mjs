@@ -149,7 +149,9 @@ test('lista vuota: guardia sul cache-set e fallimento fuori da fetchResource', (
 
   const emptyGuardAt = source.search(/if\s*\(\s*!Array\.isArray\(\s*streams\s*\)\s*\|\|\s*streams\.length\s*===\s*0\s*\)\s*return\s*;/);
   const storeAt = source.search(/_providerStreamCache\.set\(\s*k\s*,/);
-  const callAt = source.search(/_providerCacheSet\(\s*normalizedType\s*,/);
+  // L'ultima chiamata è quella del fan-out: la prima può essere il riempimento
+  // in background quando il budget di risposta ha già consegnato la lista.
+  const callAt = source.lastIndexOf('_providerCacheSet(normalizedType');
 
   assert.notEqual(emptyGuardAt, -1, 'una lista vuota non deve essere cachata');
   assert.notEqual(storeAt, -1, 'la scrittura in cache deve esistere');
@@ -193,7 +195,9 @@ test('AC5: addon.ts esegue l\'handler nello store e legge failed prima del cache
   const storeAt = source.indexOf('const store = { failed: false }');
   const runs = [...source.matchAll(/providerRequestStore\.run\(/g)].map((match) => match.index);
   const markAt = source.search(/if\s*\(\s*store\.failed\s*\)\s*providerFailure\s*=\s*true/);
-  const cacheSetAt = source.search(/if\s*\(\s*!providerFailure\s*&&\s*_providerConfigSig/);
+  // Il cache-set può avere altre guardie (es. !responseTruncated): conta che
+  // resti condizionato a !providerFailure e che venga dopo la marcatura.
+  const cacheSetAt = source.search(/if\s*\(\s*!providerFailure\s*&&[^)]*_providerConfigSig/);
 
   assert.notEqual(storeAt, -1, 'lo store deve essere creato in runProvider');
   assert.equal(runs.length, 2, 'handler dentro lo store in entrambi i rami (con e senza timeout)');

@@ -54,7 +54,7 @@ function sortStreamsByPriority(streams: { url?: string; title?: string }[]): voi
 // ================= MANIFEST BASE (restored) =================
 const baseManifest: Manifest = {
     id: "org.stremio.hanx",
-    version: "1.1.5",
+    version: "1.1.6",
     name: "HanX",
     description: "HanX addon dedicato ad AnimeUnity, AnimeSaturn e AnimeWorld",
     types: ["movie", "series", "anime"],
@@ -148,6 +148,16 @@ const PROVIDER_CACHE_TTL_MS = (() => {
         const n = parseInt(process.env.PROVIDER_CACHE_TTL_MS || '300000', 10);
         return Number.isFinite(n) && n > 0 ? n : 300000;
     } catch { return 300000; }
+})();
+// Budget della risposta: oltre questo tempo la lista esce con quello che c'è.
+// Il provider ancora in volo continua (le sue fetch restano in cache), ma non
+// tiene in ostaggio il client: senza budget la risposta è max(provider), e
+// AnimeUnity da sola arriva a 13 s.
+const STREAM_RESPONSE_BUDGET_MS = (() => {
+    try {
+        const n = parseInt(process.env.STREAM_RESPONSE_BUDGET_MS || '4000', 10);
+        return Number.isFinite(n) && n > 0 ? n : 4000;
+    } catch { return 4000; }
 })();
 const PROVIDER_CACHE_MAX_ENTRIES = (() => {
     try {
@@ -299,6 +309,9 @@ function createBuilder() {
                 const allStreams: Stream[] = [];
                 let _providerConfigSig = ''; // Dichiarato qui per essere in scope nel cache-set finale
                 let providerFailure = false;
+                // Lista tagliata dal budget: non va in cache, altrimenti per 5
+                // minuti il provider lento resterebbe invisibile.
+                let responseTruncated = false;
 
                 // === LOGICA ANIME/FILM (originale) ===
                 // Per tutto il resto, usa solo easyProxyUrl/easyProxyPassword
@@ -486,8 +499,44 @@ function createBuilder() {
                         return { streams: [] };
                     }, providerLabel('animeworld'), 30000);  // AnimeWorld: timeout 30s
 
-                    const allProviderResults = await Promise.all(providerPromises);
-                    for (const group of allProviderResults) {
+                    // Ogni provider scrive il proprio risultato appena finisce, così
+                    // allo scadere del budget si prende quello che è arrivato.
+                    const collected: (Stream[] | undefined)[] = new Array(providerPromises.length);
+                    const settled = providerPromises.map((promise, index) =>
+                        promise.then((streams) => { collected[index] = streams; })
+                    );
+                    let budgetTimer: ReturnType<typeof setTimeout> | undefined;
+                    const budgetReached = new Promise<'budget'>((resolve) => {
+                        budgetTimer = setTimeout(() => resolve('budget'), STREAM_RESPONSE_BUDGET_MS);
+                    });
+                    const outcome = await Promise.race([
+                        Promise.all(settled).then(() => 'done' as const),
+                        budgetReached,
+                    ]);
+                    if (budgetTimer) clearTimeout(budgetTimer);
+                    if (outcome === 'budget') {
+                        responseTruncated = true;
+                        debug(1, 'Addon', 'budget di risposta raggiunto', {
+                            budgetMs: STREAM_RESPONSE_BUDGET_MS,
+                            pronti: collected.filter(Boolean).length,
+                            attesi: providerPromises.length,
+                        });
+                        // Quando anche l'ultimo provider finisce, la lista completa
+                        // va in cache: la prossima apertura è un hit, non un altro
+                        // fan-out. Solo se nessuno è fallito.
+                        void Promise.all(settled).then(() => {
+                            if (providerFailure || !_providerConfigSig) return;
+                            const complete: Stream[] = [];
+                            for (const group of collected) {
+                                if (!group) continue;
+                                for (const s of group) complete.push(s);
+                            }
+                            _providerCacheSet(normalizedType, id, _providerConfigSig, complete);
+                            debug(1, 'Addon', 'cache completata in background', { streams: complete.length });
+                        });
+                    }
+                    for (const group of collected) {
+                        if (!group) continue;
                         for (const s of group) allStreams.push(s);
                     }
 
@@ -522,7 +571,7 @@ function createBuilder() {
                 // Cache the fan-out result for repeat plays, but never when a
                 // provider failed or timed out: a partial list would hide it for
                 // 5 minutes.
-                if (!providerFailure && _providerConfigSig && (id.startsWith('tt') || id.startsWith('tmdb:') || id.startsWith('tvdb:') || id.startsWith('kitsu:') || id.startsWith('mal:'))) {
+                if (!providerFailure && !responseTruncated && _providerConfigSig && (id.startsWith('tt') || id.startsWith('tmdb:') || id.startsWith('tvdb:') || id.startsWith('kitsu:') || id.startsWith('mal:'))) {
                     _providerCacheSet(normalizedType, id, _providerConfigSig, allStreams);
                 }
                 return { streams: allStreams };

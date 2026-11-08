@@ -1046,8 +1046,14 @@ export class AnimeUnityProvider {
       debug(3, 'AnimeUnity', `[AnimeUnity][ExactMap] Skip filtro: titolo di input corrisponde a chiave exactMap -> "${title}"`);
     }
     const catalogVersions = catalogUnityVersions([normalizedTitle, itQuery, altQuery], { season: seasonNumber, isMovie, malId, episode: episodeNumber });
-    let animeVersions = catalogVersions.length ? catalogVersions : await this.searchAllVersions(normalizedTitle);
-    if (!skipFilter) {
+    // Il catalogo ha gia' matchato (anche per alias, es. titolo inglese contro
+    // romaji del sito): rifiltrare per titolo scarterebbe la scheda e farebbe
+    // partire una ricerca di rete inutile.
+    const fromCatalog = catalogVersions.length > 0;
+    let animeVersions = fromCatalog ? catalogVersions : await this.searchAllVersions(normalizedTitle);
+    if (fromCatalog) {
+      debug(3, 'AnimeUnity', `[AnimeUnity][Catalog] ${animeVersions.length} schede dal catalogo, nessuna ricerca`);
+    } else if (!skipFilter) {
       const rawVersions = animeVersions;
       animeVersions = filterAnimeResults(rawVersions, queryTitles);
       if (!animeVersions.length && altQuery) {
