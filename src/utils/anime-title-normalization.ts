@@ -302,6 +302,19 @@ export function titleSpecificity(title: string): number {
   return titleTokens(title).length;
 }
 
+/**
+ * Chiavi con cui un titolo può combaciare con un altro, per l'indice del
+ * catalogo: i token (match parziale) e le forme concatenate (match esatto
+ * quando il trattino è sparito da un lato solo, es. "Mission-E" / "MissionE").
+ * `titleMatchScore` può dare un punteggio > 0 solo se una di queste combacia.
+ */
+export function matchKeys(title: string): { tokens: string[]; concats: string[] } {
+  const tokens = titleTokens(title);
+  const fromTokens = tokens.join('');
+  const fromRaw = cleanTokens(title).join('');
+  return { tokens, concats: fromTokens === fromRaw ? [fromTokens] : [fromTokens, fromRaw] };
+}
+
 export function titleMatchScoreAny(titles: string[], candidate: string): number {
   let best = 0;
   for (const title of titles) {

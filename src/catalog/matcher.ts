@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { debug } from '../utils/logger.js';
-import { titleMatchScore, titleSpecificity } from '../utils/anime-title-normalization.js';
+import { matchKeys, titleMatchScore, titleSpecificity } from '../utils/anime-title-normalization.js';
 import { compactKey } from './text.js';
 import type { CatalogLanguage, CatalogSite, TitleIndexEntry, TitleIndexFile } from './sync.js';
 
@@ -62,6 +62,51 @@ export interface CatalogLookup {
 }
 
 let cached: { file: string; mtimeMs: number; data: TitleIndexFile } | null = null;
+
+/** Indice token -> schede, per sito. Costruito una volta per versione del file. */
+type SiteIndex = {
+  byToken: Map<string, TitleIndexEntry[]>;
+  byConcat: Map<string, TitleIndexEntry[]>;
+  byKey: Map<string, TitleIndexEntry[]>;
+};
+let tokenIndex: { data: TitleIndexFile; sites: Map<string, SiteIndex> } | null = null;
+
+function pushEntry(map: Map<string, TitleIndexEntry[]>, key: string, entry: TitleIndexEntry): void {
+  if (!key) return;
+  const list = map.get(key);
+  if (!list) map.set(key, [entry]);
+  else if (list[list.length - 1] !== entry) list.push(entry);
+}
+
+function buildSiteIndex(entries: TitleIndexEntry[]): SiteIndex {
+  const byToken = new Map<string, TitleIndexEntry[]>();
+  const byConcat = new Map<string, TitleIndexEntry[]>();
+  const byKey = new Map<string, TitleIndexEntry[]>();
+  for (const entry of entries) {
+    if (entry.key) pushEntry(byKey, entry.key, entry);
+    for (const source of [entry.title, ...(entry.aliases || [])]) {
+      if (!source) continue;
+      const { tokens, concats } = matchKeys(source);
+      for (const token of tokens) pushEntry(byToken, token, entry);
+      for (const concat of concats) pushEntry(byConcat, concat, entry);
+    }
+  }
+  return { byToken, byConcat, byKey };
+}
+
+/**
+ * Le schede che possono dare un punteggio > 0: senza token in comune o senza
+ * una forma concatenata identica, `titleMatchScore` risponde 0 e non c'è
+ * ragione di chiamarlo. L'indice è un sovrainsieme esatto, non una euristica.
+ */
+function siteIndexFor(site: string, index: TitleIndexFile, entries: TitleIndexEntry[]): SiteIndex {
+  if (!tokenIndex || tokenIndex.data !== index) tokenIndex = { data: index, sites: new Map() };
+  const hit = tokenIndex.sites.get(site);
+  if (hit) return hit;
+  const built = buildSiteIndex(entries);
+  tokenIndex.sites.set(site, built);
+  return built;
+}
 
 /** Cartella del catalogo: data/ del progetto, o CATALOG_DIR (test e deploy). */
 export function catalogDir(): string {
@@ -251,7 +296,18 @@ export function lookupTitle(site: CatalogSite, queries: string[], options?: Cata
   if (clean.length) {
     const compactQueries = clean.map(compactKey);
     const specificities = clean.map(titleSpecificity);
+    const siteIndex = siteIndexFor(site, index as TitleIndexFile, entries);
+    const candidates = new Set<TitleIndexEntry>();
+    for (let i = 0; i < clean.length; i++) {
+      const { tokens, concats } = matchKeys(clean[i]);
+      for (const token of tokens) for (const entry of siteIndex.byToken.get(token) || []) candidates.add(entry);
+      for (const concat of concats) for (const entry of siteIndex.byConcat.get(concat) || []) candidates.add(entry);
+      for (const entry of siteIndex.byKey.get(compactQueries[i]) || []) candidates.add(entry);
+    }
+    // Si ripercorre `entries` per mantenere l'ordine del file: l'ordine decide
+    // quale scheda finisce prima in `hits`, quindi l'ordine degli stream.
     for (const entry of entries) {
+      if (!candidates.has(entry)) continue;
       const { score, queryTokens } = scoreEntry(clean, specificities, entry, compactQueries);
       if (score > 0) all.push({ entry, score, queryTokens });
     }

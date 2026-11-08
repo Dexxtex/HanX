@@ -294,3 +294,46 @@ test('la cache si invalida quando il file cambia', () => {
   fs.utimesSync(file, later, later);
   assert.equal(lookupTitle('saturn', ['Due']).hits.length, 1);
 });
+
+// L'indice token->schede evita di scandire tutto il catalogo a ogni lookup. Deve
+// essere un sovrainsieme esatto: ogni percorso con cui `titleMatchScore` può dare
+// un punteggio > 0 deve restare raggiungibile, altrimenti la scheda sparisce.
+test('indice token: ogni percorso di match resta raggiungibile', () => {
+  fixture({
+    sites: {
+      saturn: [
+        entry('Kimetsu no Yaiba: Yuukaku-hen', 'kimetsu', {
+          key: 'kimetsunoyaibayuukakuhen',
+          aliases: ['Demon Slayer: Entertainment District Arc'],
+        }),
+        entry('Mission-E', 'mission-e'),
+        entry('Tutor Hitman Reborn!', 'reborn'),
+        entry('Tokyo Revengers: Santen Sensou-hen', 'tr-arc'),
+        entry('Tokyo Revengers: Santen Sensou-hen (ITA)', 'tr-arc-ita'),
+        entry('Tokyo Revengers', 'tr-base'),
+      ],
+    },
+  });
+
+  // Chiave compatta: il match non passa dai token.
+  assert.equal(lookupTitle('saturn', ['Kimetsu no Yaiba Yuukakuhen']).hits[0]?.slug, 'kimetsu');
+  // Alias: la query inglese non combacia col titolo romaji, ma con l'alias sì.
+  assert.equal(
+    lookupTitle('saturn', ['Demon Slayer: Entertainment District Arc']).hits[0]?.slug,
+    'kimetsu'
+  );
+  // Concatenato: "MissionE" combacia solo grazie alla forma senza trattino.
+  assert.equal(lookupTitle('saturn', ['MissionE']).hits[0]?.slug, 'mission-e');
+  // Prefisso del sito.
+  assert.equal(lookupTitle('saturn', ['Reborn!']).hits[0]?.slug, 'reborn');
+  // Arco contro serie madre: vince l'arco, e la variante ITA resta servita.
+  const arc = lookupTitle('saturn', ['Tokyo Revengers: Santen Sensou-hen']);
+  assert.deepEqual(arc.hits.map((h) => h.slug).sort(), ['tr-arc', 'tr-arc-ita']);
+});
+
+test('indice token: nessun match inventato su un titolo estraneo', () => {
+  fixture({
+    sites: { saturn: [entry('Tokyo Revengers'), entry('Kimetsu no Yaiba'), entry('One Piece')] },
+  });
+  assert.equal(lookupTitle('saturn', ['Bleach']).hits.length, 0);
+});
