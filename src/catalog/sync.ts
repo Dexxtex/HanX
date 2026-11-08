@@ -32,6 +32,13 @@ export interface CatalogEntry {
   startDate?: string;
   /** Episodi dichiarati: dice se l'episodio richiesto può stare in questa scheda. */
   episodes?: number;
+  /**
+   * Solo AnimeUnity: coppie `[numero, id]` degli episodi. L'id è quello che il
+   * sito usa nell'URL dell'episodio, quindi dal catalogo si salta la pagina
+   * della scheda (un hop = 2 s di pacing). Assente sulle serie lunghe, dove la
+   * pagina porta solo i primi 120 episodi.
+   */
+  ep?: [number, number][];
   /** Id AniList: valida il `malId` delle schede e regge un futuro join `anilist:`. */
   anilistId?: number;
   /**
@@ -83,6 +90,8 @@ export interface TitleIndexEntry {
   language?: CatalogLanguage;
   /** Episodi dichiarati: il matcher scarta la scheda se la richiesta li supera. */
   episodes?: number;
+  /** Solo AnimeUnity: coppie `[numero, id]`, vedi `CatalogEntry.ep`. */
+  ep?: [number, number][];
 }
 
 export interface TitleIndexFile {
@@ -170,6 +179,7 @@ export function carryOverProgress(previous: CatalogEntry[], entries: CatalogEntr
     field('enrichedAt', old.enrichedAt);
     field('language', old.language);
     field('episodes', old.episodes);
+    field('ep', old.ep);
     field('startDate', old.startDate);
     field('year', old.year);
     // I titoli si sommano: gli alias presi dalla scheda e quelli di ieri sono
@@ -193,6 +203,41 @@ export interface CardDetails {
   year?: number;
   startDate?: string;
   language?: CatalogLanguage;
+  /** Solo AnimeUnity: coppie `[numero, id]` lette dall'attributo `episodes`. */
+  ep?: [number, number][];
+}
+
+/**
+ * AnimeUnity: la pagina della scheda porta la lista episodi nell'attributo JSON
+ * `episodes="[{id,number}]"`. Sono solo i primi 120: oltre si resta senza e la
+ * pagina si scarica come prima.
+ */
+function unityEpisodePairs(html: string): [number, number][] | undefined {
+  const raw = String(html || '').match(/\bepisodes="([^"]+)"/)?.[1];
+  if (!raw) return undefined;
+  try {
+    const decoded = raw
+      .replace(/&quot;/g, '"')
+      .replace(/&#0?39;/g, "'")
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&amp;/g, '&');
+    const parsed = JSON.parse(decoded) as Array<{ id?: number; number?: string }>;
+    const pairs: [number, number][] = [];
+    const seen = new Set<number>();
+    for (const item of parsed) {
+      const id = Number(item?.id);
+      if (!Number.isFinite(id) || id <= 0 || seen.has(id)) continue;
+      seen.add(id);
+      const match = String(item?.number ?? '').match(/(\d{1,4})/);
+      const num = match ? Number.parseInt(match[1], 10) : pairs.length + 1;
+      if (!Number.isFinite(num) || num <= 0) continue;
+      pairs.push([num, id]);
+    }
+    return pairs.length ? pairs : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** "Lingua Giapponese" nella scheda: Italiano = doppiato, il resto = sottotitolato. */
@@ -272,10 +317,12 @@ export function parseCardDetails(html: string, site: CatalogSite): CardDetails {
   const saturnAudio = site === 'saturn' ? saturnLanguage(text) : undefined;
   const year = String(data.datePublished || '').match(/^(\d{4})/);
   const episodes = positive(data.numberOfEpisodes) ?? positive(info.episodes) ?? (site === 'world' ? worldEpisodes(text) : undefined);
+  const ep = site === 'unity' ? unityEpisodePairs(text) : undefined;
   return {
     ...parseCardIds(text),
     ...(asList(series.alternateName).length ? { titles: asList(series.alternateName) } : {}),
     ...(episodes ? { episodes } : {}),
+    ...(ep ? { ep } : {}),
     ...(year ? { year: Number(year[1]) } : {}),
     ...(info.year && !year ? { year: info.year } : {}),
     ...(info.startDate ? { startDate: info.startDate } : {}),
@@ -295,6 +342,7 @@ export function applyCardDetails(entry: CatalogEntry, details: CardDetails, conf
   }
   if (titles.size) entry.titles = [...titles];
   if (details.episodes && !entry.episodes) entry.episodes = details.episodes;
+  if (details.ep && !entry.ep) entry.ep = details.ep;
   if (details.startDate && !entry.startDate) entry.startDate = details.startDate;
   if (details.language && !entry.language) entry.language = details.language;
   if (details.year && !entry.year) entry.year = details.year;
@@ -536,6 +584,7 @@ export function buildTitleIndex(catalog: CatalogFile): TitleIndexFile {
       ...(entry.malId ? { malId: entry.malId } : {}),
       ...(entry.language ? { language: entry.language } : {}),
       ...(entry.episodes ? { episodes: entry.episodes } : {}),
+      ...(entry.ep ? { ep: entry.ep } : {}),
     }));
   }
   return { generatedAt: catalog.generatedAt, sites };

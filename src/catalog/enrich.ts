@@ -18,8 +18,14 @@ import {
   type CatalogFile,
 } from './sync.js';
 
-/** Siti con il backfill: Unity porta già il `malId` dall'API. */
-const ENRICH_SITES = ['saturn', 'world'] as const;
+/**
+ * Siti con il backfill. Unity non ha bisogno di AniList (il `malId` arriva
+ * dall'API), ma la sua pagina porta le coppie `[numero, id]` degli episodi:
+ * senza quelle il provider deve scaricarla a ogni richiesta.
+ */
+const ENRICH_SITES = ['saturn', 'world', 'unity'] as const;
+/** Solo Unity: la scheda si legge per gli id episodio, non per il malId. */
+const EPISODE_SITES: ReadonlySet<string> = new Set(['unity']);
 
 export interface EnrichOptions {
   /** HTML della scheda. Lancia sull'errore: `isBlocked` decide se fermarsi. */
@@ -28,6 +34,8 @@ export interface EnrichOptions {
   isBlocked: (err: unknown) => boolean;
   /** Schede per sito da leggere in una run. */
   quota: number;
+  /** Quota diversa per un sito specifico (Unity legge per gli id episodio). */
+  quotaBySite?: Partial<Record<(typeof ENRICH_SITES)[number], number>>;
   /** Timestamp oltre il quale la fase si ferma (il job ha un tetto di tempo). */
   deadline: number;
   /** Testo breve di un errore, senza segreti. */
@@ -70,9 +78,10 @@ export async function enrichMalIds(catalog: CatalogFile, options: EnrichOptions)
     // Prima le schede mai lette (le nuove comprese), poi le più vecchie: quelle
     // lette da poco non si rileggono.
     const found: { entry: CatalogEntry; details: ReturnType<typeof parseCardDetails> }[] = [];
+    const siteQuota = options.quotaBySite?.[site] ?? options.quota;
     let requests = 0;
     for (const entry of pendingBySite[site]) {
-      if (requests >= options.quota || now() > options.deadline) break;
+      if (requests >= siteQuota || now() > options.deadline) break;
       requests += 1;
       try {
         found.push({ entry, details: parseCardDetails(await options.readPage(entry), site) });
@@ -88,11 +97,15 @@ export async function enrichMalIds(catalog: CatalogFile, options: EnrichOptions)
     // Solo gli id che AniList conferma: una pagina con il link MAL sbagliato non
     // deve entrare nel ramo esatto del matcher.
     read += found.length;
-    const { confirmed, answered } = await confirmMalIds(
-      found.map((item) => item.details),
-      options.fetcher,
-      { delayMs: options.delayMs }
-    );
+    // Unity non passa da AniList: il suo malId viene dall'API del sito e qui si
+    // leggono solo gli id episodio. Una mappa vuota lascia `malId` invariato.
+    const { confirmed, answered } = EPISODE_SITES.has(site)
+      ? { confirmed: new Map<number, number>(), answered: new Set<number>() }
+      : await confirmMalIds(
+          found.map((item) => item.details),
+          options.fetcher,
+          { delayMs: options.delayMs }
+        );
     let accepted = 0;
     let rejected = 0;
     let unanswered = 0;
@@ -112,16 +125,26 @@ export async function enrichMalIds(catalog: CatalogFile, options: EnrichOptions)
       // senza link AniList non ha niente da confermare, quella muta si riprova.
       if (isEnrichmentFinal(details, answered)) entry.enrichedAt = today;
     }
-    const withMalId = entries.filter((entry) => entry.malId).length;
-    log(
-      `[catalog] schede ${site}: ${found.length} lette, ${accepted} malId confermati, ${rejected} rifiutati, ` +
-        `${unanswered} in attesa di AniList, ${skipped} senza id da confermare, ${aliased} con alias nuovi ` +
-        `(${withMalId}/${entries.length} con malId)`
-    );
+    if (EPISODE_SITES.has(site)) {
+      // Niente AniList qui: il conteggio utile è quante schede hanno gli id.
+      const withEp = entries.filter((entry) => entry.ep?.length).length;
+      log(
+        `[catalog] schede ${site}: ${found.length} lette per gli id episodio, ` +
+          `${aliased} con alias nuovi (${withEp}/${entries.length} con id episodio)`
+      );
+    } else {
+      const withMalId = entries.filter((entry) => entry.malId).length;
+      log(
+        `[catalog] schede ${site}: ${found.length} lette, ${accepted} malId confermati, ${rejected} rifiutati, ` +
+          `${unanswered} in attesa di AniList, ${skipped} senza id da confermare, ${aliased} con alias nuovi ` +
+          `(${withMalId}/${entries.length} con malId)`
+      );
+    }
     if (now() > options.deadline) break;
   }
-  // Unity non è nella lista perché il suo `malId` arriva già dall'API: senza
-  // questa riga nei log sembrerebbe un sito che non è stato letto.
+  // Un sito senza backfill non si legge: senza questa riga nei log sembrerebbe
+  // un sito dimenticato. Oggi nessun sito è fuori dalla lista, ma la riga resta
+  // per il giorno in cui uno esce.
   for (const site of CATALOG_SITES) {
     if ((ENRICH_SITES as readonly string[]).includes(site)) continue;
     const entries = catalog.sites[site];

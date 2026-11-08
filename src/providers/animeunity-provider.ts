@@ -158,6 +158,8 @@ interface AnimeUnitySearchResult {
   name_eng?: string; // Titolo inglese (opzionale)
   episodes_count: number;
   type?: string; // Solo .co: TV / Movie / Special
+  /** Dal catalogo: coppie [numero, id] degli episodi, evita la pagina scheda. */
+  ep?: [number, number][];
 }
 
 interface AnimeUnityStreamData {
@@ -553,7 +555,14 @@ function catalogUnityVersions(
     const slug = String(hit.slug).replace(/^\d+-/, '');
     if (!Number.isFinite(id) || id <= 0 || !slug) continue;
     versions.push({
-      version: { id, slug, name: hit.title, episodes_count: 0, ...(hit.type ? { type: hit.type } : {}) },
+      version: {
+        id,
+        slug,
+        name: hit.title,
+        episodes_count: 0,
+        ...(hit.type ? { type: hit.type } : {}),
+        ...(hit.ep?.length ? { ep: hit.ep } : {}),
+      },
       language_type: hit.language,
     });
   }
@@ -670,7 +679,11 @@ export class AnimeUnityProvider {
     requestedEpisodeInput: number | null,
     seasonNumber: number | null,
     isMovie: boolean,
-    titleOverride?: string
+    titleOverride?: string,
+    /** Dal catalogo: coppie [numero, id] che evitano la pagina della scheda. */
+    catalogEp?: [number, number][],
+    /** Dal catalogo: lingua della scheda, quando la pagina non si scarica. */
+    catalogLanguage?: string
   ): Promise<StreamForStremio[]> {
     const normalizedPath = normalizeAnimePath(animePath);
     if (!normalizedPath) return [];
@@ -678,47 +691,66 @@ export class AnimeUnityProvider {
     const animeUrl = buildUnityUrl(normalizedPath);
     if (!animeUrl) return [];
 
-    const html = await auFetchResource(animeUrl, caches, {
-      ttlMs: TTL.animePage,
-      cacheKey: `au-anime:${normalizedPath}`,
-      timeoutMs: FETCH_TIMEOUT,
-    }).catch(() => '');
-
-    if (!html) return [];
-
-    const $ = cheerio.load(String(html));
-    const pageTitle =
-      $('meta[property="og:title"]').attr('content') ||
-      $('title').first().text().trim() ||
-      null;
-    const displayTitle = titleOverride || sanitizeAnimeTitle(pageTitle) || 'Unknown Title';
     const requestedEpisode = normalizeRequestedEpisode(requestedEpisodeInput);
-
     const { animeId, animeSlug } = extractAnimeIdSlugFromPath(normalizedPath);
     if (!animeId || !animeSlug) return [];
 
-    // .co mette solo i primi 120 episodi nella pagina: per le serie lunghe
-    // chiediamo la finestra che contiene l'episodio richiesto a /info_api.
-    let pageEpisodes = isUnityCoBase()
-      ? parseUnityCoEpisodes(String(html))
-      : parseEpisodesFromAnimeHtml(String(html));
-    if (isUnityCoBase() && requestedEpisode
-      && !pageEpisodes.some((entry) => parseEpisodeNumber(entry.number, 0) === requestedEpisode)) {
-      pageEpisodes = [...pageEpisodes, ...(await fetchUnityCoEpisodeWindow(animeId, requestedEpisode))];
+    // Catalogo: con le coppie [numero, id] la pagina della scheda non serve.
+    // E' un hop sull'host AnimeUnity, cioe' 2 s di pacing.
+    const catalogEpisodes = catalogEp?.length
+      ? normalizeEpisodesList(
+          catalogEp.map(([num, id]) => ({ num, episodeId: id, link: null, fileName: null, embedUrl: null })),
+          getUnityBaseUrl()
+        )
+      : [];
+    const fromCatalog = pickEpisodeEntry(catalogEpisodes, requestedEpisode, isMovie ? 'movie' : 'tv');
+
+    let displayTitle = titleOverride || '';
+    let selected = fromCatalog;
+    let html = '';
+
+    if (!selected?.episodeId) {
+      html = String(await auFetchResource(animeUrl, caches, {
+        ttlMs: TTL.animePage,
+        cacheKey: `au-anime:${normalizedPath}`,
+        timeoutMs: FETCH_TIMEOUT,
+      }).catch(() => '') || '');
+
+      if (!html) return [];
+
+      const $ = cheerio.load(String(html));
+      const pageTitle =
+        $('meta[property="og:title"]').attr('content') ||
+        $('title').first().text().trim() ||
+        null;
+      displayTitle = titleOverride || sanitizeAnimeTitle(pageTitle) || 'Unknown Title';
+
+      // .co mette solo i primi 120 episodi nella pagina: per le serie lunghe
+      // chiediamo la finestra che contiene l'episodio richiesto a /info_api.
+      let pageEpisodes = isUnityCoBase()
+        ? parseUnityCoEpisodes(String(html))
+        : parseEpisodesFromAnimeHtml(String(html));
+      if (isUnityCoBase() && requestedEpisode
+        && !pageEpisodes.some((entry) => parseEpisodeNumber(entry.number, 0) === requestedEpisode)) {
+        pageEpisodes = [...pageEpisodes, ...(await fetchUnityCoEpisodeWindow(animeId, requestedEpisode))];
+      }
+
+      const normalizedEpisodes = normalizeEpisodesList(
+        pageEpisodes.map((entry, index) => ({
+          num: parseEpisodeNumber(entry.number, index + 1),
+          episodeId: entry.id,
+          link: null,
+          fileName: entry.name || null,
+          embedUrl: null,
+        })),
+        getUnityBaseUrl()
+      );
+
+      selected = pickEpisodeEntry(normalizedEpisodes, requestedEpisode, isMovie ? 'movie' : 'tv');
+    } else {
+      debug(3, 'AnimeUnity', '[AnimeUnity][Catalog] id episodio dal catalogo, nessuna pagina scheda');
+      displayTitle = displayTitle || 'Unknown Title';
     }
-
-    const normalizedEpisodes = normalizeEpisodesList(
-      pageEpisodes.map((entry, index) => ({
-        num: parseEpisodeNumber(entry.number, index + 1),
-        episodeId: entry.id,
-        link: null,
-        fileName: entry.name || null,
-        embedUrl: null,
-      })),
-      getUnityBaseUrl()
-    );
-
-    const selected = pickEpisodeEntry(normalizedEpisodes, requestedEpisode, isMovie ? 'movie' : 'tv');
     if (!selected?.episodeId) return [];
 
     const resolvedEpisodeNum = parsePositiveInt(selected.num) || requestedEpisode;
@@ -749,8 +781,10 @@ export class AnimeUnityProvider {
     const needVariant = !(proxyWanted && this.config.proxyUrl.trim());
 
     // .at espone SUB e ITA nello stesso episodio; .co ha schede separate per lingua.
+    // Senza pagina scheda (id dal catalogo) la lingua viene dal catalogo.
+    const dubPage = html ? isUnityCoDubPage(String(html)) : catalogLanguage === 'ITA';
     const languages: ('sub' | 'dub')[] = isUnityCoBase()
-      ? [isUnityCoDubPage(String(html)) ? 'dub' : 'sub']
+      ? [dubPage ? 'dub' : 'sub']
       : ['sub', 'dub'];
     // SUB e DUB in parallelo: gli hop sull'host AnimeUnity restano in fila per il
     // pacing, ma embed e manifest (host diversi) si sovrappongono. Il budget WAF
@@ -1132,7 +1166,7 @@ export class AnimeUnityProvider {
     }
     const streams: StreamForStremio[] = [];
     const seenLinks = new Set();
-    for (const { version } of animeVersions) {
+    for (const { version, language_type: versionLanguage } of animeVersions) {
       // .co tipizza le schede: un film non è l'episodio di una serie.
       if (!isMovie && version.type === 'Movie') continue;
       const cleanName = version.name
@@ -1152,7 +1186,9 @@ export class AnimeUnityProvider {
         episodeNumber,
         seasonNumber,
         isMovie,
-        labelTitle
+        labelTitle,
+        version.ep,
+        versionLanguage
       );
       for (const st of perVersion) {
         if (!st || !st.url) continue;

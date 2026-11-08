@@ -264,6 +264,9 @@ function enrichMalIds(catalog: CatalogFile, startedAt: number) {
     readPage: async (entry) => (await request(entry.url)).body,
     isBlocked: (err) => err instanceof BlockedError,
     quota: Math.ceil(MALID_MAX_REQUESTS / 2),
+    // Unity legge solo per gli id episodio: quota sua, cosi il backlog malId
+    // di saturn e world non rallenta.
+    quotaBySite: { unity: MALID_MAX_REQUESTS },
     deadline: startedAt + MALID_DEADLINE_MIN * 60_000,
     describe: describeError,
     log: (line) => console.log(line),

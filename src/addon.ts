@@ -17,6 +17,7 @@ import {
 } from './config.js';
 import { AnimeUnityProvider } from './providers/animeunity-provider.js';
 import { providerRequestStore } from './providers/anime-core/fetch-resource.js';
+import { collectWithinBudget } from './providers/anime-core/fanout.js';
 import { providerLabel } from './utils/unifiedNames.js';
 import { landingTemplate } from './landingPage.js';
 import { toNumericId, parseRequestId } from './mapping/request.js';
@@ -54,7 +55,7 @@ function sortStreamsByPriority(streams: { url?: string; title?: string }[]): voi
 // ================= MANIFEST BASE (restored) =================
 const baseManifest: Manifest = {
     id: "org.stremio.hanx",
-    version: "1.1.6",
+    version: "1.1.7",
     name: "HanX",
     description: "HanX addon dedicato ad AnimeUnity, AnimeSaturn e AnimeWorld",
     types: ["movie", "series", "anime"],
@@ -499,45 +500,30 @@ function createBuilder() {
                         return { streams: [] };
                     }, providerLabel('animeworld'), 30000);  // AnimeWorld: timeout 30s
 
-                    // Ogni provider scrive il proprio risultato appena finisce, così
-                    // allo scadere del budget si prende quello che è arrivato.
-                    const collected: (Stream[] | undefined)[] = new Array(providerPromises.length);
-                    const settled = providerPromises.map((promise, index) =>
-                        promise.then((streams) => { collected[index] = streams; })
-                    );
-                    let budgetTimer: ReturnType<typeof setTimeout> | undefined;
-                    const budgetReached = new Promise<'budget'>((resolve) => {
-                        budgetTimer = setTimeout(() => resolve('budget'), STREAM_RESPONSE_BUDGET_MS);
-                    });
-                    const outcome = await Promise.race([
-                        Promise.all(settled).then(() => 'done' as const),
-                        budgetReached,
-                    ]);
-                    if (budgetTimer) clearTimeout(budgetTimer);
-                    if (outcome === 'budget') {
-                        responseTruncated = true;
-                        debug(1, 'Addon', 'budget di risposta raggiunto', {
+                    const fanout = await collectWithinBudget(providerPromises, {
+                        budgetMs: STREAM_RESPONSE_BUDGET_MS,
+                        onBudget: (ready) => debug(1, 'Addon', 'budget di risposta raggiunto', {
                             budgetMs: STREAM_RESPONSE_BUDGET_MS,
-                            pronti: collected.filter(Boolean).length,
+                            pronti: ready,
                             attesi: providerPromises.length,
-                        });
+                        }),
+                        onEmptyBudget: (ready) => debug(1, 'Addon', 'budget scaduto senza stream: atteso il primo provider', { pronti: ready }),
+                    });
+                    for (const s of fanout.items) allStreams.push(s);
+                    if (fanout.truncated) {
+                        responseTruncated = true;
                         // Quando anche l'ultimo provider finisce, la lista completa
                         // va in cache: la prossima apertura è un hit, non un altro
                         // fan-out. Solo se nessuno è fallito.
-                        void Promise.all(settled).then(() => {
+                        void Promise.all(providerPromises).then((groups) => {
                             if (providerFailure || !_providerConfigSig) return;
                             const complete: Stream[] = [];
-                            for (const group of collected) {
-                                if (!group) continue;
+                            for (const group of groups) {
                                 for (const s of group) complete.push(s);
                             }
                             _providerCacheSet(normalizedType, id, _providerConfigSig, complete);
                             debug(1, 'Addon', 'cache completata in background', { streams: complete.length });
                         });
-                    }
-                    for (const group of collected) {
-                        if (!group) continue;
-                        for (const s of group) allStreams.push(s);
                     }
 
                 }

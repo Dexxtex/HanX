@@ -31,6 +31,8 @@ export interface CatalogHit {
   language: CatalogLanguage;
   /** Solo AnimeUnity: il tipo della scheda (TV/Movie). */
   type?: string;
+  /** Solo AnimeUnity: coppie `[numero, id]` degli episodi, evita la pagina scheda. */
+  ep?: [number, number][];
 }
 
 export interface CatalogQueryOptions {
@@ -205,6 +207,7 @@ export function lookupTitle(site: CatalogSite, queries: string[], options?: Cata
           score: 1,
           language: entry.language ?? languageOf(entry.title),
           ...(entry.type ? { type: entry.type } : {}),
+          ...(entry.ep?.length ? { ep: entry.ep } : {}),
         }));
       if (hits.length) {
         // ITA e SUB della stessa opera possono condividere il mal_id: si servono entrambe.
@@ -269,6 +272,7 @@ export function lookupTitle(site: CatalogSite, queries: string[], options?: Cata
           score,
           language: entry.language ?? languageOf(entry.title),
           ...(entry.type ? { type: entry.type } : {}),
+          ...(entry.ep?.length ? { ep: entry.ep } : {}),
         }))
       : [];
 

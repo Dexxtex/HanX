@@ -148,9 +148,10 @@ test('backlog vuoto: niente da leggere non è un guasto', async () => {
   assert.equal(enrichmentStalled(result), false);
 });
 
-test('arricchimento: i siti senza backfill compaiono nei log', async () => {
-  // Unity porta il malId dall'API: non si legge, ma nei log deve esserci, altrimenti
-  // la run sembra avere solo due siti.
+test('arricchimento: unity si legge per gli id episodio e lo dice nei log', async () => {
+  // Unity non passa da AniList (il malId arriva dall'API), ma la sua pagina
+  // porta le coppie [numero, id] degli episodi: senza quelle il provider deve
+  // scaricare la scheda a ogni richiesta.
   const catalog = catalogWith([{ anilistId: 7 }]);
   catalog.sites.unity = [
     { site: 'unity', slug: 'u-1', url: 'https://unity.test/u-1', titleSite: 'Uno', malId: 11 },
@@ -168,8 +169,9 @@ test('arricchimento: i siti senza backfill compaiono nei log', async () => {
     delayMs: 0,
     log: (line) => lines.push(line),
   });
-  const unity = lines.find((line) => line.includes('unity'));
+  const unity = lines.find((line) => line.includes('schede unity'));
   assert.ok(unity, 'manca la riga di unity');
-  assert.match(unity, /nessun backfill/);
-  assert.match(unity, /1\/2 con malId/);
+  assert.match(unity, /id episodio/);
+  // Il malId di Unity non viene toccato dalla lettura della scheda.
+  assert.equal(catalog.sites.unity[0].malId, 11);
 });
