@@ -23,6 +23,7 @@ import {
   saturnListingGap,
   parseWorldFilterPage,
   readCatalog,
+  shouldRunCatalogSync,
   writeCatalogsAtomic,
 } from '../../dist/catalog/sync.js';
 import { compactKey } from '../../dist/catalog/text.js';
@@ -445,4 +446,29 @@ test('scrittura atomica: due file validi, nessun temporaneo lasciato', () => {
   assert.deepEqual(readCatalog(dir).sites.unity, catalog.sites.unity);
   assert.deepEqual(readCatalog(path.join(dir, 'manca')).sites, { saturn: [], world: [], unity: [] });
   fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('shouldRunCatalogSync: dispatch forza il sync, intervallo minimo 16 ore', () => {
+  const now = Date.parse('2026-11-08T20:00:00.000Z');
+
+  // workflow_dispatch forza sempre l'esecuzione
+  assert.equal(shouldRunCatalogSync({ eventName: 'workflow_dispatch', lastSyncRaw: '2026-11-08T19:30:00.000Z', nowMs: now }), true);
+
+  // Marcatore assente o vuoto -> esegue
+  assert.equal(shouldRunCatalogSync({ eventName: 'schedule', lastSyncRaw: '', nowMs: now }), true);
+  assert.equal(shouldRunCatalogSync({ eventName: 'schedule', lastSyncRaw: null, nowMs: now }), true);
+
+  // Sincronizzato 30 min prima -> salta
+  assert.equal(shouldRunCatalogSync({ eventName: 'schedule', lastSyncRaw: '2026-11-08T19:30:00.000Z', nowMs: now }), false);
+
+  // Sincronizzato 20 ore prima -> esegue
+  assert.equal(shouldRunCatalogSync({ eventName: 'schedule', lastSyncRaw: '2026-11-08T00:00:00.000Z', nowMs: now }), true);
+
+  // Timestamp numerico (secondi)
+  const thirtyMinAgoSec = Math.floor((now - 30 * 60 * 1000) / 1000);
+  assert.equal(shouldRunCatalogSync({ eventName: 'schedule', lastSyncRaw: String(thirtyMinAgoSec), nowMs: now }), false);
+
+  // Formato legacy YYYY-MM-DD
+  assert.equal(shouldRunCatalogSync({ eventName: 'schedule', lastSyncRaw: '2026-11-08', nowMs: now }), false);
+  assert.equal(shouldRunCatalogSync({ eventName: 'schedule', lastSyncRaw: '2026-11-07', nowMs: now }), true);
 });

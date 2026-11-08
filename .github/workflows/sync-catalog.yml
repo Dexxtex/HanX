@@ -44,8 +44,7 @@ jobs:
     # I secret dell'environment `CATALOG` (CATALOG_PROXY) arrivano solo se il job
     # lo dichiara. L'environment non ha regole di protezione: il cron gira da solo.
     environment: CATALOG
-    # ~700 richieste a 3 s sono ~35 minuti; il backfill dei malId ne aggiunge
-    # fino a 300 (15 min). 60 lascia spazio a retry e code.
+    # Timeout con margine per il crawl dei provider e il backfill malId.
     timeout-minutes: 60
     steps:
       - name: Checkout
@@ -72,26 +71,48 @@ jobs:
         run: |
           mkdir -p data
           if git fetch -q --depth=1 origin data 2>/dev/null; then
-            git show FETCH_HEAD:catalogs.json > data/catalogs.json
-            git show FETCH_HEAD:catalog-titles.json > data/catalog-titles.json
-            git show FETCH_HEAD:last-sync.txt > data/last-sync.txt 2>/dev/null || true
+            git show FETCH_HEAD:catalogs.json > data/catalogs.json 2>/dev/null || true
+            git show FETCH_HEAD:catalog-titles.json > data/catalog-titles.json 2>/dev/null || true
+            git show FETCH_HEAD:last-sync.txt > data/last-sync.txt 2>/dev/null || rm -f data/last-sync.txt
+            [ -s data/last-sync.txt ] || rm -f data/last-sync.txt
             echo "Ripristinate $(node -e "const d=require('./data/catalogs.json');console.log(Object.values(d.sites).reduce((n,l)=>n+l.length,0))") schede dal branch data."
           else
             echo "Branch data assente: primo sync, il catalogo parte vuoto."
           fi
 
-      # Due finestre per stagione: se la prima ha già pubblicato stasera, questa è
-      # la copia di riserva e non deve rifare ~700 richieste ai siti. Il criterio
-      # è il marcatore scritto solo dal sync (l'arricchimento non lo tocca): un
-      # crawl già partito ore dopo l'ora di Roma è comunque di oggi.
+      # Due finestre per stagione: se la prima ha già sincronizzato stasera, questa è
+      # la copia di riserva e non deve rifare il crawl.
       - name: Guard già sincronizzato oggi
         id: fresh
         run: |
           set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "Esecuzione manuale (workflow_dispatch): guard disattivato."
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          now=$(date +%s)
+          last=""
+          if [ -s data/last-sync.txt ]; then
+            last=$(tr -d '[:space:]' < data/last-sync.txt)
+          fi
+          # Compatibilità con formato legacy YYYY-MM-DD
           today=$(TZ=Europe/Rome date +%F)
-          last=$(tr -d '[:space:]' < data/last-sync.txt 2>/dev/null || true)
           if [ "$last" = "$today" ]; then
             echo "Catalogo già sincronizzato oggi ($last): nessun crawl."
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          last_epoch=""
+          if [ -n "$last" ]; then
+            if [[ "$last" =~ ^[0-9]+$ ]]; then
+              last_epoch="$last"
+            else
+              last_epoch=$(date -d "$last" +%s 2>/dev/null || true)
+            fi
+          fi
+          if [ -n "$last_epoch" ] && [ $(( now - last_epoch )) -lt 57600 ]; then
+            echo "Catalogo già sincronizzato ($last): nessun crawl."
             echo "should_run=false" >> "$GITHUB_OUTPUT"
           else
             echo "should_run=true" >> "$GITHUB_OUTPUT"
@@ -105,6 +126,7 @@ jobs:
       # serve una sessione sticky (stesso IP per tutta la run) e non è un fix
       # del blocco. Vuoto = nessun proxy.
       - name: Sync catalogo
+        id: sync
         if: steps.fresh.outputs.should_run == 'true'
         env:
           CATALOG_PROXY: ${{ secrets.CATALOG_PROXY }}
@@ -127,12 +149,19 @@ jobs:
           fi
           work=$(mktemp -d)
           cp data/catalogs.json data/catalog-titles.json "$work"/
-          # Marcatore "già sincronizzato oggi": è l'unica prova che oggi è già
-          # girato un crawl, l'arricchimento non lo scrive e lo conserva se c'è.
-          TZ=Europe/Rome date +%F > "$work/last-sync.txt"
+          # Il marcatore si aggiorna solo a sync completato con successo: se fallisce,
+          # si preserva il marcatore precedente così la finestra di riserva può ritentare.
+          if [ "${{ steps.sync.outcome }}" = "success" ]; then
+            date -u +%Y-%m-%dT%H:%M:%SZ > "$work/last-sync.txt"
+          elif [ -s data/last-sync.txt ]; then
+            cp data/last-sync.txt "$work"/
+          fi
           cd "$work"
           git init -q -b data
-          git add catalogs.json catalog-titles.json last-sync.txt
+          git add catalogs.json catalog-titles.json
+          if [ -s last-sync.txt ]; then
+            git add last-sync.txt
+          fi
           git -c user.name='github-actions[bot]' \
               -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
               commit -qm "chore(catalog): sync $(TZ=Europe/Rome date +%F)"
@@ -143,15 +172,22 @@ jobs:
           if git fetch -q --depth=1 origin data 2>/dev/null; then
             changed=false
             for file in catalogs.json catalog-titles.json; do
-              git show "FETCH_HEAD:$file" | jq 'del(.generatedAt)' > old.json
-              if ! jq 'del(.generatedAt)' "$file" | diff -q - old.json > /dev/null; then
+              if git show "FETCH_HEAD:$file" 2>/dev/null | jq 'del(.generatedAt)' > old.json; then
+                if ! jq 'del(.generatedAt)' "$file" | diff -q - old.json > /dev/null; then
+                  changed=true
+                fi
+              else
                 changed=true
               fi
             done
             # Il marcatore deve aggiornarsi anche quando il catalogo è identico,
             # altrimenti la finestra di riserva rifarebbe il crawl.
             last=$(git show FETCH_HEAD:last-sync.txt 2>/dev/null || true)
-            if [ "$(tr -d '[:space:]' <<< "$last")" != "$(cat last-sync.txt)" ]; then
+            current_marker=""
+            if [ -s last-sync.txt ]; then
+              current_marker=$(tr -d '[:space:]' < last-sync.txt)
+            fi
+            if [ -n "$current_marker" ] && [ "$(tr -d '[:space:]' <<< "$last")" != "$current_marker" ]; then
               changed=true
             fi
           fi

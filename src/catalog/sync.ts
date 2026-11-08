@@ -579,3 +579,39 @@ export function readCatalog(dir: string): CatalogFile {
     return emptyCatalog();
   }
 }
+
+/** Valuta se eseguire il crawl del catalogo in base all'evento e all'intervallo dall'ultimo sync. */
+export function shouldRunCatalogSync(params: {
+  eventName?: string;
+  lastSyncRaw?: string | null;
+  nowMs?: number;
+  minIntervalHours?: number;
+}): boolean {
+  if (params.eventName === 'workflow_dispatch') return true;
+  const raw = (params.lastSyncRaw || '').trim();
+  if (!raw) return true;
+  const now = params.nowMs ?? Date.now();
+  const minHours = params.minIntervalHours ?? 16;
+
+  // Formato legacy YYYY-MM-DD: se è la stessa data di calendario a Roma, salta
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    const today = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Europe/Rome',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date(now));
+    if (raw === today) return false;
+  }
+
+  let lastMs: number | null = null;
+  if (/^\d+$/.test(raw)) {
+    lastMs = parseInt(raw, 10) * 1000;
+  } else {
+    const parsed = Date.parse(raw);
+    if (!isNaN(parsed)) lastMs = parsed;
+  }
+  if (lastMs === null) return true;
+  return (now - lastMs) >= minHours * 3600 * 1000;
+}
+

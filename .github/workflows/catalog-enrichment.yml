@@ -1,18 +1,8 @@
 name: Catalog Enrichment
 
 # Arricchisce le schede già pubblicate: titoli alternativi, anno, episodi,
-# lingua e `malId` (confermato da AniList). Non fa crawl: parte dal catalogo del
-# branch `data`, lo legge scheda per scheda e riscrive solo quello che cambia.
-#
-# Perché esiste: la run notturna ha poco tempo, e col budget di 300 schede/notte
-# il backlog di 13.043 schede richiederebbe ~45 notti. Qui 600 ogni 6 ore lo
-# drenano in pochi giorni. Poi si autolimita: le schede si riprendono dopo 30
-# giorni, salvo quelle in attesa di una risposta di AniList; quando il backlog è
-# finito ogni run costa pochi minuti e pubblica solo se c'è davvero qualcosa di
-# nuovo (le schede appena uscite).
-#
-# Non tocca il crawler: nessun rischio di pubblicare un catalogo peggiore, la
-# guardia del 70% e quella del 98% restano dove sono.
+# lingua e malId confermato da AniList, distribuendo le richieste fuori dalla
+# finestra del sync notturno e riprendendo solo le schede nuove o da aggiornare.
 
 on:
   schedule:
@@ -38,7 +28,7 @@ jobs:
     # Stessa rete del sync: i secret dell'environment `CATALOG` (CATALOG_PROXY)
     # arrivano solo se il job lo dichiara, e servono lo stesso IP residenziale.
     environment: CATALOG
-    # 600 schede a 3 s sono ~30 minuti; la deadline interna è a 32.
+    # Timeout con margine per completare il blocco di arricchimento.
     timeout-minutes: 40
     steps:
       - name: Checkout
@@ -67,10 +57,10 @@ jobs:
           if git fetch -q --depth=1 origin data 2>/dev/null; then
             git show FETCH_HEAD:catalogs.json > data/catalogs.json
             git show FETCH_HEAD:catalog-titles.json > data/catalog-titles.json
-            # Il marcatore del sync si ripristina e si ripubblica: il branch
-            # viene rimpiazzato per intero e senza lui la finestra di riserva
-            # rifarebbe il crawl.
-            git show FETCH_HEAD:last-sync.txt > data/last-sync.txt 2>/dev/null || true
+            # Il marcatore del sync si ripristina e si ripubblica per evitare
+            # che l'arricchimento lo cancelli con il force-push.
+            git show FETCH_HEAD:last-sync.txt > data/last-sync.txt 2>/dev/null || rm -f data/last-sync.txt
+            [ -s data/last-sync.txt ] || rm -f data/last-sync.txt
             echo "Ripristinate $(node -e "const d=require('./data/catalogs.json');console.log(Object.values(d.sites).reduce((n,l)=>n+l.length,0))") schede dal branch data."
           else
             echo "Branch data assente: salto l'arricchimento, la run resta verde." >&2
@@ -103,13 +93,13 @@ jobs:
           fi
           work=$(mktemp -d)
           cp data/catalogs.json data/catalog-titles.json "$work"/
-          if [ -f data/last-sync.txt ]; then
+          if [ -s data/last-sync.txt ]; then
             cp data/last-sync.txt "$work"/
           fi
           cd "$work"
           git init -q -b data
           git add catalogs.json catalog-titles.json
-          if [ -f last-sync.txt ]; then
+          if [ -s last-sync.txt ]; then
             git add last-sync.txt
           fi
           git -c user.name='github-actions[bot]' \
@@ -120,8 +110,11 @@ jobs:
           if git fetch -q --depth=1 origin data 2>/dev/null; then
             changed=false
             for file in catalogs.json catalog-titles.json; do
-              git show "FETCH_HEAD:$file" | jq 'del(.generatedAt)' > old.json
-              if ! jq 'del(.generatedAt)' "$file" | diff -q - old.json > /dev/null; then
+              if git show "FETCH_HEAD:$file" 2>/dev/null | jq 'del(.generatedAt)' > old.json; then
+                if ! jq 'del(.generatedAt)' "$file" | diff -q - old.json > /dev/null; then
+                  changed=true
+                fi
+              else
                 changed=true
               fi
             done
