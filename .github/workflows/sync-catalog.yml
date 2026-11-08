@@ -48,39 +48,27 @@ jobs:
     # fino a 300 (15 min). 60 lascia spazio a retry e code.
     timeout-minutes: 60
     steps:
-      # GitHub può partire la run ore dopo il cron, anche a metà notte: il
-      # lavoro vero lo decide il guard "già sincronizzato oggi", qui non si
-      # scarta nessuno.
-      - name: Guard ora di Roma
-        id: guard
-        run: echo "should_run=true" >> "$GITHUB_OUTPUT"
-
       - name: Checkout
-        if: steps.guard.outputs.should_run == 'true'
         uses: actions/checkout@v7
 
       - name: Set up pnpm
-        if: steps.guard.outputs.should_run == 'true'
         uses: pnpm/action-setup@v6
         with:
           version: 12.15.0
 
       - name: Set up Node
-        if: steps.guard.outputs.should_run == 'true'
         uses: actions/setup-node@v7
         with:
           node-version: 26
           cache: pnpm
 
       - name: Install
-        if: steps.guard.outputs.should_run == 'true'
         run: pnpm install --frozen-lockfile
 
       # Il catalogo di ieri vive sul branch `data`, non nel workspace: senza
       # questo ripristino la guardia 70% non avrebbe termine di confronto e un
       # sito bloccato pubblicherebbe una lista vuota al posto dei suoi dati.
       - name: Ripristina il catalogo pubblicato
-        if: steps.guard.outputs.should_run == 'true'
         run: |
           mkdir -p data
           if git fetch -q --depth=1 origin data 2>/dev/null; then
@@ -98,7 +86,6 @@ jobs:
       # crawl già partito ore dopo l'ora di Roma è comunque di oggi.
       - name: Guard già sincronizzato oggi
         id: fresh
-        if: steps.guard.outputs.should_run == 'true'
         run: |
           set -euo pipefail
           today=$(TZ=Europe/Rome date +%F)
@@ -118,7 +105,7 @@ jobs:
       # serve una sessione sticky (stesso IP per tutta la run) e non è un fix
       # del blocco. Vuoto = nessun proxy.
       - name: Sync catalogo
-        if: steps.guard.outputs.should_run == 'true' && steps.fresh.outputs.should_run == 'true'
+        if: steps.fresh.outputs.should_run == 'true'
         env:
           CATALOG_PROXY: ${{ secrets.CATALOG_PROXY }}
           # Backfill malId: 300 schede per run, stop a 52' (il job ha 60').
@@ -128,7 +115,7 @@ jobs:
 
       # `always()`: anche con il sync rosso i siti riusciti vanno pubblicati.
       - name: Pubblica sul branch data
-        if: always() && steps.guard.outputs.should_run == 'true' && steps.fresh.outputs.should_run == 'true'
+        if: always() && steps.fresh.outputs.should_run == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO_URL: https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
@@ -163,7 +150,7 @@ jobs:
             done
             # Il marcatore deve aggiornarsi anche quando il catalogo è identico,
             # altrimenti la finestra di riserva rifarebbe il crawl.
-            last=$(git show FETCH_HEAD:last-sync.txt 2>/dev/null || date +%F)
+            last=$(git show FETCH_HEAD:last-sync.txt 2>/dev/null || true)
             if [ "$(tr -d '[:space:]' <<< "$last")" != "$(cat last-sync.txt)" ]; then
               changed=true
             fi

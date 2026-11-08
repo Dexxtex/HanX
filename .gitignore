@@ -54,7 +54,6 @@ __pycache__/
 # --- Strumenti locali ---
 graphify-out/
 .graphifyignore
-.devloop
 PENDING_COMMITS.md
 
 # --- OpenCode: gli artefatti delle sessioni restano locali, gli agenti si versionano ---

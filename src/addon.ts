@@ -51,7 +51,6 @@ function sortStreamsByPriority(streams: { url?: string; title?: string }[]): voi
     });
 }
 
-// Helper: compute Europe/Rome interpretation for eventStart even if timezone is missing
 // ================= MANIFEST BASE (restored) =================
 const baseManifest: Manifest = {
     id: "org.stremio.hanx",
@@ -255,7 +254,9 @@ function createBuilder() {
                         if (isValidConfigObject(parsed) && Object.keys(parsed).length > 0) {
                             config = normalizeConfig(parsed);
                         }
-                    } catch { }
+                    } catch {
+                        // Ignore unparseable raw config
+                    }
                 } else if (requestConfig && typeof requestConfig === 'object' && isValidConfigObject(requestConfig) && Object.keys(requestConfig).length > 0) {
                     // Normalizza e valida la config prima di usarla
                     config = normalizeConfig(requestConfig);
@@ -401,7 +402,7 @@ function createBuilder() {
                         // `failed` quando una fetch provider-site fallisce.
                         const store = { failed: false };
                         try {
-                            let result;
+                            let result: { streams: Stream[] } | undefined;
 
                             if (timeoutMs !== null && timeoutMs > 0) {
                                 // Provider con timeout personalizzato
@@ -446,14 +447,12 @@ function createBuilder() {
                     // AnimeUnity
                     scheduleProviderRun('AnimeUnity', animeUnityEnabled, async () => {
                         const animeUnityProvider = new AnimeUnityProvider(animeUnityConfig);
-                        let res;
-                        if (id.startsWith('kitsu:')) res = await animeUnityProvider.handleKitsuRequest(id);
-                        else if (id.startsWith('mal:')) res = await animeUnityProvider.handleMalRequest(id);
-                        else if (id.startsWith('tt')) res = await animeUnityProvider.handleImdbRequest(id, seasonNumber, episodeNumber, isMovie);
-                        else if (id.startsWith('tmdb:')) res = await animeUnityProvider.handleTmdbRequest(toNumericId(id), seasonNumber, episodeNumber, isMovie);
-                        else if (id.startsWith('tvdb:')) res = await animeUnityProvider.handleTvdbRequest(toNumericId(id), seasonNumber, episodeNumber, isMovie);
-                        else res = { streams: [] };
-                        return res;
+                        if (id.startsWith('kitsu:')) return animeUnityProvider.handleKitsuRequest(id);
+                        if (id.startsWith('mal:')) return animeUnityProvider.handleMalRequest(id);
+                        if (id.startsWith('tt')) return animeUnityProvider.handleImdbRequest(id, seasonNumber, episodeNumber, isMovie);
+                        if (id.startsWith('tmdb:')) return animeUnityProvider.handleTmdbRequest(toNumericId(id), seasonNumber, episodeNumber, isMovie);
+                        if (id.startsWith('tvdb:')) return animeUnityProvider.handleTvdbRequest(toNumericId(id), seasonNumber, episodeNumber, isMovie);
+                        return { streams: [] };
                     }, providerLabel('animeunity'), 30000);  // AnimeUnity: timeout 30s
 
                     // AnimeSaturn
@@ -503,7 +502,9 @@ function createBuilder() {
                     {
                         allStreams.sort((a, b) => providerRank((a.name || a.title || '').toString()) - providerRank((b.name || b.title || '').toString()));
                     }
-                } catch { }
+                } catch {
+                    // Fallback to unsorted streams if provider sorting fails
+                }
 
                 debug(1, 'Addon', 'stream response', {
                     type: normalizedType,
@@ -548,7 +549,7 @@ app.use((req: Request, res: ExpressResponse, next: NextFunction) => {
         forwardedProto: req.get('x-forwarded-proto'),
         protocol: req.protocol,
     }) || `${req.protocol}://${req.get('host') || ''}`;
-    const manifest = withInstanceAssets(loadCustomConfig() as Record<string, any>, baseUrl);
+    const manifest = withInstanceAssets(loadCustomConfig() as Record<string, unknown>, baseUrl);
     // Con la config nel percorso il manifest non è più "configurabile": senza
     // questo l'app desktop apre la configurazione invece di installare.
     if (hasConfigSegment(req.path)) {
@@ -610,7 +611,7 @@ app.use((req: Request, res: ExpressResponse, next: NextFunction) => {
                 const jsonConfig = JSON.stringify(parsedConfig);
                 const encodedJsonConfig = encodeURIComponent(jsonConfig);
                 const oldPath = req.path;
-                const newPath = oldPath.replace('/' + configString, '/' + encodedJsonConfig);
+                const newPath = oldPath.replace(`/${configString}`, `/${encodedJsonConfig}`);
                 req.url = req.url.replace(oldPath, newPath);
                 // NOTE: req.path è read-only, ma il router Stremio SDK usa req.url, quindi basta riscrivere quello
                 // Invalida la cache interna di Express per forzare il re-parsing
@@ -634,7 +635,7 @@ app.use((req: Request, res: ExpressResponse, next: NextFunction) => {
             if (typeof req.query.extra === 'string') {
                 try {
                     extraObj = JSON.parse(req.query.extra);
-                } catch (e) {
+                } catch {
                     extraObj = {};
                 }
             } else if (typeof req.query.extra === 'object') {
