@@ -449,8 +449,12 @@ export function resolveLocalTarget(request: MappingRequest): MappingTarget | nul
     const target: MappingTarget = {
       kitsuId: request.id,
       kitsuEpisode: request.episode ?? 1,
+      // `alt` è la mappa costruita dai range dell'indice: porta il romaji del
+      // sito ("Tokyo Revengers: Santen Sensou-hen"), che è l'unica query che
+      // distingue un arco dalla serie base. Senza, la ricerca cade sulla madre
+      // e la stagione 4 mostra la 1.
       title: override?.title || '',
-      titleAlt: override?.titleAlt || '',
+      titleAlt: override?.titleAlt || alt?.titleAlt || '',
       titleIt: alt?.titleIt || override?.titleIt || '',
       titleItSeason: alt?.season ?? null,
       displaySeason: null,
