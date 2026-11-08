@@ -167,6 +167,8 @@ interface AnimeUnityStreamData {
   mp4_url: string | null;
   /** Altezza della variante HLS scelta, null se non dichiarata. */
   height: number | null;
+  /** Il player dichiara canPlayFHD: usato quando il manifest non viene scaricato. */
+  fhd?: boolean;
 }
 
 /**
@@ -402,8 +404,10 @@ async function resolveServerEmbedUrl(linkId: string, referer: string): Promise<s
 
 async function resolveEmbedMedia(
   embedUrl: string,
-  episodePage: string
-): Promise<{ hls_url: string | null; mp4_url: string | null; height: number | null }> {
+  episodePage: string,
+  /** false in modalità proxy: EasyProxy rifà max_res, il manifest qui è sprecato. */
+  needVariant = true
+): Promise<{ hls_url: string | null; mp4_url: string | null; height: number | null; fhd?: boolean }> {
   let hlsUrl: string | null = null;
   let mp4Url: string | null = null;
   let hlsHeight: number | null = null;
@@ -451,7 +455,7 @@ async function resolveEmbedMedia(
         // token vixcloud è legato all'IP del primo che la chiede, quindi deve
         // restare al client (o a EasyProxy), non consumarlo qui.
         hlsHeight = renditionHeight;
-      } else {
+      } else if (needVariant) {
         try {
           const manifest = String(await fetchPage(hlsUrl) || '');
           const highest = selectHighestHlsVariantInfo(manifest, hlsUrl);
@@ -469,16 +473,21 @@ async function resolveEmbedMedia(
     console.warn('[AnimeUnity] embed media failed:', error?.message || error);
   }
 
-  return { hls_url: hlsUrl, mp4_url: mp4Url, height: hlsHeight };
+  // Solo quando il manifest non è stato scaricato: `h=1` è il marcatore che
+  // parseVixcloudHls mette se il player dichiara canPlayFHD, e in proxy
+  // EasyProxy prende comunque la variante più alta. In diretto resta `height`.
+  const fhd = !needVariant && Boolean(hlsUrl && /[?&]h=1(?:&|$)/.test(hlsUrl));
+  return { hls_url: hlsUrl, mp4_url: mp4Url, height: hlsHeight, fhd };
 }
 
 async function getStreamData(
   animeId: number,
   animeSlug: string,
   episodeId: number,
-  language: 'sub' | 'dub'
+  language: 'sub' | 'dub',
+  needVariant = true
 ): Promise<AnimeUnityStreamData> {
-  if (isUnityCoBase()) return getUnityCoStreamData(animeId, animeSlug, episodeId);
+  if (isUnityCoBase()) return getUnityCoStreamData(animeId, animeSlug, episodeId, needVariant);
   const episodePage = `${getUnityBaseUrl()}/anime/${animeId}-${animeSlug}/ep-${episodeId}`;
   const empty: AnimeUnityStreamData = { episode_page: episodePage, embed_url: null, hls_url: null, mp4_url: null, height: null };
 
@@ -497,7 +506,7 @@ async function getStreamData(
     const embedUrl = await resolveServerEmbedUrl(server.linkId, episodePage);
     if (!embedUrl) return empty;
 
-    const media = await resolveEmbedMedia(embedUrl, episodePage);
+    const media = await resolveEmbedMedia(embedUrl, episodePage, needVariant);
     return { ...empty, embed_url: embedUrl, ...media };
   } catch (error: any) {
     console.warn('[AnimeUnity] getStreamData failed:', error?.message || error);
@@ -508,7 +517,8 @@ async function getStreamData(
 async function getUnityCoStreamData(
   animeId: number,
   animeSlug: string,
-  episodeId: number
+  episodeId: number,
+  needVariant = true
 ): Promise<AnimeUnityStreamData> {
   const episodePage = `${getUnityBaseUrl()}/anime/${animeId}-${animeSlug}/${episodeId}`;
   const empty: AnimeUnityStreamData = { episode_page: episodePage, embed_url: null, hls_url: null, mp4_url: null, height: null };
@@ -524,7 +534,7 @@ async function getUnityCoStreamData(
     if (!raw) return empty;
 
     const embedUrl = decodeHtmlAttribute(raw);
-    const media = await resolveEmbedMedia(embedUrl, episodePage);
+    const media = await resolveEmbedMedia(embedUrl, episodePage, needVariant);
     return { ...empty, embed_url: embedUrl, ...media };
   } catch (error: any) {
     console.warn('[AnimeUnity][co] getStreamData failed:', error?.message || error);
@@ -734,18 +744,32 @@ export class AnimeUnityProvider {
       streams.push({ title, url, name: providerLabel('animeunity', isFhd), behaviorHints: { notWebReady: true } });
     };
 
+    // In proxy il manifest lo scarica EasyProxy con max_res: chiederlo qui costa
+    // un hop (2 s di pacing) e consuma il token vixcloud legato al nostro IP.
+    const needVariant = !(proxyWanted && this.config.proxyUrl.trim());
+
     // .at espone SUB e ITA nello stesso episodio; .co ha schede separate per lingua.
     const languages: ('sub' | 'dub')[] = isUnityCoBase()
       ? [isUnityCoDubPage(String(html)) ? 'dub' : 'sub']
       : ['sub', 'dub'];
-    for (const language of languages) {
-      const streamResult = await getStreamData(animeId, animeSlug, selected.episodeId, language);
+    // SUB e DUB in parallelo: gli hop sull'host AnimeUnity restano in fila per il
+    // pacing, ma embed e manifest (host diversi) si sovrappongono. Il budget WAF
+    // non cambia: paceHost serializza comunque per host.
+    const episodeId = selected.episodeId;
+    const streamResults = await Promise.all(
+      languages.map((language) =>
+        getStreamData(animeId, animeSlug, episodeId, language, needVariant)
+          .catch(() => null)
+      )
+    );
+    for (const [index, streamResult] of streamResults.entries()) {
+      if (!streamResult) continue;
       if (!streamResult.hls_url && !streamResult.mp4_url && !streamResult.embed_url) continue;
 
-      const langLabel = language === 'dub' ? 'ITA' : 'SUB';
+      const langLabel = languages[index] === 'dub' ? 'ITA' : 'SUB';
       // FHD solo quando la variante HLS scelta dichiara 1080p o più. Il badge
       // sta nel nome del provider: il titolo non porta più la parola "FHD".
-      const quality = qualityTag(streamResult.height);
+      const quality = qualityTag(streamResult.height) || (streamResult.fhd ? 'FHD' : null);
       const isFhd = Boolean(quality);
       const baseTitle = `${capitalize(displayTitle)} ▪ ${langLabel} ▪ ${episodeTag(seasonNumber, resolvedEpisodeNum)}`;
 

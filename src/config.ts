@@ -194,11 +194,16 @@ export function parseConfigFromArgs(args: any): AddonConfig {
                     } catch (jsonError) {
                         debug(4, 'Addon', 'Base64 content is not valid JSON');
 
-                        // Prova a estrarre JSON dalla stringa decodificata
-                        const jsonMatch = decoded.match(/({.*})/);
-                        if (jsonMatch && jsonMatch[1]) {
+                        // Prova a estrarre JSON dalla stringa decodificata.
+                        // indexOf/lastIndexOf e non /({.*})/: su un segmento da 12 KB
+                        // senza parentesi il backtracking costa ~50 ms di event loop.
+                        const firstBrace = decoded.indexOf('{');
+                        const lastBrace = decoded.lastIndexOf('}');
+                        const extractedJson = firstBrace !== -1 && lastBrace > firstBrace
+                            ? decoded.slice(firstBrace, lastBrace + 1)
+                            : '';
+                        if (extractedJson) {
                             try {
-                                const extractedJson = jsonMatch[1];
                                 const parsed = JSON.parse(extractedJson);
                                 debug(4, 'Addon', 'Extracted JSON from Base64 decoded string');
                                 if (!isValidConfigObject(parsed)) {

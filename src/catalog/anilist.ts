@@ -17,6 +17,16 @@ const BATCH_DELAY_MS = 1000;
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/** Svuota il body: un errore non letto tiene occupato il socket keep-alive. */
+async function drain(response: Response): Promise<void> {
+  try {
+    const body = (response as any)?.text?.();
+    if (body && typeof body.catch === 'function') await body.catch(() => '');
+  } catch {
+    // Corpo assente o mock parziale: niente da drenare.
+  }
+}
+
 export interface CardIds {
   malId: number | null;
   anilistId: number | null;
@@ -28,6 +38,8 @@ export interface MalIdCheck {
   /** anilistId per cui AniList ha risposto (media presente, con `idMal` anche null). */
   answered: Set<number>;
   rateLimited?: boolean;
+  /** Il 429 portava un Retry-After: si è aspettato, quindi ritentare ha senso. */
+  waitedForRetry?: boolean;
 }
 
 /**
@@ -62,6 +74,9 @@ async function queryPairs(
     return;
   }
   if (response.status === 404) {
+    // Il body va consumato: un 404 non letto tiene occupato il socket e il
+    // dimezzamento ne apre uno nuovo a ogni passo.
+    await drain(response);
     if (pairs.length === 1) {
       // Un id solo che risponde 404: AniList non lo conosce. Esito definitivo,
       // altrimenti quella scheda resta in testa alla coda per sempre.
@@ -78,12 +93,17 @@ async function queryPairs(
     out.rateLimited = true;
     const retryHeader = response.headers?.get ? response.headers.get('retry-after') : null;
     const retryAfter = Number(retryHeader);
+    await drain(response);
     if (Number.isFinite(retryAfter) && retryAfter > 0) {
+      out.waitedForRetry = true;
       await sleep(Math.min(retryAfter * 1000, 60_000));
     }
     return;
   }
-  if (!response.ok) return; // 5xx/altri: silenzio, non si moltiplicano le richieste
+  if (!response.ok) {
+    await drain(response);
+    return; // 5xx/altri: silenzio, non si moltiplicano le richieste
+  }
   const json = (await response.json()) as {
     data?: Record<string, { idMal?: number | null } | null>;
   };
@@ -125,10 +145,16 @@ export async function confirmMalIds(
     first = false;
   };
   for (let start = 0; start < usable.length; start += BATCH) {
+    const batch = usable.slice(start, start + BATCH);
     const check: MalIdCheck = { confirmed, answered };
-    await queryPairs(usable.slice(start, start + BATCH), fetcher, check, pause);
+    await queryPairs(batch, fetcher, check, pause);
     if (check.rateLimited) {
-      break;
+      // Solo se il 429 portava un Retry-After (si è già aspettato) ha senso
+      // ritentare il blocco: senza attesa si insisterebbe e basta.
+      if (!check.waitedForRetry) break;
+      const retry: MalIdCheck = { confirmed, answered };
+      await queryPairs(batch, fetcher, retry, pause);
+      if (retry.rateLimited) break;
     }
   }
   return { confirmed, answered };

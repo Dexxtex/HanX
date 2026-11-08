@@ -137,6 +137,20 @@ function readJson(filePath: string): unknown {
   }
 }
 
+/**
+ * Come `readJson`, ma tiene anche il testo letto: la signature si calcola
+ * sull'originale invece di ri-serializzare l'albero (13 MB di indice).
+ */
+function readJsonWithRaw(filePath: string): { data: unknown; raw: string } {
+  let raw = '';
+  try {
+    raw = fs.readFileSync(filePath, 'utf8');
+    return { data: JSON.parse(raw), raw };
+  } catch {
+    return { data: null, raw };
+  }
+}
+
 function statMtime(filePath: string): number {
   try {
     return fs.statSync(filePath).mtimeMs;
@@ -199,13 +213,13 @@ function loadIndex(): AnimeMappingIndex {  const filePath = indexFilePath();
     return snapshot.index;
   }
 
-  const rawIndex = mtimeMs === -1 ? null : readJson(filePath);
-  const rawOverrides = overridesMtimeMs === -1 ? null : readJson(overridesFile);
-  let index = mergeOverrides(normalizeIndex(rawIndex), rawOverrides);
+  const indexRead = mtimeMs === -1 ? { data: null, raw: '' } : readJsonWithRaw(filePath);
+  const overridesRead = overridesMtimeMs === -1 ? { data: null, raw: '' } : readJsonWithRaw(overridesFile);
+  let index = mergeOverrides(normalizeIndex(indexRead.data), overridesRead.data);
   const signature = createHash('sha256')
     .update(
       `${index.version}|${index.generatedAt || ''}|${Object.keys(index.series).length}|${Object.keys(index.movies).length}|` +
-        `${JSON.stringify(rawIndex)}|${JSON.stringify(rawOverrides)}`
+        `${indexRead.raw}|${overridesRead.raw}`
     )
     .digest('hex')
     .slice(0, 16);
@@ -361,6 +375,9 @@ export async function refreshMappingFromUrl(): Promise<void> {
       const nextEtag = res.headers.get('etag');
       if (nextEtag) writeAtomic(`${target}.etag`, nextEtag);
       snapshot = null;
+      // Ricarica subito: altrimenti il primo utente dopo il refresh paga il
+      // parse dei 13 MB e il calcolo della signature.
+      loadIndex();
       debug(2, 'Mapping', 'remote index updated', {
         series: Object.keys(index.series).length,
         movies: Object.keys(index.movies).length,

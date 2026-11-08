@@ -55,7 +55,6 @@ export function setCached<T = any>(map: Map<string, CacheEntry<T>>, key: string,
 export function createCaches() {
   return {
     http: new Map<string, CacheEntry>(),
-    mapping: new Map<string, CacheEntry>(),
     inflight: new Map<string, Promise<any>>(),
   };
 }

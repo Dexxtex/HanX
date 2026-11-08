@@ -179,14 +179,38 @@ const FORMAT_SUFFIX_TOKENS = new Set([
   'edition', 'version', 'uncut', 'uncensored', 'short',
 ]);
 
+// La normalizzazione costa ~3 us per titolo: sul catalogo (20k schede x 3 query)
+// sono centinaia di ms per richiesta. Le stringhe sono un insieme chiuso, quindi
+// il risultato si memorizza (funzioni pure, array condivisi in sola lettura).
+const TOKEN_CACHE_LIMIT = 50_000;
+const tokenCache = new Map<string, string[]>();
+const filteredTokenCache = new Map<string, string[]>();
+
+function memoize(cache: Map<string, string[]>, key: string, build: () => string[]): string[] {
+  const hit = cache.get(key);
+  if (hit) return hit;
+  const value = Object.freeze(build()) as unknown as string[];
+  if (cache.size >= TOKEN_CACHE_LIMIT) cache.clear();
+  cache.set(key, value);
+  return value;
+}
+
 function titleTokens(title: string): string[] {
-  return cleanTokens(title).filter(
-    (token) => !TITLE_STOP_WORDS.has(token) && !TITLE_LANGUAGE_WORDS.has(token)
+  const key = String(title || '');
+  return memoize(filteredTokenCache, key, () =>
+    cleanTokens(key).filter(
+      (token) => !TITLE_STOP_WORDS.has(token) && !TITLE_LANGUAGE_WORDS.has(token)
+    )
   );
 }
 
 /** Token senza filtri di stopword: serve per confrontare "Mission-E" con "MissionE". */
 function cleanTokens(title: string): string[] {
+  const key = String(title || '');
+  return memoize(tokenCache, key, () => buildCleanTokens(key));
+}
+
+function buildCleanTokens(title: string): string[] {
   const tokens = normalizeHomoglyphs(String(title || ''))
     .normalize('NFKD')
     .replace(/[\u0300-\u036f]/g, '')
@@ -224,6 +248,9 @@ export function titleMatchScore(requested: string, candidate: string): number {
   // filtrati. Riprodotto dal vivo il 3/11/2026: il sito risponde "Mission-E",
   // il filtro lo scarta e lo stream manca.
   if (cleanTokens(requested).join('') === cleanTokens(candidate).join('')) return 1;
+  // Le due join qui sopra sono l'ultimo confronto esatto: da qui in poi servono
+  // solo match parziali, che richiedono almeno un token in comune.
+  if (!query.some((token) => found.includes(token))) return 0;
 
   // Il sito antepone parole al titolo invece di aggiungerle: "Reborn!" lì è
   // "Tutor Hitman Reborn!" (Saturn) e "Katekyo Hitman Reborn!" (World). La

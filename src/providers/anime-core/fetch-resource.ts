@@ -45,8 +45,10 @@ function getProxyAgent(proxyUrl: string): any {
   const cached = proxyAgents.get(proxyUrl);
   if (cached) return cached;
   debug(4, 'Fetch', 'proxy agent created', redactUrl(proxyUrl));
+  // keepAlive: senza, ogni richiesta paga TCP + SOCKS5 + TLS (100-320 ms).
+  // ProxyAgent (undici) ha già il pooling attivo; SocksProxyAgent no.
   const agent = proxyUrl.startsWith('socks')
-    ? new SocksProxyAgent(proxyUrl)
+    ? new SocksProxyAgent(proxyUrl, { keepAlive: true })
     : new ProxyAgent(proxyUrl);
   proxyAgents.set(proxyUrl, agent);
   return agent;
@@ -131,7 +133,6 @@ function getProxyChain(url: string, platformOverride?: ProxyPlatform): { label: 
  */
 export interface ProviderCaches {
   http: Map<string, CacheEntry>;
-  mapping: Map<string, CacheEntry>;
   inflight: Map<string, Promise<any>>;
 }
 

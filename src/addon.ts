@@ -54,7 +54,7 @@ function sortStreamsByPriority(streams: { url?: string; title?: string }[]): voi
 // ================= MANIFEST BASE (restored) =================
 const baseManifest: Manifest = {
     id: "org.stremio.hanx",
-    version: "1.1.4",
+    version: "1.1.5",
     name: "HanX",
     description: "HanX addon dedicato ad AnimeUnity, AnimeSaturn e AnimeWorld",
     types: ["movie", "series", "anime"],
@@ -691,6 +691,9 @@ app.get('/', (req: Request, res: ExpressResponse) => {
 const PORT = parseInt(process.env.PORT || '7000', 10);
 const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 HanX addon listening on http://0.0.0.0:${PORT}`);
+    // L'indice mapping (13 MB) si carica qui e non alla prima richiesta: dopo un
+    // refresh lo snapshot è nullo, e il primo utente pagherebbe parse + hash.
+    void getMappingVersion();
     // Indice mapping remoto: parte dopo il listen, non blocca l'avvio.
     void refreshMappingFromUrl();
     setInterval(() => void refreshMappingFromUrl(), MAPPING_REFRESH_INTERVAL_MS).unref();

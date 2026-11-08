@@ -33,23 +33,12 @@ interface TmdbBasicResponse {
   title?: string;
 }
 
-async function getTmdbIdFromImdb(imdbId: string, tmdbKey: string): Promise<string | null> {
-  try {
-    const { getTmdbIdFromImdbId } = await import('./tmdbResolver.js');
-    const imdbOnly = imdbId.split(':')[0];
-    const tmdbId = await getTmdbIdFromImdbId(imdbOnly, tmdbKey, 'tv');
-    return tmdbId || null;
-  } catch {
-    return null;
-  }
-}
-
 async function fetchTmdbDetailsAny(tmdbId: string, tmdbKey: string, mediaHint?: 'movie' | 'tv'): Promise<any | null> {
   const tryEndpoints: ('movie' | 'tv')[] = mediaHint ? [mediaHint, mediaHint === 'movie' ? 'tv' : 'movie'] : ['tv', 'movie'];
   for (const kind of tryEndpoints) {
     try {
       const url = `https://api.themoviedb.org/3/${kind}/${tmdbId}?api_key=${tmdbKey}`;
-      const resp = await fetch(url);
+      const resp = await fetch(url, { signal: AbortSignal.timeout(10_000) });
       if (!resp.ok) continue;
       const json = (await resp.json()) as TmdbBasicResponse;
       if (json && (json.id || json.name || json.title)) return json;
@@ -142,8 +131,13 @@ async function resolveAnimeGate(
     return { isAnime: true, hasMal: false, hasKitsu: false, reason: 'no-tmdb-key' };
   }
   let tmdbId: string | null = null;
+  let fromFind: { isAnime: boolean } | null = null;
   if (type === 'imdb') {
-    tmdbId = await getTmdbIdFromImdb(id, tmdbKey);
+    // `/find` porta già genere e origine: se dice "anime" non serve `/tv/{id}`.
+    const { getTmdbSummaryFromImdbId } = await import('./tmdbResolver.js');
+    const summary = await getTmdbSummaryFromImdbId(id.split(':')[0], tmdbKey, mediaHint);
+    tmdbId = summary?.id || null;
+    fromFind = summary;
   } else {
     tmdbId = id;
   }
@@ -157,6 +151,12 @@ async function resolveAnimeGate(
   const allowTmdbFallback = (process.env.ANIME_GATE_TMDB_FALLBACK || 'true') !== 'false';
   if (!allowTmdbFallback) {
     return { isAnime: false, hasMal: false, hasKitsu: false, reason: 'no-mapping-and-fallback-disabled' };
+  }
+  // Il verdetto positivo arriva già da `/find`: una seconda richiesta servirebbe
+  // solo a confermarlo. Il "non anime" invece si verifica sui dettagli pieni.
+  if (fromFind?.isAnime) {
+    debug(2, 'AnimeGate', 'anime', { type, id, reason: 'tmdb-find' });
+    return { isAnime: true, hasMal: false, hasKitsu: false, reason: 'tmdb-find' };
   }
   const details = await fetchTmdbDetailsAny(tmdbId, tmdbKey, mediaHint);
   if (!details) {

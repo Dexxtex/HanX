@@ -404,6 +404,13 @@ async function resolveLiveMovie(request: MappingRequest, credentialsInput: Mappi
   const credentials = normalizeMappingCredentials(credentialsInput);
   const tmdbKey = tmdbKeyFor(credentials.tmdbApiKey);
   debug(3, 'Mapping/Live', 'movie lookup', { provider: request.provider, id: request.id });
+  // Un film non mappato costa 2-3 richieste a ogni click: la chiave include la
+  // coppia provider:id, quindi due richieste ravvicinate condividono il risultato.
+  const cacheKey = `live:movie:${request.provider}:${request.id}:${hashTvdbCredentials(tmdbKey, '')}`;
+  return cached(cacheKey, () => resolveLiveMovieUncached(request, tmdbKey));
+}
+
+async function resolveLiveMovieUncached(request: MappingRequest, tmdbKey: string): Promise<MappingTarget | null> {
   // Kitsu has no IMDb/TMDB mappings for anime movies. Resolve the official
   // TMDB movie title/year and use Kitsu's public title search.
   if (!tmdbKey) {
