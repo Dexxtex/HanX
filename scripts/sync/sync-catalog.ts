@@ -263,10 +263,11 @@ function enrichMalIds(catalog: CatalogFile, startedAt: number) {
   return enrichMalIdsImpl(catalog, {
     readPage: async (entry) => (await request(entry.url)).body,
     isBlocked: (err) => err instanceof BlockedError,
-    quota: Math.ceil(MALID_MAX_REQUESTS / 2),
-    // Unity legge solo per gli id episodio: quota sua, cosi il backlog malId
-    // di saturn e world non rallenta.
-    quotaBySite: { unity: MALID_MAX_REQUESTS },
+    // Il budget totale non cambia: meta' a Unity (id episodio), il resto diviso
+    // tra saturn e world. Con 600 richieste a 3 s sono ~30 min, dentro la
+    // deadline di 32: se il totale sfora, Unity si ferma senza fare progressi.
+    quota: Math.ceil((MALID_MAX_REQUESTS - Math.ceil(MALID_MAX_REQUESTS / 2)) / 2),
+    quotaBySite: { unity: Math.ceil(MALID_MAX_REQUESTS / 2) },
     deadline: startedAt + MALID_DEADLINE_MIN * 60_000,
     describe: describeError,
     log: (line) => console.log(line),
