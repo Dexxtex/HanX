@@ -17,7 +17,6 @@ import {
 } from './config.js';
 import { AnimeUnityProvider } from './providers/animeunity-provider.js';
 import { providerRequestStore } from './providers/anime-core/fetch-resource.js';
-import { collectWithinBudget } from './providers/anime-core/fanout.js';
 import { providerLabel } from './utils/unifiedNames.js';
 import { landingTemplate } from './landingPage.js';
 import { toNumericId, parseRequestId } from './mapping/request.js';
@@ -55,7 +54,7 @@ function sortStreamsByPriority(streams: { url?: string; title?: string }[]): voi
 // ================= MANIFEST BASE (restored) =================
 const baseManifest: Manifest = {
     id: "org.stremio.hanx",
-    version: "1.1.9",
+    version: "1.1.10",
     name: "HanX",
     description: "HanX addon dedicato ad AnimeUnity, AnimeSaturn e AnimeWorld",
     types: ["movie", "series", "anime"],
@@ -149,17 +148,6 @@ const PROVIDER_CACHE_TTL_MS = (() => {
         const n = parseInt(process.env.PROVIDER_CACHE_TTL_MS || '300000', 10);
         return Number.isFinite(n) && n > 0 ? n : 300000;
     } catch { return 300000; }
-})();
-// Budget della risposta: oltre questo tempo la lista esce con quello che c'è.
-// **Disattivato per default (0)**: tagliare la lista toglie i provider lenti, e
-// su una serie fredda il primo provider arriva a 7-10 s. Chi lo vuole lo accende
-// con STREAM_RESPONSE_BUDGET_MS, sapendo che la prima apertura mostrerà meno
-// stream (i mancanti arrivano alla riapertura, dalla cache).
-const STREAM_RESPONSE_BUDGET_MS = (() => {
-    const raw = process.env.STREAM_RESPONSE_BUDGET_MS;
-    if (raw === undefined || raw.trim() === '') return 0;
-    const n = parseInt(raw, 10);
-    return Number.isFinite(n) && n >= 0 ? n : 0;
 })();
 const PROVIDER_CACHE_MAX_ENTRIES = (() => {
     try {
@@ -311,9 +299,6 @@ function createBuilder() {
                 const allStreams: Stream[] = [];
                 let _providerConfigSig = ''; // Dichiarato qui per essere in scope nel cache-set finale
                 let providerFailure = false;
-                // Lista tagliata dal budget: non va in cache, altrimenti per 5
-                // minuti il provider lento resterebbe invisibile.
-                let responseTruncated = false;
 
                 // === LOGICA ANIME/FILM (originale) ===
                 // Per tutto il resto, usa solo easyProxyUrl/easyProxyPassword
@@ -501,30 +486,11 @@ function createBuilder() {
                         return { streams: [] };
                     }, providerLabel('animeworld'), 30000);  // AnimeWorld: timeout 30s
 
-                    const fanout = await collectWithinBudget(providerPromises, {
-                        budgetMs: STREAM_RESPONSE_BUDGET_MS,
-                        onBudget: (ready) => debug(1, 'Addon', 'budget di risposta raggiunto', {
-                            budgetMs: STREAM_RESPONSE_BUDGET_MS,
-                            pronti: ready,
-                            attesi: providerPromises.length,
-                        }),
-                        onEmptyBudget: (ready) => debug(1, 'Addon', 'budget scaduto senza stream: atteso il primo provider', { pronti: ready }),
-                    });
-                    for (const s of fanout.items) allStreams.push(s);
-                    if (fanout.truncated) {
-                        responseTruncated = true;
-                        // Quando anche l'ultimo provider finisce, la lista completa
-                        // va in cache: la prossima apertura è un hit, non un altro
-                        // fan-out. Solo se nessuno è fallito.
-                        void Promise.all(providerPromises).then((groups) => {
-                            if (providerFailure || !_providerConfigSig) return;
-                            const complete: Stream[] = [];
-                            for (const group of groups) {
-                                for (const s of group) complete.push(s);
-                            }
-                            _providerCacheSet(normalizedType, id, _providerConfigSig, complete);
-                            debug(1, 'Addon', 'cache completata in background', { streams: complete.length });
-                        });
+                    // Si aspettano tutti: consegnare una lista tagliata toglie i
+                    // provider lenti, e su una serie mai vista sono 7-10 s.
+                    const allProviderResults = await Promise.all(providerPromises);
+                    for (const group of allProviderResults) {
+                        for (const s of group) allStreams.push(s);
                     }
 
                 }
@@ -558,7 +524,7 @@ function createBuilder() {
                 // Cache the fan-out result for repeat plays, but never when a
                 // provider failed or timed out: a partial list would hide it for
                 // 5 minutes.
-                if (!providerFailure && !responseTruncated && _providerConfigSig && (id.startsWith('tt') || id.startsWith('tmdb:') || id.startsWith('tvdb:') || id.startsWith('kitsu:') || id.startsWith('mal:'))) {
+                if (!providerFailure && _providerConfigSig && (id.startsWith('tt') || id.startsWith('tmdb:') || id.startsWith('tvdb:') || id.startsWith('kitsu:') || id.startsWith('mal:'))) {
                     _providerCacheSet(normalizedType, id, _providerConfigSig, allStreams);
                 }
                 return { streams: allStreams };
