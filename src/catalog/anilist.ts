@@ -27,6 +27,7 @@ export interface MalIdCheck {
   confirmed: Map<number, number>;
   /** anilistId per cui AniList ha risposto (media presente, con `idMal` anche null). */
   answered: Set<number>;
+  rateLimited?: boolean;
 }
 
 /**
@@ -72,7 +73,16 @@ async function queryPairs(
     await queryPairs(pairs.slice(middle), fetcher, out, pause);
     return;
   }
-  if (!response.ok) return; // 429/5xx: silenzio, non si moltiplicano le richieste
+  if (response.status === 429) {
+    out.rateLimited = true;
+    const retryHeader = response.headers?.get ? response.headers.get('retry-after') : null;
+    const retryAfter = Number(retryHeader);
+    if (Number.isFinite(retryAfter) && retryAfter > 0) {
+      await sleep(Math.min(retryAfter * 1000, 60_000));
+    }
+    return;
+  }
+  if (!response.ok) return; // 5xx/altri: silenzio, non si moltiplicano le richieste
   const json = (await response.json()) as {
     data?: Record<string, { idMal?: number | null } | null>;
   };
@@ -114,7 +124,11 @@ export async function confirmMalIds(
     first = false;
   };
   for (let start = 0; start < usable.length; start += BATCH) {
-    await queryPairs(usable.slice(start, start + BATCH), fetcher, { confirmed, answered }, pause);
+    const check: MalIdCheck = { confirmed, answered };
+    await queryPairs(usable.slice(start, start + BATCH), fetcher, check, pause);
+    if (check.rateLimited) {
+      break;
+    }
   }
   return { confirmed, answered };
 }

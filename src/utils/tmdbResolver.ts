@@ -9,6 +9,7 @@ const TMDB_API_BASE_URL = "https://api.themoviedb.org/3";
 const TMDB_FIND_CACHE_TTL_MS = 60 * 60 * 1000;
 const TMDB_FIND_CACHE_MAX_ENTRIES = 500;
 const tmdbFindCache = new Map<string, { value: string; expires: number }>();
+const tmdbInFlight = new Map<string, Promise<string | null>>();
 
 function rememberTmdbId(key: string, value: string): string {
   tmdbFindCache.set(key, { value, expires: Date.now() + TMDB_FIND_CACHE_TTL_MS });
@@ -67,39 +68,50 @@ export async function getTmdbIdFromImdbId(imdbId: string, tmdbApiKey?: string, p
   const cacheKey = `${imdbId}|${preferredType || ''}|${tmdbApiKey}`;
   const cachedResult = tmdbFindCache.get(cacheKey);
   if (cachedResult && cachedResult.expires > Date.now()) return cachedResult.value;
-  try {
-    const response = await fetch(findUrl);
-    if (!response.ok) {
-      console.error(`Failed to fetch TMDB ID for ${imdbId}: ${response.status}`);
+
+  const running = tmdbInFlight.get(cacheKey);
+  if (running) return running;
+
+  const promise = (async () => {
+    try {
+      const response = await fetch(findUrl, { signal: (AbortSignal as any).timeout(10_000) });
+      if (!response.ok) {
+        console.error(`Failed to fetch TMDB ID for ${imdbId}: ${response.status}`);
+        return null;
+      }
+      const data = (await response.json()) as TmdbFindResponse;
+
+      // Priorità intelligente: se preferredType è specificato, cerca prima quel tipo
+      const movieResults = data.movie_results || [];
+      const tvResults = data.tv_results || [];
+
+      if (preferredType === 'tv' && tvResults.length > 0) {
+        debug(2, 'TMDB', `[IMDB→TMDB] Preferred TV: ${imdbId} → TMDB ${tvResults[0].id} (${tvResults[0].name})`);
+        return rememberTmdbId(cacheKey, tvResults[0].id.toString());
+      } else if (preferredType === 'movie' && movieResults.length > 0) {
+        debug(2, 'TMDB', `[IMDB→TMDB] Preferred Movie: ${imdbId} → TMDB ${movieResults[0].id} (${movieResults[0].title})`);
+        return rememberTmdbId(cacheKey, movieResults[0].id.toString());
+      }
+
+      // Fallback: se preferredType non trova nulla, prova l'altro tipo
+      if (movieResults.length > 0) {
+        debug(3, 'TMDB', `[IMDB→TMDB] Fallback Movie: ${imdbId} → TMDB ${movieResults[0].id} (${movieResults[0].title})`);
+        return rememberTmdbId(cacheKey, movieResults[0].id.toString());
+      } else if (tvResults.length > 0) {
+        debug(3, 'TMDB', `[IMDB→TMDB] Fallback TV: ${imdbId} → TMDB ${tvResults[0].id} (${tvResults[0].name})`);
+        return rememberTmdbId(cacheKey, tvResults[0].id.toString());
+      }
+
+      console.warn(`No TMDB movie or TV results found for IMDb ID: ${imdbId}`);
       return null;
+    } catch (error) {
+      console.error(`Error fetching TMDB ID for ${imdbId}:`, error);
+      return null;
+    } finally {
+      tmdbInFlight.delete(cacheKey);
     }
-    const data = (await response.json()) as TmdbFindResponse;
+  })();
 
-    // Priorità intelligente: se preferredType è specificato, cerca prima quel tipo
-    const movieResults = data.movie_results || [];
-    const tvResults = data.tv_results || [];
-
-    if (preferredType === 'tv' && tvResults.length > 0) {
-      debug(2, 'TMDB', `[IMDB→TMDB] Preferred TV: ${imdbId} → TMDB ${tvResults[0].id} (${tvResults[0].name})`);
-      return rememberTmdbId(cacheKey, tvResults[0].id.toString());
-    } else if (preferredType === 'movie' && movieResults.length > 0) {
-      debug(2, 'TMDB', `[IMDB→TMDB] Preferred Movie: ${imdbId} → TMDB ${movieResults[0].id} (${movieResults[0].title})`);
-      return rememberTmdbId(cacheKey, movieResults[0].id.toString());
-    }
-
-    // Fallback: se preferredType non trova nulla, prova l'altro tipo
-    if (movieResults.length > 0) {
-      debug(3, 'TMDB', `[IMDB→TMDB] Fallback Movie: ${imdbId} → TMDB ${movieResults[0].id} (${movieResults[0].title})`);
-      return rememberTmdbId(cacheKey, movieResults[0].id.toString());
-    } else if (tvResults.length > 0) {
-      debug(3, 'TMDB', `[IMDB→TMDB] Fallback TV: ${imdbId} → TMDB ${tvResults[0].id} (${tvResults[0].name})`);
-      return rememberTmdbId(cacheKey, tvResults[0].id.toString());
-    }
-
-    console.warn(`No TMDB movie or TV results found for IMDb ID: ${imdbId}`);
-    return null;
-  } catch (error) {
-    console.error(`Error fetching TMDB ID for ${imdbId}:`, error);
-    return null;
-  }
+  tmdbInFlight.set(cacheKey, promise);
+  return promise;
 }

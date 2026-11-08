@@ -450,7 +450,8 @@ async function getTmdbEpisode(
   request: MappingRequest,
   credentials: MappingCredentials = {}
 ): Promise<{ aired: string | null } | null> {
-  if (request.season === null || request.episode === null) return null;
+  const season = request.season ?? 1;
+  if (request.episode === null) return null;
   const tmdbKey = tmdbKeyFor(credentials.tmdbApiKey);
   if (!tmdbKey) return null;
 
@@ -460,9 +461,9 @@ async function getTmdbEpisode(
   if (!tmdbId) return null;
 
   const json = await cached(
-    `tmdb:season:${createHash('sha256').update(tmdbKey).digest('hex').slice(0, 16)}:${tmdbId}:${request.season}`,
+    `tmdb:season:${createHash('sha256').update(tmdbKey).digest('hex').slice(0, 16)}:${tmdbId}:${season}`,
     () => fetchJson<any>(
-      `${TMDB_API}/tv/${encodeURIComponent(tmdbId)}/season/${request.season}?api_key=${tmdbKey}`
+      `${TMDB_API}/tv/${encodeURIComponent(tmdbId)}/season/${season}?api_key=${tmdbKey}`
     )
   );
   const episode = Array.isArray(json?.episodes)
@@ -521,7 +522,7 @@ async function resolveLiveSeries(request: MappingRequest, credentialsInput: Mapp
 
   const targetDay = toDay(targetEpisode.aired);
   const exactStart = entries.find((entry) => daysClose(targetDay, toDay(entry.startDate)));
-  if (exactStart) {
+  if (exactStart && (targetEpisode.number === 1 || request.episode === 1)) {
     debug(2, 'Mapping/Live', 'exact start match', { kitsuId: exactStart.id, title: exactStart.title });
     return {
       kitsuId: exactStart.id,
@@ -566,6 +567,7 @@ async function resolveLiveSeries(request: MappingRequest, credentialsInput: Mapp
   const chosenDay = toDay(chosen.startDate);
   if (chosenDay !== null) {
     startIndex = allEpisodes.findIndex((episode) => {
+      if ((request.season ?? 1) !== 0 && episode.seasonNumber === 0) return false;
       const day = toDay(episode.aired);
       return day !== null && day >= chosenDay - 1;
     });

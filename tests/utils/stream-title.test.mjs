@@ -49,3 +49,13 @@ test('providerRank: ordine Anime Unity, Anime Saturn, Anime World, resto', () =>
   assert.equal(providerRank('🌍 Anime World'), 3);
   assert.equal(providerRank('Algolia'), 50);
 });
+
+test('unifyStreams: nessun dangling bracket con [SUB ITA] e deduplica URL identici', () => {
+  const [first, ...rest] = unifyStreams([
+    { title: 'Titolo ▪ [SUB ITA] ▪ S01E01', url: 'https://cdn.example/s1e1.mp4' },
+    { title: 'Titolo duplicato', url: 'https://cdn.example/s1e1.mp4' },
+  ], '🪐 Anime Saturn');
+
+  assert.equal(first.title.split('\n')[0], '🎞️ Titolo ▪ S01E01');
+  assert.equal(rest.length, 0);
+});

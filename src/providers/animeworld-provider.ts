@@ -348,7 +348,16 @@ export function isSingleFallbackHit(
   filtered: Array<{ slug?: string }>,
   fromFallback: boolean
 ): boolean {
-  return fromFallback && filtered.length === 0 && versions.length === 1;
+  if (!fromFallback || filtered.length !== 0 || versions.length === 0) return false;
+  if (versions.length === 1) return true;
+  // Se ha restituito due schede che condividono la stessa base (SUB e ITA dello stesso anime),
+  // vale comunque come unico risultato del sito.
+  if (versions.length === 2) {
+    const base0 = animeWorldSlugBase(versions[0]?.slug || '');
+    const base1 = animeWorldSlugBase(versions[1]?.slug || '');
+    return Boolean(base0 && base0 === base1);
+  }
+  return false;
 }
 
 async function awSearch(query: string, date?: string): Promise<AnimeWorldResult[]> {  const q = encodeURIComponent(String(query || '').trim());

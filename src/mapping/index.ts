@@ -108,12 +108,22 @@ function mergeOverrides(index: AnimeMappingIndex, overrides: unknown): AnimeMapp
   };
   if (isRecord(overrides.series)) {
     for (const [key, value] of Object.entries(overrides.series)) {
-      if (isRecord(value)) merged.series[key] = value as SeriesIndexEntry;
+      if (isRecord(value)) {
+        const existing = merged.series[key];
+        merged.series[key] = existing ? {
+          ...existing,
+          ...value,
+          seasons: { ...existing.seasons, ...((value as any).seasons || {}) },
+        } as SeriesIndexEntry : value as SeriesIndexEntry;
+      }
     }
   }
   if (isRecord(overrides.movies)) {
     for (const [key, value] of Object.entries(overrides.movies)) {
-      if (isRecord(value)) merged.movies[key] = value as any;
+      if (isRecord(value)) {
+        const existing = merged.movies[key];
+        merged.movies[key] = existing ? { ...existing, ...value } as any : value as any;
+      }
     }
   }
   return merged;
@@ -528,16 +538,16 @@ export function resolveLocalTarget(request: MappingRequest): MappingTarget | nul
   // può essere quello TVDB (giapponese) o l'italiano di TMDB, e il range porta
   // spesso il secondo.
   const sharesSeriesTitle =
-    !!range.title && (range.title === series.title || (!!series.titleIt && range.title === series.titleIt));
+    !range.title || range.title === series.title || (!!series.titleIt && range.title === series.titleIt);
   if (isSpecial && sharesSeriesTitle) {
     debug(3, 'Mapping', 'local miss', { provider: request.provider, id: request.id, reason: 'special-shares-series-title' });
     return null;
   }
   const target: MappingTarget = {
-    kitsuId: String(range.kitsuId),
+    kitsuId: String(range.kitsuId || ''),
     kitsuEpisode,
     title: range.title || series.title || '',
-    titleAlt: range.titleAlt || '',
+    titleAlt: range.titleAlt || series.titleAlt || '',
     // TMDB it-IT a volte restituisce il titolo giapponese (es. "ファントム THE
     // ANIMATION"): come query italiana è una richiesta sprecata, quindi si scarta.
     titleIt: isSpecial ? '' : latinTitle(series.titleIt),

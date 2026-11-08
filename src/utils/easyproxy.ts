@@ -9,7 +9,8 @@ function buildEasyProxyUrl(
 ): string {
   if (!targetUrl || !proxyUrl.trim()) return targetUrl;
 
-  const base = proxyUrl.trim().replace(/\/+$/, '');
+  const raw = proxyUrl.trim();
+  const base = /^https?:\/\//i.test(raw) ? raw.replace(/\/+$/, '') : `http://${raw.replace(/\/+$/, '')}`;
   const params = new URLSearchParams({ d: targetUrl });
   if (proxyPassword) params.set('api_password', proxyPassword);
 

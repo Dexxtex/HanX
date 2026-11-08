@@ -167,28 +167,23 @@ export async function fetchWithTimeout(
   options: any = {},
   timeoutMs: number = DEFAULT_FETCH_TIMEOUT
 ): Promise<any> {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-  
-  // Rimuovi agent e signal da options se presenti per gestirli manualmente
-  const { agent, ...restOptions } = options;
+  const timeoutSignal = AbortSignal.timeout(timeoutMs);
+  const signal = options.signal ? (AbortSignal as any).any([options.signal, timeoutSignal]) : timeoutSignal;
 
-  try {
-    // node-fetch honors agent; native fetch only honors an undici dispatcher.
-    if (agent instanceof SocksProxyAgent) {
-      return await nodeFetch(url, { ...restOptions, agent, signal: controller.signal as any });
-    }
-    const init: any = { ...restOptions, signal: controller.signal };
-    // Global fetch is a different undici copy on Node 22/24; its dispatcher must come from that copy.
-    if (agent instanceof ProxyAgent) {
-      return await undiciFetch(url, { ...init, dispatcher: agent });
-    }
-    init.agent = agent;
-    const response = await fetchImpl(url, init);
-    return response;
-  } finally {
-    clearTimeout(timeoutId);
+  // Rimuovi agent e signal da options se presenti per gestirli manualmente
+  const { agent, signal: _ignored, ...restOptions } = options;
+
+  // node-fetch honors agent; native fetch only honors an undici dispatcher.
+  if (agent instanceof SocksProxyAgent) {
+    return await nodeFetch(url, { ...restOptions, agent, signal: signal as any });
   }
+  const init: any = { ...restOptions, signal };
+  // Global fetch is a different undici copy on Node 22/24; its dispatcher must come from that copy.
+  if (agent instanceof ProxyAgent) {
+    return await undiciFetch(url, { ...init, dispatcher: agent });
+  }
+  init.agent = agent;
+  return await fetchImpl(url, init);
 }
 
 

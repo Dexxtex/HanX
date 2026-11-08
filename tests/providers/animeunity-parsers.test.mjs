@@ -109,6 +109,8 @@ test('vixsrcEmbedUrl manda al proxy la pagina embed, non la playlist', () => {
   // Al proxy va l'embed: è lui il primo a usare il token, dal suo IP.
   assert.equal(vixsrcEmbedUrl('https://vixcloud.cc/embed/89716'), 'https://vixsrc.to/embed/89716');
   assert.equal(vixsrcEmbedUrl('https://www.vixcloud.co/embed/abc'), 'https://vixsrc.to/embed/abc');
+  assert.equal(vixsrcEmbedUrl('https://vixcloud.to/embed/123'), 'https://vixsrc.to/embed/123');
+  assert.equal(vixsrcEmbedUrl('https://vixsrc.to/embed/already'), 'https://vixsrc.to/embed/already');
   // Altri host: nessuna riscrittura, si ricade su hls_url.
   assert.equal(vixsrcEmbedUrl('https://ani3.api-webs.com/player.php?m3u8=x'), '');
   assert.equal(vixsrcEmbedUrl(null), '');

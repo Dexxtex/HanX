@@ -15,31 +15,35 @@ export function reverseProviderKey(label: string): string {
 
 export function unifyStreams(original: Stream[], providerLabelName: string): Stream[] {
     const providerKey = reverseProviderKey(providerLabelName);
+    const seenUrls = new Set<string>();
     return original.map(st => {
         const url = (st as any).url || '';
         const rawTitle: string = (st.title || '').toString();
         const lines = rawTitle.split('\n');
         let baseLine = lines[0] || '';
         // Remove duplicated leading icons / tags
-        baseLine = baseLine.replace(/^\s*🎬\s*/, '');
+        baseLine = baseLine.replace(/^\s*[🎬🎞️]\s*/, '');
         for (let i = 0; i < 3; i++) baseLine = baseLine.replace(/^\s*\[[^\]]+\]\s*/, '').trim();
         // Strip language markers or bullet language artifacts from base line
         baseLine = baseLine
-            .replace(/\s*[•▪]\s*\[?(ITA|SUB)\]?/ig, '')
+            .replace(/\s*[•▪]\s*\[?(?:SUB\s*ITA|SUB|ITA)\]?/ig, '')
+            .replace(/\s*\[(?:SUB\s*ITA|SUB|ITA)\]/ig, '')
             .replace(/\s*\b(ITA|SUB)\b/ig, '')
             .replace(/\s*•\s*\[SUB ITA\]/ig, '')
             .replace(/\s{2,}/g, ' ') // collapse spaces
             .trim();
         // Cleanup universale aggiuntivo: rimuovi eventuali [ITA]/[SUB] residui attaccati senza spazio e lock icon per qualsiasi provider
         baseLine = baseLine
+            .replace(/\[(?:SUB\s*ITA|SUB|ITA)\]/ig, '')
             .replace(/\[ITA\]/ig, '')
             .replace(/\[SUB\]/ig, '')
             .replace(/🔒|🔓FHD?|🔓/g, '')
             .replace(/\s{2,}/g, ' ')
             .replace(/\s+$/, '')
             .trim();
-        // Language detection (from whole raw title)
-        const isSub = /\bsub\b|\[sub\]/i.test(rawTitle);
+        // Language detection: verifica prima 'sub', poi 'ita'.
+        const isSub = /\b(?:sub|sub[-_ ]?ita)\b|\[sub(?:[-_ ]?ita)?\]/i.test(rawTitle);
+        const isIta = !isSub && (/\bita\b|\[ita\]/i.test(rawTitle) || /\bdub\b/i.test(rawTitle));
         // Proxy detection (broadened):
         //  - /proxy/ path segment
         //  - presence of api_password= (EasyProxy wrapper)
@@ -76,8 +80,8 @@ export function unifyStreams(original: Stream[], providerLabelName: string): Str
         // (Provider label removed from multiline)
         const outLines: string[] = [];
         outLines.push(`🎞️ ${baseLine}`);
-        // Language line: logica legacy [ITA]/[SUB].
-        outLines.push(`🎧 ${isSub ? 'SUB' : 'ITA'}`);
+        // Language line: se esplicitamente ITA mostra ITA, altrimenti SUB di default per anime
+        outLines.push(`🎧 ${isIta ? 'ITA' : 'SUB'}`);
         // Build size/res combined line before proxy if present
         let sizeResLine = '';
         if (sizeHuman && resHuman) {
@@ -98,7 +102,7 @@ export function unifyStreams(original: Stream[], providerLabelName: string): Str
             case 'animeunity':
             case 'animeworld':
             case 'animesaturn':
-                bingeGroup = `${providerKey}-std-${isSub ? 'sub' : 'ita'}`;
+                bingeGroup = `${providerKey}-std-${isIta ? 'ita' : 'sub'}`;
                 break;
             default:
                 bingeGroup = `${providerKey}-std`;
@@ -106,6 +110,12 @@ export function unifyStreams(original: Stream[], providerLabelName: string): Str
         const existingHints = (st as any).behaviorHints || {};
         const mergedHints = { ...existingHints, bingeGroup };
         return { ...st, title: unifiedTitle, name: (st as any).name || providerLabel(providerKey), behaviorHints: mergedHints } as Stream;
+    }).filter(st => {
+        const url = (st as any).url;
+        if (!url) return true;
+        if (seenUrls.has(url)) return false;
+        seenUrls.add(url);
+        return true;
     });
 }
 

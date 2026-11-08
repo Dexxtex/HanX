@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { debug } from '../utils/logger.js';
 import { titleMatchScoreAny } from '../utils/anime-title-normalization.js';
+import { compactKey } from './text.js';
 import type { CatalogLanguage, CatalogSite, TitleIndexEntry, TitleIndexFile } from './sync.js';
 
 /** Sopra questa soglia il match è automatico; sotto 0.5 si ignora. */
@@ -84,12 +85,19 @@ function loadIndex(): TitleIndexFile | null {
   }
 }
 
-function scoreEntry(queries: string[], entry: TitleIndexEntry): number {
+function scoreEntry(queries: string[], entry: TitleIndexEntry, compactQueries?: string[]): number {
+  if (entry.key && compactQueries) {
+    for (const cq of compactQueries) {
+      if (cq && entry.key === cq) return 1.0;
+    }
+  }
   let best = titleMatchScoreAny(queries, entry.title);
+  if (best >= 1.0) return best;
   for (const alias of entry.aliases || []) {
     if (!alias) continue;
     const score = titleMatchScoreAny(queries, alias);
     if (score > best) best = score;
+    if (best >= 1.0) break;
   }
   return best;
 }
@@ -214,8 +222,9 @@ export function lookupTitle(site: CatalogSite, queries: string[], options?: Cata
 
   const all: Scored[] = [];
   if (clean.length) {
+    const compactQueries = clean.map(compactKey);
     for (const entry of entries) {
-      const score = scoreEntry(clean, entry);
+      const score = scoreEntry(clean, entry, compactQueries);
       if (score > 0) all.push({ entry, score });
     }
   }

@@ -232,8 +232,9 @@ export function hlsHeightFromUrl(url: string): number | null {
  */
 export function vixsrcEmbedUrl(url: string | null | undefined): string {
   const value = String(url || '');
-  return /vixcloud\.(?:cc|co)/i.test(value)
-    ? value.replace(/\/\/(?:www\.)?vixcloud\.(?:cc|co)\//i, '//vixsrc.to/')
+  if (/vixsrc\.to/i.test(value)) return value;
+  return /vixcloud\.(?:cc|co|to)/i.test(value)
+    ? value.replace(/\/\/(?:www\.)?vixcloud\.(?:cc|co|to)\//i, '//vixsrc.to/')
     : '';
 }
 

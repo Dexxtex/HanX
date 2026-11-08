@@ -535,6 +535,35 @@ test('override kitsu fornisce il titolo giusto ai provider', () => {
   resetMappingCache();
 });
 
+test('mergeOverrides preserves existing series seasons when patching a season', () => {
+  const overridesFile = path.join(fixtureDir, 'overrides-deep-merge.json');
+  fs.writeFileSync(overridesFile, JSON.stringify({
+    series: {
+      'imdb:tt2560140': {
+        seasons: {
+          '5': [{ from: 1, kitsuId: '99999', episodeCount: 12 }],
+        },
+      },
+    },
+    movies: {},
+  }));
+  process.env.ANIME_MAPPING_OVERRIDES = overridesFile;
+  resetMappingCache();
+
+  // Stagione 3 della serie base esiste ancora (non cancellata dall'override della stagione 5)
+  const s3 = targetFor('imdb:tt2560140:3:13');
+  assert.ok(s3);
+  assert.equal(s3.kitsuId, '41982');
+
+  // E la stagione 5 riceve l'override
+  const s5 = targetFor('imdb:tt2560140:5:1');
+  assert.ok(s5);
+  assert.equal(s5.kitsuId, '99999');
+
+  delete process.env.ANIME_MAPPING_OVERRIDES;
+  resetMappingCache();
+});
+
 test('parser handles TVDB and no S/E movies', () => {
   const series = parseRequestId('tvdb:377543:3:13');
   assert.ok(series);
