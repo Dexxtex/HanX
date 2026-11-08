@@ -21,11 +21,14 @@ test('unifyStreams: titolo AnimeWorld ITA e proxy rilevato dal path EasyProxy', 
   const [out] = unifyStreams([{
     title: 'Solo Leveling ▪ ITA ▪ S1E1',
     url: 'https://epx.example/proxy/stream.mp4',
+    behaviorHints: { notWebReady: true, proxyHeaders: { request: {} } },
   }], '🌍 Anime World');
 
   assert.equal(out.title, '🎞️ Solo Leveling ▪ S1E1\n🎧 ITA\n🛡️ Proxy (ON)');
   assert.equal(out.name, '🌍 Anime World');
-  assert.equal(out.behaviorHints.bingeGroup, 'animeworld-std-ita');
+  assert.equal(out.behaviorHints.bingeGroup, 'animeworld-proxy-ita');
+  assert.equal(out.behaviorHints.notWebReady, undefined, 'notWebReady rimosso quando il proxy è attivo');
+  assert.equal(out.behaviorHints.proxyHeaders, undefined, 'proxyHeaders rimosso quando il proxy è attivo');
 });
 
 test('unifyStreams: riga AnimeUnity con marker, 💾 size/res e lock icon FHD', () => {

@@ -97,17 +97,23 @@ export function unifyStreams(original: Stream[], providerLabelName: string): Str
         // ---------------- BINGE GROUP LOGIC (CUSTOM MAP) ----------------
         // animeunity/animeworld/animesaturn: std-ita | std-sub
         // Altri provider (fallback): providerKey-std
+        const lang = isIta ? 'ita' : 'sub';
+        const mode = proxyOn ? 'proxy' : 'std';
         let bingeGroup: string;
         switch (providerKey) {
             case 'animeunity':
             case 'animeworld':
             case 'animesaturn':
-                bingeGroup = `${providerKey}-std-${isIta ? 'ita' : 'sub'}`;
+                bingeGroup = `${providerKey}-${mode}-${lang}`;
                 break;
             default:
-                bingeGroup = `${providerKey}-std`;
+                bingeGroup = `${providerKey}-${mode}`;
         }
-        const existingHints = (st as any).behaviorHints || {};
+        const existingHints = { ...((st as any).behaviorHints || {}) };
+        if (proxyOn) {
+            delete existingHints.notWebReady;
+            delete existingHints.proxyHeaders;
+        }
         const mergedHints = { ...existingHints, bingeGroup };
         return { ...st, title: unifiedTitle, name: (st as any).name || providerLabel(providerKey), behaviorHints: mergedHints } as Stream;
     }).filter(st => {

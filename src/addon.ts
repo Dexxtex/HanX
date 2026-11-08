@@ -54,7 +54,7 @@ function sortStreamsByPriority(streams: { url?: string; title?: string }[]): voi
 // ================= MANIFEST BASE (restored) =================
 const baseManifest: Manifest = {
     id: "org.stremio.hanx",
-    version: "1.1.3",
+    version: "1.1.4",
     name: "HanX",
     description: "HanX addon dedicato ad AnimeUnity, AnimeSaturn e AnimeWorld",
     types: ["movie", "series", "anime"],
@@ -285,8 +285,15 @@ function createBuilder() {
                     config.easyProxyUrl,
                     process.env.EASYPROXY_URL
                 );
+                // La password del server si usa solo se il proxy attivo è quello del server:
+                // un proxy personalizzato dell'utente usa solo la propria password (mai quella del server).
+                const isServerProxy = Boolean(
+                    easyProxyUrl &&
+                    process.env.EASYPROXY_URL &&
+                    easyProxyUrl.replace(/\/+$/, '') === process.env.EASYPROXY_URL.trim().replace(/\/+$/, '')
+                );
                 const easyProxyPassword = easyProxyUrl
-                    ? String(config.easyProxyPassword || process.env.EASYPROXY_PASSWORD || '')
+                    ? String(config.easyProxyPassword || (isServerProxy ? process.env.EASYPROXY_PASSWORD : '') || '')
                     : '';
 
                 const allStreams: Stream[] = [];
@@ -682,7 +689,7 @@ app.get('/', (req: Request, res: ExpressResponse) => {
 
 // Avvia il server Express
 const PORT = parseInt(process.env.PORT || '7000', 10);
-app.listen(PORT, '0.0.0.0', () => {
+const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 HanX addon listening on http://0.0.0.0:${PORT}`);
     // Indice mapping remoto: parte dopo il listen, non blocca l'avvio.
     void refreshMappingFromUrl();
@@ -691,3 +698,16 @@ app.listen(PORT, '0.0.0.0', () => {
     void refreshCatalogFromUrl();
     setInterval(() => void refreshCatalogFromUrl(), CATALOG_REFRESH_INTERVAL_MS).unref();
 });
+
+let isShuttingDown = false;
+const onShutdown = (signal: string) => {
+    if (isShuttingDown) process.exit(0);
+    isShuttingDown = true;
+    debug(1, 'Server', `Ricevuto segnale ${signal}, chiusura server...`);
+    const forceTimer = setTimeout(() => process.exit(0), 5000);
+    forceTimer.unref();
+    (server as any).closeIdleConnections?.();
+    server.close(() => process.exit(0));
+};
+process.on('SIGTERM', () => onShutdown('SIGTERM'));
+process.on('SIGINT', () => onShutdown('SIGINT'));

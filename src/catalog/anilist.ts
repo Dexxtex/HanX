@@ -70,6 +70,7 @@ async function queryPairs(
     }
     const middle = Math.ceil(pairs.length / 2);
     await queryPairs(pairs.slice(0, middle), fetcher, out, pause);
+    if (out.rateLimited) return;
     await queryPairs(pairs.slice(middle), fetcher, out, pause);
     return;
   }

@@ -686,7 +686,7 @@ function normalizeUnicodeToAscii(str: string): string {
  * Se il fetch fallisce o non è un master, restituisce l'URL originale: il
  * proxy HLS può comunque applicare max_res=true come fallback.
  */
-export async function selectHighestSaturnHls(mediaUrl: string, referer: string): Promise<string> {
+export async function selectHighestSaturnHls(mediaUrl: string, referer: string): Promise<string | null> {
   if (!/\.m3u8(?:[?#]|$)/i.test(mediaUrl)) return mediaUrl;
   try {
     const manifest = String(await fetchResource(mediaUrl, asCaches, {
@@ -706,6 +706,7 @@ export async function selectHighestSaturnHls(mediaUrl: string, referer: string):
     }
   } catch (error: any) {
     console.warn('[AnimeSaturn] Selezione variante HLS fallita:', error?.message || error);
+    if (/HTTP\s+(?:404|410)/i.test(error?.message || '')) return null;
   }
   return mediaUrl;
 }
@@ -868,6 +869,7 @@ export class AnimeSaturnProvider {
         if (mediaUrl && !seenMedia.has(mediaUrl)) {
           seenMedia.add(mediaUrl);
           const finalMediaUrl = await selectHighestSaturnHls(mediaUrl, watchUrl);
+          if (!finalMediaUrl) continue;
           const host = normalizeHostLabel(finalMediaUrl);
 
           const langLabel = parsedPage.sourceTag === 'ITA' ? 'ITA' : 'SUB';
@@ -898,6 +900,7 @@ export class AnimeSaturnProvider {
         if (!mediaUrl || seenMedia.has(mediaUrl)) continue;
 
         const finalMediaUrl = await selectHighestSaturnHls(mediaUrl, watchUrl);
+        if (!finalMediaUrl) continue;
         const lowerLink = finalMediaUrl.toLowerCase();
         if (lowerLink.endsWith('.mkv.mp4') || BLOCKED_DOMAINS.some((domain) => lowerLink.includes(domain))) {
           continue;
@@ -1106,10 +1109,13 @@ export class AnimeSaturnProvider {
     // Saturn indicizza i titoli italiani: senza sottotitolo è il primo ripiego.
     const itQueryRaw = italianSeasonQuery(titleIt, titleItSeason ?? seasonNumber, normalizedTitle);
     const itQuery = sameQuery(itQueryRaw, normalizedTitle) ? '' : itQueryRaw;
-    const titles = [normalizedTitle];
+    const hasSeason = Boolean(seasonNumber && new RegExp(`(?:\\b|\\s)${seasonNumber}$`, 'i').test(normalizedTitle));
+    const seasonTitle = (!isMovie && seasonNumber && seasonNumber > 1 && !hasSeason) ? `${normalizedTitle} ${seasonNumber}` : '';
+    const titles = seasonTitle ? [seasonTitle] : [normalizedTitle];
     if (itQuery) titles.push(itQuery);
-    const catalogVersions = catalogSaturnVersions([normalizedTitle, itQuery, altQuery], { season: seasonNumber, isMovie, malId, episode: episodeNumber });
-    const rawVersions = catalogVersions.length ? [] : await this.searchAllVersions(normalizedTitle);
+    const searchTarget = seasonTitle || normalizedTitle;
+    const catalogVersions = catalogSaturnVersions(seasonTitle ? [seasonTitle, normalizedTitle, itQuery, altQuery] : [normalizedTitle, itQuery, altQuery], { season: seasonNumber, isMovie, malId, episode: episodeNumber });
+    const rawVersions = catalogVersions.length ? [] : await this.searchAllVersions(searchTarget);
     let animeVersions = catalogVersions.length ? catalogVersions : filterAnimeResults(rawVersions, titles);
     if (!animeVersions.length && altQuery) {
       titles.push(altQuery);

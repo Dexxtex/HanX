@@ -11,8 +11,9 @@ const TMDB_FIND_CACHE_MAX_ENTRIES = 500;
 const tmdbFindCache = new Map<string, { value: string; expires: number }>();
 const tmdbInFlight = new Map<string, Promise<string | null>>();
 
-function rememberTmdbId(key: string, value: string): string {
-  tmdbFindCache.set(key, { value, expires: Date.now() + TMDB_FIND_CACHE_TTL_MS });
+function rememberTmdbId(key: string, value: string, ttlMs: number = TMDB_FIND_CACHE_TTL_MS): string {
+  tmdbFindCache.delete(key);
+  tmdbFindCache.set(key, { value, expires: Date.now() + ttlMs });
   if (tmdbFindCache.size > TMDB_FIND_CACHE_MAX_ENTRIES) {
     const now = Date.now();
     for (const [entryKey, entry] of tmdbFindCache) {
@@ -67,7 +68,14 @@ export async function getTmdbIdFromImdbId(imdbId: string, tmdbApiKey?: string, p
   const findUrl = `${TMDB_API_BASE_URL}/find/${imdbId}?api_key=${tmdbApiKey}&external_source=imdb_id`;
   const cacheKey = `${imdbId}|${preferredType || ''}|${tmdbApiKey}`;
   const cachedResult = tmdbFindCache.get(cacheKey);
-  if (cachedResult && cachedResult.expires > Date.now()) return cachedResult.value;
+  if (cachedResult) {
+    if (cachedResult.expires > Date.now()) {
+      tmdbFindCache.delete(cacheKey);
+      tmdbFindCache.set(cacheKey, cachedResult);
+      return cachedResult.value || null;
+    }
+    tmdbFindCache.delete(cacheKey);
+  }
 
   const running = tmdbInFlight.get(cacheKey);
   if (running) return running;
@@ -103,15 +111,15 @@ export async function getTmdbIdFromImdbId(imdbId: string, tmdbApiKey?: string, p
       }
 
       console.warn(`No TMDB movie or TV results found for IMDb ID: ${imdbId}`);
+      rememberTmdbId(cacheKey, '', 5 * 60 * 1000);
       return null;
     } catch (error) {
       console.error(`Error fetching TMDB ID for ${imdbId}:`, error);
       return null;
-    } finally {
-      tmdbInFlight.delete(cacheKey);
     }
   })();
 
   tmdbInFlight.set(cacheKey, promise);
+  promise.finally(() => tmdbInFlight.delete(cacheKey));
   return promise;
 }

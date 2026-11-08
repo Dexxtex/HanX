@@ -506,13 +506,11 @@ export function resolveLocalTarget(request: MappingRequest): MappingTarget | nul
   }
 
   const offset = Number.isFinite(range.offset) ? Number(range.offset) : range.from - 1;
-  // Offset negativo NON è di per sé un errore: con la numerazione a passi
-  // (episodio saltato o inserito) vale kitsu = esterno + 1, ed è la mappatura
-  // giusta. L'errore vero era una special di stagione 0 che riusava il kitsuId
+  // L'errore vero era una special di stagione 0 che riusava il kitsuId
   // della madre: quello si riconosce perché lo stesso kitsuId serve anche
   // un'altra stagione della serie.
-  if (offset < 0 && season === 0 && kitsuUsedElsewhere(series, range.kitsuId, season)) {
-    debug(3, 'Mapping', 'local miss', { provider: request.provider, id: request.id, season: request.season, episode, reason: 'negative-offset-mother', offset });
+  if (season === 0 && kitsuUsedElsewhere(series, range.kitsuId, season)) {
+    debug(3, 'Mapping', 'local miss', { provider: request.provider, id: request.id, season: request.season, episode, reason: 'special-reuses-series-kitsu', offset });
     return null;
   }
   const kitsuEpisode = episode - offset;

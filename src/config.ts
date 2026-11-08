@@ -112,14 +112,14 @@ export function parseConfigFromArgs(args: any): AddonConfig {
         return config;
     }
 
-    // Se la configurazione è già un oggetto, validalo
+    // Se la configurazione è già un oggetto, validalo e normalizzalo
     if (typeof args === 'object' && args !== null) {
         if (!isValidConfigObject(args)) {
             debug(4, 'Addon', 'Configuration object invalid (array or non-object)');
             return config;
         }
         debug(4, 'Addon', 'Configuration provided as valid object');
-        return args as AddonConfig;
+        return normalizeConfig(args as Record<string, unknown>);
     }
 
     if (typeof args === 'string') {
