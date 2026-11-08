@@ -215,6 +215,10 @@ function buildCleanTokens(title: string): string[] {
     .normalize('NFKD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
+    // La lingua in parentesi non fa parte del titolo: senza toglierla,
+    // "Santen Sensou-hen (ITA)" non combacia con "Santen Sensou-hen" perché
+    // il suffisso di stagione non viene più tolto.
+    .replace(/\((?:sub\s*ita|ita|cr|dub|jap|jp)\)/g, ' ')
     .replace(/[^a-z0-9]+/g, ' ')
     .trim()
     .split(/\s+/)
@@ -293,6 +297,11 @@ export function titleMatchScore(requested: string, candidate: string): number {
  * Miglior punteggio tra i titoli noti dell'opera (inglese + romaji MAL): i siti
  * italiani a volte listano il romaji, che con il solo titolo inglese prende 0.
  */
+/** Quanti token portanti ha un titolo: serve a preferire la query più specifica. */
+export function titleSpecificity(title: string): number {
+  return titleTokens(title).length;
+}
+
 export function titleMatchScoreAny(titles: string[], candidate: string): number {
   let best = 0;
   for (const title of titles) {

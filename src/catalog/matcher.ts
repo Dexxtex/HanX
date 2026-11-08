@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { debug } from '../utils/logger.js';
-import { titleMatchScoreAny } from '../utils/anime-title-normalization.js';
+import { titleMatchScore, titleSpecificity } from '../utils/anime-title-normalization.js';
 import { compactKey } from './text.js';
 import type { CatalogLanguage, CatalogSite, TitleIndexEntry, TitleIndexFile } from './sync.js';
 
@@ -87,21 +87,45 @@ function loadIndex(): TitleIndexFile | null {
   }
 }
 
-function scoreEntry(queries: string[], entry: TitleIndexEntry, compactQueries?: string[]): number {
+/**
+ * Punteggio della scheda **e** quanti token ha la query che l'ha prodotto: a
+ * parità di punteggio vince la query più specifica. "Tokyo Revengers" combacia
+ * con la serie madre, "Tokyo Revengers: Santen Sensou-hen" con l'arco, e senza
+ * questo criterio le due schede pareggiano e il catalogo non serve nulla.
+ */
+function scoreEntry(
+  queries: string[],
+  specificities: number[],
+  entry: TitleIndexEntry,
+  compactQueries?: string[]
+): { score: number; queryTokens: number } {
   if (entry.key && compactQueries) {
-    for (const cq of compactQueries) {
-      if (cq && entry.key === cq) return 1.0;
+    for (let i = 0; i < compactQueries.length; i++) {
+      const cq = compactQueries[i];
+      if (cq && entry.key === cq) return { score: 1.0, queryTokens: specificities[i] ?? 0 };
     }
   }
-  let best = titleMatchScoreAny(queries, entry.title);
-  if (best >= 1.0) return best;
-  for (const alias of entry.aliases || []) {
-    if (!alias) continue;
-    const score = titleMatchScoreAny(queries, alias);
-    if (score > best) best = score;
-    if (best >= 1.0) break;
+  let best = 0;
+  let tokens = 0;
+  const consider = (candidate: string) => {
+    for (let i = 0; i < queries.length; i++) {
+      const score = titleMatchScore(queries[i], candidate);
+      const size = specificities[i] ?? 0;
+      if (score > best || (score === best && score > 0 && size > tokens)) {
+        best = score;
+        tokens = size;
+      }
+    }
+  };
+  consider(entry.title);
+  if (best < 1.0) {
+    for (const alias of entry.aliases || []) {
+      if (!alias) continue;
+      consider(alias);
+      if (best >= 1.0) break;
+    }
   }
-  return best;
+  return { score: best, queryTokens: tokens };
 }
 
 /** Forma della scheda senza id numerico di Unity, lingua e punteggiatura. */
@@ -148,7 +172,7 @@ function isFormatEntry(entry: TitleIndexEntry): boolean {
   return FORMAT_ONLY.test(entry.title) || FORMAT_ONLY.test(String(entry.type || ''));
 }
 
-type Scored = { entry: TitleIndexEntry; score: number };
+type Scored = { entry: TitleIndexEntry; score: number; queryTokens: number };
 
 /**
  * Sceglie fra basi diverse. Con una stagione nota vince solo se esattamente una
@@ -226,9 +250,10 @@ export function lookupTitle(site: CatalogSite, queries: string[], options?: Cata
   const all: Scored[] = [];
   if (clean.length) {
     const compactQueries = clean.map(compactKey);
+    const specificities = clean.map(titleSpecificity);
     for (const entry of entries) {
-      const score = scoreEntry(clean, entry, compactQueries);
-      if (score > 0) all.push({ entry, score });
+      const { score, queryTokens } = scoreEntry(clean, specificities, entry, compactQueries);
+      if (score > 0) all.push({ entry, score, queryTokens });
     }
   }
   const scoreBest = all.reduce((max, item) => Math.max(max, item.score), 0);
@@ -248,8 +273,22 @@ export function lookupTitle(site: CatalogSite, queries: string[], options?: Cata
   });
   const best = wanted.reduce((max, item) => Math.max(max, item.score), 0);
   let selected = best ? wanted.filter((item) => item.score >= best - TIE_MARGIN) : [];
+  // A parità di punteggio vince la query più specifica: la scheda della serie
+  // madre non deve pareggiare con quella dell'arco solo perché il titolo
+  // italiano è il suo prefisso.
+  const mostSpecific = selected.reduce((max, item) => Math.max(max, item.queryTokens), 0);
+  if (mostSpecific > 0) selected = selected.filter((item) => item.queryTokens === mostSpecific);
 
-  // Varianti ita/sub della stessa opera: stesso gruppo, si servono tutte.
+  // Varianti ita/sub della stessa opera: stesso gruppo, si servono tutte. Il
+  // confronto è sulla scheda senza lingua, quindi la variante ITA resta anche
+  // quando il suo punteggio è un soffio sotto quello della SUB.
+  const bases = new Set(selected.map((item) => cardBase(item.entry.title) || item.entry.slug));
+  if (bases.size) {
+    selected = wanted.filter(
+      (item) => selected.includes(item) || bases.has(cardBase(item.entry.title) || item.entry.slug)
+    );
+  }
+
   const groups = new Map<string, Scored[]>();
   for (const item of selected) {
     const key = cardBase(item.entry.title) || item.entry.slug;
