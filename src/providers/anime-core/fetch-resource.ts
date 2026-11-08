@@ -58,14 +58,16 @@ type ProxyPlatform = 'animeunity' | 'animesaturn' | 'animeworld';
 
 // Un host alla volta, con un minimo tra due richieste: le raffiche (un titolo
 // costa fino a 15 richieste in meno di un secondo) fanno scattare il WAF, e
-// l'uscita condivisa si brucia. 0 disattiva l'intervallo.
+// l'uscita condivisa si brucia. 0 disattiva l'intervallo. Un episodio freddo
+// costa 4 richieste per host, quindi l'intervallo e' anche il pavimento del
+// tempo di risposta: 1 s misurato a ~4,4 s contro ~7,7 s a 2 s, senza blocchi.
 const hostTails = new Map<string, Promise<unknown>>();
 const hostLastAt = new Map<string, number>();
 
 /** Letto a ogni chiamata: i test lo azzerano senza toccare il resto. */
 function minHostIntervalMs(): number {
   const raw = process.env.ANIME_HOST_MIN_INTERVAL_MS;
-  if (raw === undefined) return 2000;
+  if (raw === undefined) return 1000;
   return Math.max(0, Number.parseInt(raw, 10) || 0);
 }
 
