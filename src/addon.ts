@@ -55,7 +55,7 @@ function sortStreamsByPriority(streams: { url?: string; title?: string }[]): voi
 // ================= MANIFEST BASE (restored) =================
 const baseManifest: Manifest = {
     id: "org.stremio.hanx",
-    version: "1.1.7",
+    version: "1.1.9",
     name: "HanX",
     description: "HanX addon dedicato ad AnimeUnity, AnimeSaturn e AnimeWorld",
     types: ["movie", "series", "anime"],
@@ -151,14 +151,15 @@ const PROVIDER_CACHE_TTL_MS = (() => {
     } catch { return 300000; }
 })();
 // Budget della risposta: oltre questo tempo la lista esce con quello che c'è.
-// Il provider ancora in volo continua (le sue fetch restano in cache), ma non
-// tiene in ostaggio il client: senza budget la risposta è max(provider), e
-// AnimeUnity da sola arriva a 13 s.
+// **Disattivato per default (0)**: tagliare la lista toglie i provider lenti, e
+// su una serie fredda il primo provider arriva a 7-10 s. Chi lo vuole lo accende
+// con STREAM_RESPONSE_BUDGET_MS, sapendo che la prima apertura mostrerà meno
+// stream (i mancanti arrivano alla riapertura, dalla cache).
 const STREAM_RESPONSE_BUDGET_MS = (() => {
-    try {
-        const n = parseInt(process.env.STREAM_RESPONSE_BUDGET_MS || '4000', 10);
-        return Number.isFinite(n) && n > 0 ? n : 4000;
-    } catch { return 4000; }
+    const raw = process.env.STREAM_RESPONSE_BUDGET_MS;
+    if (raw === undefined || raw.trim() === '') return 0;
+    const n = parseInt(raw, 10);
+    return Number.isFinite(n) && n >= 0 ? n : 0;
 })();
 const PROVIDER_CACHE_MAX_ENTRIES = (() => {
     try {
