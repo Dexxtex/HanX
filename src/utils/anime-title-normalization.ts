@@ -262,7 +262,12 @@ export function titleMatchScore(requested: string, candidate: string): number {
   // meno di un match esatto, così una scheda precisa vince sempre.
   if (found.length > query.length) {
     const tail = found.slice(found.length - query.length);
-    if (tail.every((token, index) => token === query[index])) return 0.9;
+    // Un token solo e corto combacia con la coda di qualunque titolo che
+    // finisce così: "Yuki" prendeva 0.9 su "Ookami Kodomo no Ame to Yuki" e il
+    // catalogo serviva Wolf Children al posto di "Yuki: Snow Fairy". Il
+    // prefisso-rumore vale solo se la query ha abbastanza identità.
+    const distinctive = query.length >= 2 || query[0].length >= 6;
+    if (distinctive && tail.every((token, index) => token === query[index])) return 0.9;
   }
 
   // A bare series title must not match a season that only adds a subtitle.

@@ -337,3 +337,15 @@ test('indice token: nessun match inventato su un titolo estraneo', () => {
   });
   assert.equal(lookupTitle('saturn', ['Bleach']).hits.length, 0);
 });
+
+// Un token solo e corto non basta a identificare un'opera per coda: il catalogo
+// serviva Wolf Children al posto di "Yuki: Snow Fairy" (visto live 09/11/2026).
+test('un token corto non combacia con la coda di un titolo piu lungo', () => {
+  fixture({ sites: { saturn: [entry('Wolf Children - Ame e Yuki i bambini lupo', 'wolf', { aliases: ['Ookami Kodomo no Ame to Yuki'] })] } });
+  assert.deepEqual(lookupTitle('saturn', ['Yuki: Snow Fairy', 'Yuki'], { season: null, isMovie: true }).hits, []);
+  // Il prefisso-rumore resta valido quando la query ha identità sufficiente.
+  assert.deepEqual(
+    lookupTitle('saturn', ['Ame to Yuki'], { season: null, isMovie: true }).hits.map((h) => h.slug),
+    ['wolf']
+  );
+});
