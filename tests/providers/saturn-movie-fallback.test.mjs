@@ -77,3 +77,16 @@ test('film: l opera madre non risponde al posto del film', async () => {
   const italian = [{ version: { title: 'La scomparsa di Haruhi Suzumiya', url: '/anime/haruhi' }, language_type: 'SUB ITA' }];
   assert.equal(filterAnimeResults(italian, ['The Disappearance of Haruhi Suzumiya'], true).length, 1);
 });
+
+
+// Il ripiego troncato ("JUJUTSU KAISEN") trova la scheda, ma per un film il
+// match si valuta sul titolo intero: la serie non deve passare al posto del film.
+test('film: il ripiego troncato non accetta l opera madre', async () => {
+  const { filterAnimeResults } = await import('../../dist/providers/animesaturn-provider.js');
+  const series = [{ version: { title: 'Jujutsu Kaisen', url: '/anime/jjk' }, language_type: 'SUB ITA' }];
+  const titles = ['Jujutsu Kaisen: Execution', 'JUJUTSU KAISEN', 'JUJUTSU KAISEN: Esecuzione'];
+  // Serie: il ripiego troncato può ancora servire (comportamento invariato).
+  assert.equal(filterAnimeResults(series, titles, true, false).length, 1);
+  // Film: il ripiego troncato non basta.
+  assert.deepEqual(filterAnimeResults(series, titles, true, true), []);
+});

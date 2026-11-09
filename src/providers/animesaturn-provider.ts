@@ -600,12 +600,23 @@ function catalogSaturnVersions(
 export function filterAnimeResults(
   results: { version: AnimeSaturnResult; language_type: string }[],
   titles: string[],
-  allowSingleSiteMatch = true
+  allowSingleSiteMatch = true,
+  isMovie = false
 ) {
   const norm = (s: string) => normalizeApostrophes(normalizeUnicodeToAscii(s.toLowerCase().replace(/\s+/g, ' ').trim()));
   const baseRaw = norm(titles[0] || '');
+  const tokensOf = (value: string) => matchKeys(value).tokens;
+  const isTruncationOf = (short: string, full: string) => {
+    const s = tokensOf(short);
+    const f = tokensOf(full);
+    return s.length > 0 && s.length < f.length && s.every((token, i) => token === f[i]);
+  };
+  // Per un film il sottotitolo è parte dell'identità: un ripiego troncato
+  // ("JUJUTSU KAISEN" da "Jujutsu Kaisen: Execution") serve a trovare la
+  // scheda, ma non deve far accettare l'opera madre al posto del film.
+  const scoringTitles = isMovie ? titles.filter((title) => !isTruncationOf(title, titles[0] || '')) : titles;
   const scored = results
-    .map((result) => ({ result, score: titleMatchScoreAny(titles, result.version.title) }))
+    .map((result) => ({ result, score: titleMatchScoreAny(scoringTitles, result.version.title) }))
     .filter((entry) => entry.score > 0);
   const best = scored.reduce((max, entry) => Math.max(max, entry.score), 0);
   // Il sito a volte ha solo il titolo italiano ("La scomparsa di Haruhi
@@ -618,16 +629,11 @@ export function filterAnimeResults(
   // Se la scheda è un prefisso stretto della query il sito ha risposto con
   // l'opera madre: "Jujutsu Kaisen" per il film "Jujutsu Kaisen: Execution"
   // darebbe l'episodio 1 della serie al posto del film.
-  const isStrictPrefix = (candidate: string, query: string) => {
-    const c = matchKeys(candidate).tokens;
-    const q = matchKeys(query).tokens;
-    return c.length > 0 && c.length < q.length && c.every((token, i) => token === q[i]);
-  };
   const singleSiteMatch =
     allowSingleSiteMatch &&
     results.length === 1 &&
     baseRaw.split(' ').filter(Boolean).length >= 2 &&
-    !isStrictPrefix(results[0].version.title, titles[0] || '');
+    !isTruncationOf(results[0].version.title, titles[0] || '');
   const byScore = pickBestScored(scored, REVIEW_SCORE);
   const filtered = byScore.length ? byScore : singleSiteMatch ? results.map((entry) => entry) : [];
   if (singleSiteMatch && !byScore.length) {
@@ -1092,7 +1098,7 @@ export class AnimeSaturnProvider {
       const fallbackBudget = isMovie ? 3 : 2;
       for (const fallbackQuery of candidates.filter((q, i, all) => q && !sameQuery(q, normalizedTitle) && all.indexOf(q) === i).slice(0, fallbackBudget)) {
         titles.push(fallbackQuery);
-        const fallbackVersions = filterAnimeResults(await this.searchAllVersions(fallbackQuery), titles, false);
+        const fallbackVersions = filterAnimeResults(await this.searchAllVersions(fallbackQuery), titles, false, isMovie);
         if (fallbackVersions.length) {
           debug(2, 'AnimeSaturn', `[AnimeSaturn] Trovato con query di ripiego: ${fallbackQuery}`);
           animeVersions = fallbackVersions;
