@@ -54,7 +54,7 @@ function sortStreamsByPriority(streams: { url?: string; title?: string }[]): voi
 // ================= MANIFEST BASE (restored) =================
 const baseManifest: Manifest = {
     id: "org.stremio.hanx",
-    version: "1.1.16",
+    version: "1.1.17",
     name: "HanX",
     description: "HanX addon dedicato ad AnimeUnity, AnimeSaturn e AnimeWorld",
     types: ["movie", "series", "anime"],
@@ -161,6 +161,10 @@ const PROVIDER_CACHE_DISABLED: boolean = (() => {
         return v === '1' || v === 'true' || v === 'on' || v === 'yes';
     } catch { return false; }
 })();
+// Tetto per provider. Il default sta qui e non al call site: con `null` un
+// provider nuovo che dimentica il quinto argomento blocca `Promise.all` e la
+// risposta non parte mai.
+const PROVIDER_TIMEOUT_MS = 30000;
 const _providerStreamCache = new Map<string, { streams: any[]; ts: number }>();
 
 function _providerCacheGet(type: string, id: string, configDigest: string): any[] | null {
@@ -307,9 +311,14 @@ function createBuilder() {
                 const envFlag = (name: string) => normalizeBool(process.env[name]);
 
                 const rc = requestConfig as any;
-                const animeUnityEnabled = envFlag('ANIMEUNITY_ENABLED') ?? (isDirectAPICall || config.animeunityEnabled === true || rc?.animeunityEnabled === true);
-                const animeSaturnEnabled = envFlag('ANIMESATURN_ENABLED') ?? (isDirectAPICall || config.animesaturnEnabled === true || rc?.animesaturnEnabled === true);
-                const animeWorldEnabled = envFlag('ANIMEWORLD_ENABLED') ?? (isDirectAPICall || config.animeworldEnabled === true || rc?.animeworldEnabled === true);
+                // L'env è solo un kill switch: `false` toglie il provider, `true` o
+                // assente lasciano decidere la configurazione dell'utente. Con `??`
+                // un `=true` in env.example rendeva inerti le checkbox della landing.
+                const enabledBy = (envName: string, fromConfig: boolean | undefined, fromRequest: boolean | undefined) =>
+                    envFlag(envName) === false ? false : (isDirectAPICall || fromConfig === true || fromRequest === true);
+                const animeUnityEnabled = enabledBy('ANIMEUNITY_ENABLED', config.animeunityEnabled, rc?.animeunityEnabled);
+                const animeSaturnEnabled = enabledBy('ANIMESATURN_ENABLED', config.animesaturnEnabled, rc?.animesaturnEnabled);
+                const animeWorldEnabled = enabledBy('ANIMEWORLD_ENABLED', config.animeworldEnabled, rc?.animeworldEnabled);
 
                 debug(2, 'Addon', 'providers resolved', {
                     directApiCall: isDirectAPICall,
@@ -398,7 +407,7 @@ function createBuilder() {
                     });
                     // Titolo/lingua/proxy/bingeGroup: logica pura in utils/streamTitle.ts
 
-                    const runProvider = async (name: string, enabled: boolean, handler: () => Promise<{ streams: Stream[] }>, streamName: string, timeoutMs: number | null = null): Promise<Stream[]> => {
+                    const runProvider = async (name: string, enabled: boolean, handler: () => Promise<{ streams: Stream[] }>, streamName: string, timeoutMs: number | null = PROVIDER_TIMEOUT_MS): Promise<Stream[]> => {
                         if (!enabled) {
                             debug(3, 'Provider', 'disabled', name);
                             return [];
@@ -447,7 +456,7 @@ function createBuilder() {
                         enabled: boolean,
                         handler: () => Promise<{ streams: Stream[] }>,
                         streamName: string,
-                        timeoutMs: number | null = null
+                        timeoutMs: number | null = PROVIDER_TIMEOUT_MS
                     ): void => {
                         providerPromises.push(runProvider(name, enabled, handler, streamName, timeoutMs));
                     };
@@ -460,7 +469,7 @@ function createBuilder() {
                         if (id.startsWith('tmdb:')) return animeUnityProvider.handleTmdbRequest(toNumericId(id), seasonNumber, episodeNumber, isMovie);
                         if (id.startsWith('tvdb:')) return animeUnityProvider.handleTvdbRequest(toNumericId(id), seasonNumber, episodeNumber, isMovie);
                         return { streams: [] };
-                    }, providerLabel('animeunity'), 30000);  // AnimeUnity: timeout 30s
+                    }, providerLabel('animeunity'));
 
                     // AnimeSaturn
                     scheduleProviderRun('AnimeSaturn', animeSaturnEnabled, async () => {
@@ -472,7 +481,7 @@ function createBuilder() {
                         if (id.startsWith('tmdb:')) return animeSaturnProvider.handleTmdbRequest(toNumericId(id), seasonNumber, episodeNumber, isMovie);
                         if (id.startsWith('tvdb:')) return animeSaturnProvider.handleTvdbRequest(toNumericId(id), seasonNumber, episodeNumber, isMovie);
                         return { streams: [] };
-                    }, providerLabel('animesaturn'), 30000);  // AnimeSaturn: timeout 30s
+                    }, providerLabel('animesaturn'));
 
                     // AnimeWorld
                     scheduleProviderRun('AnimeWorld', animeWorldEnabled, async () => {
@@ -484,7 +493,7 @@ function createBuilder() {
                         if (id.startsWith('tmdb:')) return animeWorldProvider.handleTmdbRequest(toNumericId(id), seasonNumber, episodeNumber, isMovie);
                         if (id.startsWith('tvdb:')) return animeWorldProvider.handleTvdbRequest(toNumericId(id), seasonNumber, episodeNumber, isMovie);
                         return { streams: [] };
-                    }, providerLabel('animeworld'), 30000);  // AnimeWorld: timeout 30s
+                    }, providerLabel('animeworld'));
 
                     // Si aspettano tutti: consegnare una lista tagliata toglie i
                     // provider lenti, e su una serie mai vista sono 7-10 s.

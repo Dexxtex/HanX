@@ -252,9 +252,18 @@ async function getTvdbEpisodes(tvdbId: string, season?: number, credentials: Map
  * stagione: senza cache erano due GET identiche per richiesta.
  */
 function tvdbSeriesExtended(tvdbId: string, credentials: MappingCredentials): Promise<any | null> {
-  return cached(`tvdb:extended:${tvdbId}`, () =>
-    tvdbGet(`/series/${encodeURIComponent(tvdbId)}/extended?short=true`, credentials)
+  // La chiave porta le credenziali: un utente senza TVDB_API_KEY non deve
+  // avvelenare la cache di chi ce l'ha. E un `null` (login fallito, rete giù)
+  // non si memorizza: senza, un errore transitorio spegne i titoli TVDB per 6 h.
+  const credentialKey = hashTvdbCredentials(
+    String(credentials.tvdbApiKey || process.env.TVDB_API_KEY || '').trim(),
+    String(credentials.tvdbPin || process.env.TVDB_PIN || '').trim()
   );
+  return cached(`tvdb:extended:${credentialKey}:${tvdbId}`, async () => {
+    const json = await tvdbGet(`/series/${encodeURIComponent(tvdbId)}/extended?short=true`, credentials);
+    if (json === null) throw new Error('TVDB series extended unavailable');
+    return json;
+  });
 }
 
 /**

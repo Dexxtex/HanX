@@ -65,10 +65,13 @@ const hostTails = new Map<string, Promise<unknown>>();
 const hostLastAt = new Map<string, number>();
 
 /** Letto a ogni chiamata: i test lo azzerano senza toccare il resto. */
-function minHostIntervalMs(): number {
+export function minHostIntervalMs(): number {
   const raw = process.env.ANIME_HOST_MIN_INTERVAL_MS;
-  if (raw === undefined) return 1000;
-  return Math.max(0, Number.parseInt(raw, 10) || 0);
+  // Solo il letterale `0` spegne il pacing. Una variabile vuota o con un typo
+  // non deve poter togliere la protezione che è costata un 403.
+  if (raw === undefined || !raw.trim()) return 1000;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 1000;
 }
 
 function paceHost<T>(host: string, task: () => Promise<T>): Promise<T> {

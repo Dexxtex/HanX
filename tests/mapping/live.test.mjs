@@ -143,3 +143,30 @@ test('la scheda TVDB estesa si scarica una volta sola fra titolo e stagione', as
     globalThis.fetch = originalFetch;
   }
 });
+
+// `tvdb:extended` cachava `null` per 6 ore con una chiave che non conteneva le
+// credenziali: un utente senza TVDB_API_KEY spegneva i titoli TVDB per tutti.
+test('scheda TVDB: un fallimento non resta in cache, e le credenziali sono nella chiave', async () => {
+  let extended = 0;
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    if (url.endsWith('/login')) return jsonResponse({ data: { token: 'tok' } });
+    if (/\/series\/9901\/extended/.test(url)) {
+      extended += 1;
+      return new Response('boom', { status: 500 });
+    }
+    return jsonResponse({});
+  };
+
+  try {
+    const { getTvdbTitle } = await import('../../dist/mapping/live.js');
+    const credentials = { tvdbApiKey: 'test-key', tvdbPin: '' };
+
+    await assert.rejects(() => getTvdbTitle('9901', credentials), 'un fallimento deve lanciare, non tornare vuoto');
+    const afterFirst = extended;
+    await assert.rejects(() => getTvdbTitle('9901', credentials), 'il secondo tentativo deve riprovare');
+    assert.ok(extended > afterFirst, `la seconda chiamata deve tornare in rete (${afterFirst} -> ${extended})`);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

@@ -128,6 +128,13 @@ function loadIndex(): TitleIndexFile | null {
     cached = { file, mtimeMs, data };
     return data;
   } catch {
+    // File corrotto: si memorizza l'esito vuoto per questa versione del file.
+    // Senza, ogni lookup (3 per richiesta) rifarebbe stat + read + parse di un
+    // file da 15k schede, per sempre se la rete non lo ri-scarica.
+    try {
+      const { mtimeMs } = fs.statSync(file);
+      cached = { file, mtimeMs, data: { generatedAt: null, sites: {} } as TitleIndexFile };
+    } catch { /* file assente: niente da memorizzare */ }
     return null;
   }
 }
