@@ -243,12 +243,18 @@ function buildCleanTokens(title: string, stripTrailingFormat = true): string[] {
  * 0 = non correlato.
  */
 export function titleMatchScore(requested: string, candidate: string): number {
-  // Se la richiesta è un film e la scheda non lo dichiara, la scheda è l'opera
-  // madre: "Yu-Gi-Oh!: The Movie" contro "Yu-Gi-Oh!" darebbe la serie.
-  if (FILM_MARKER.test(String(requested || '')) && !FILM_MARKER.test(String(candidate || ''))) return 0;
   const query = titleTokens(requested);
   const found = titleTokens(candidate);
   if (!query.length || !found.length) return 0;
+  // Se la richiesta dichiara un film e la scheda no, la scheda è l'opera madre
+  // solo quando ne è un prefisso: "Yu-Gi-Oh!" per "Yu-Gi-Oh!: The Movie" dà la
+  // serie. Un titolo romaji con "Movie" contro la scheda italiana ("Kara no
+  // Kyoukai Movie 1" / "Kara no Kyoukai 1: Vista dall'Alto") è lo stesso film e
+  // non deve essere scartato.
+  if (FILM_MARKER.test(String(requested || '')) && !FILM_MARKER.test(String(candidate || ''))) {
+    const withoutMarker = titleTokens(String(requested || '').replace(FILM_MARKER, ' '));
+    if (withoutMarker.length === found.length && withoutMarker.every((token, i) => token === found[i])) return 0;
+  }
 
   const queryKey = query.join(' ');
   const foundKey = found.join(' ');
