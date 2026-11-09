@@ -16,8 +16,6 @@ import {
 import type { AnimeUnityPageEpisode } from './animeunity-parsers.js';
 import { AnimeUnityConfig, StreamForStremio } from '../types/animeunity.js';
 import * as cheerio from 'cheerio';
-import { SocksProxyAgent } from 'socks-proxy-agent';
-import { ProxyAgent as UndiciProxyAgent } from 'undici';
 import { checkIsAnimeById, applyUniversalAnimeTitleNormalization } from '../utils/animeGate.js';
 import { providerLabel } from '../utils/unifiedNames.js';
 import { lookupTitle, REVIEW_SCORE, type CatalogQueryOptions } from '../catalog/matcher.js';
@@ -46,6 +44,7 @@ import {
   italianSeasonQuery,
   pickBestScored,
   isAbortOrTimeoutError,
+  proxyAgentFor,
   seasonFromTitle,
 } from './anime-core/index.js';
 import {
@@ -86,8 +85,9 @@ const PROXY_CONFIGS = [
         ...entry,
         type: isSocks ? 'SOCKS' : 'HTTP/HTTPS',
         // fetchResource usa undici per HTTP(S), node-fetch per SOCKS.
-        nodeAgent: isSocks ? new SocksProxyAgent(entry.url) : undefined,
-        fetchAgent: isSocks ? undefined : new UndiciProxyAgent(entry.url),
+        // Unica factory: e' quella che imposta keepAlive sugli agent SOCKS.
+        // Creandolo qui senza, ogni richiesta pagava TCP + SOCKS5 + TLS.
+        agent: proxyAgentFor(entry.url),
       }];
     } catch (error: any) {
       console.warn(`[AnimeUnity][Proxy] Configurazione ${entry.label} ignorata: ${error?.message || error}`);
@@ -120,7 +120,7 @@ export async function auFetchResource(url: string, providerCaches: any, options:
   const attempts = [
     ...PROXY_CONFIGS.map((proxy) => ({
       label: `proxy ${proxy.label} ${proxy.type}`,
-      agent: proxy.fetchAgent || proxy.nodeAgent,
+      agent: proxy.agent,
       timeoutMs: options.timeoutMs || FETCH_TIMEOUT,
     })),
     // Senza proxy il diretto non è un fallback: deve usare il timeout normale.

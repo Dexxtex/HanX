@@ -22,6 +22,7 @@ export {
   DEFAULT_FETCH_TIMEOUT,
   type ProviderCaches,
   type FetchResourceOptions,
+  proxyAgentFor,
 } from './fetch-resource.js';
 
 // Provider URL resolution

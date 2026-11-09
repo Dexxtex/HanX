@@ -46,7 +46,7 @@ export function markProviderFetchFailure(): void {
 // Riusa lo stesso agent: crearne uno per richiesta lascia pool di connessioni aperti.
 const proxyAgents = new Map<string, any>();
 
-function getProxyAgent(proxyUrl: string): any {
+export function proxyAgentFor(proxyUrl: string): any {
   const cached = proxyAgents.get(proxyUrl);
   if (cached) return cached;
   debug(4, 'Fetch', 'proxy agent created', redactUrl(proxyUrl));
@@ -202,7 +202,7 @@ export async function fetchResource(
         try {
           return await fetchResource(url, caches, {
             ...options,
-            agent: getProxyAgent(proxy.url),
+            agent: proxyAgentFor(proxy.url),
             cacheKey: `${cacheKey}#${proxy.label}`,
             exitLabel: proxy.label,
           });
