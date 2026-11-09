@@ -97,7 +97,7 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
 
-async function cached<T>(key: string, fn: () => Promise<T>, ttlMs = LIVE_TTL_MS): Promise<T> {
+export async function cached<T>(key: string, fn: () => Promise<T>, ttlMs = LIVE_TTL_MS): Promise<T> {
   const hit = liveCache.get(key);
   if (hit && hit.expires > Date.now()) {
     debug(4, 'Mapping/Cache', 'hit', key);
@@ -113,6 +113,9 @@ async function cached<T>(key: string, fn: () => Promise<T>, ttlMs = LIVE_TTL_MS)
   debug(4, 'Mapping/Cache', 'miss', key);
   const run = fn()
     .then((value) => {
+      // delete prima di set: rinfrescare una chiave non la sposta in coda,
+      // quindi senza questo la voce piu' calda sarebbe la prima sfrattata.
+      liveCache.delete(key);
       liveCache.set(key, { expires: Date.now() + ttlMs, value });
       // Stesso limite della cache provider: l'eviction evita crescita illimitata
       // in un processo che resta acceso per settimane.

@@ -58,6 +58,9 @@ export interface AnimeWorldResult {
   // Badge DUB nell'anchor "poster" della scheda di ricerca: presente solo sulle
   // versioni ITA, serve a dedurre la lingua senza scaricare la pagina /play/<slug>.
   dubBadge?: boolean;
+  // Coppie `[numero, token]` dal catalogo: con queste la pagina /play/<slug> non
+  // serve più, né per la lista episodi né per il token dell'API.
+  ep?: [number, number | string][];
 }
 
 export interface AnimeWorldEpisode {

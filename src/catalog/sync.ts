@@ -38,7 +38,7 @@ export interface CatalogEntry {
    * della scheda (un hop = 2 s di pacing). Assente sulle serie lunghe, dove la
    * pagina porta solo i primi 120 episodi.
    */
-  ep?: [number, number][];
+  ep?: [number, number | string][];
   /** Id AniList: valida il `malId` delle schede e regge un futuro join `anilist:`. */
   anilistId?: number;
   /**
@@ -91,7 +91,7 @@ export interface TitleIndexEntry {
   /** Episodi dichiarati: il matcher scarta la scheda se la richiesta li supera. */
   episodes?: number;
   /** Solo AnimeUnity: coppie `[numero, id]`, vedi `CatalogEntry.ep`. */
-  ep?: [number, number][];
+  ep?: [number, number | string][];
 }
 
 export interface TitleIndexFile {
@@ -204,7 +204,7 @@ export interface CardDetails {
   startDate?: string;
   language?: CatalogLanguage;
   /** Solo AnimeUnity: coppie `[numero, id]` lette dall'attributo `episodes`. */
-  ep?: [number, number][];
+  ep?: [number, number | string][];
 }
 
 /**
@@ -289,6 +289,33 @@ function worldEpisodes(html: string): number | undefined {
   return Number.isFinite(highest) && highest > 0 ? highest : undefined;
 }
 
+/**
+ * AnimeWorld: la pagina `/play/<slug>` elenca gli episodi come anchor con
+ * `data-episode-num` e il token nell'href. Il sync scarica già quella pagina,
+ * quindi le coppie `[numero, token]` costano zero e risparmiano all'addon un hop
+ * per scheda (il token serve all'API `serverPlayerAnimeWorld`).
+ */
+function worldEpisodePairs(html: string): [number, string][] | undefined {
+  const raw = String(html || '');
+  const pairs: [number, string][] = [];
+  const seen = new Set<number>();
+  const anchor = /<a\b[^>]*>/gi;
+  let tag: RegExpExecArray | null;
+  while ((tag = anchor.exec(raw)) !== null) {
+    const attrs = tag[0];
+    const numMatch = attrs.match(/\bdata-episode-num=(?:"(\d+)"|'(\d+)')/i);
+    if (!numMatch) continue;
+    const num = Number.parseInt(numMatch[1] || numMatch[2], 10);
+    if (!Number.isFinite(num) || num <= 0 || seen.has(num)) continue;
+    const hrefMatch = attrs.match(/\bhref=(?:"([^"]*)"|'([^']*)')/i);
+    const token = String(hrefMatch?.[1] || hrefMatch?.[2] || '').match(/\/play\/[^/?#]+\/([^/?#]+)/)?.[1];
+    if (!token) continue;
+    seen.add(num);
+    pairs.push([num, token]);
+  }
+  return pairs.length ? pairs : undefined;
+}
+
 /** `alternateName` è una stringa o una lista, secondo schema.org. */
 function asList(value: unknown): string[] {
   const raw = Array.isArray(value) ? value : [value];
@@ -317,7 +344,8 @@ export function parseCardDetails(html: string, site: CatalogSite): CardDetails {
   const saturnAudio = site === 'saturn' ? saturnLanguage(text) : undefined;
   const year = String(data.datePublished || '').match(/^(\d{4})/);
   const episodes = positive(data.numberOfEpisodes) ?? positive(info.episodes) ?? (site === 'world' ? worldEpisodes(text) : undefined);
-  const ep = site === 'unity' ? unityEpisodePairs(text) : undefined;
+  const ep =
+    site === 'unity' ? unityEpisodePairs(text) : site === 'world' ? worldEpisodePairs(text) : undefined;
   return {
     ...parseCardIds(text),
     ...(asList(series.alternateName).length ? { titles: asList(series.alternateName) } : {}),

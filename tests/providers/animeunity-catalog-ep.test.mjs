@@ -109,3 +109,26 @@ test('catalogo senza ep: si torna alla pagina scheda (comportamento di prima)', 
 process.on('exit', () => {
   globalThis.fetch = originalFetch;
 });
+
+// Il guadagno della 1.1.10 era "una ricerca in meno": la scheda dal catalogo
+// salta `filterAnimeResults` e non fa partire `/archivio`. Un test che asserisce
+// solo la presenza della ricerca non vede il ritorno del costo.
+test('catalogo: nessuna ricerca /archivio quando la scheda arriva dal catalogo', async () => {
+  // Due schede (SUB + ITA): con una sola scatterebbe il ripiego della "scheda
+  // ITA sorella", che la pagina la chiede per un motivo legittimo.
+  useCatalog([
+    { ...SUB_CARD, ep: [[1, 90136]] },
+    { ...ITA_CARD, ep: [[1, 90137]] },
+  ]);
+  requested.length = 0;
+
+  const { streams } = await provider.handleTitleRequest('Tokyo Revengers: Santen Sensou-hen', 1, 1, false);
+
+  assert.equal(streams.length, 2);
+  assert.equal(
+    requested.filter((url) => url.includes('/archivio?title=')).length,
+    0,
+    'la ricerca sul sito non deve partire'
+  );
+  assert.equal(animePageCalls().length, 0, 'la pagina scheda non deve essere chiesta');
+});

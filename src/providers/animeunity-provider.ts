@@ -159,7 +159,7 @@ interface AnimeUnitySearchResult {
   episodes_count: number;
   type?: string; // Solo .co: TV / Movie / Special
   /** Dal catalogo: coppie [numero, id] degli episodi, evita la pagina scheda. */
-  ep?: [number, number][];
+  ep?: [number, number | string][];
 }
 
 interface AnimeUnityStreamData {
@@ -681,7 +681,7 @@ export class AnimeUnityProvider {
     isMovie: boolean,
     titleOverride?: string,
     /** Dal catalogo: coppie [numero, id] che evitano la pagina della scheda. */
-    catalogEp?: [number, number][],
+    catalogEp?: [number, number | string][],
     /** Dal catalogo: lingua della scheda, quando la pagina non si scarica. */
     catalogLanguage?: string
   ): Promise<StreamForStremio[]> {
@@ -718,12 +718,16 @@ export class AnimeUnityProvider {
 
       if (!html) return [];
 
-      const $ = cheerio.load(String(html));
-      const pageTitle =
-        $('meta[property="og:title"]').attr('content') ||
-        $('title').first().text().trim() ||
-        null;
-      displayTitle = titleOverride || sanitizeAnimeTitle(pageTitle) || 'Unknown Title';
+      // Il DOM serve solo a leggere il titolo, e il titolo arriva quasi sempre
+      // dal chiamante: costruirlo comunque costa ~46 ms su una pagina da 500 KB.
+      if (!titleOverride) {
+        const $ = cheerio.load(String(html));
+        const pageTitle =
+          $('meta[property="og:title"]').attr('content') ||
+          $('title').first().text().trim() ||
+          null;
+        displayTitle = sanitizeAnimeTitle(pageTitle) || 'Unknown Title';
+      }
 
       // .co mette solo i primi 120 episodi nella pagina: per le serie lunghe
       // chiediamo la finestra che contiene l'episodio richiesto a /info_api.

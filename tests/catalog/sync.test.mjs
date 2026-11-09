@@ -472,3 +472,27 @@ test('shouldRunCatalogSync: dispatch forza il sync, intervallo minimo 16 ore', (
   assert.equal(shouldRunCatalogSync({ eventName: 'schedule', lastSyncRaw: '2026-11-08', nowMs: now }), false);
   assert.equal(shouldRunCatalogSync({ eventName: 'schedule', lastSyncRaw: '2026-11-07', nowMs: now }), true);
 });
+
+// AnimeWorld: la pagina /play/<slug> elenca gli episodi come anchor con
+// `data-episode-num` e il token nell'href. Il sync la scarica già, quindi
+// estrarre le coppie [numero, token] costa zero e risparmia all'addon un hop.
+test('world: le coppie [numero, token] vengono lette dalla pagina /play', () => {
+  const html = `
+    <div id="episodes">
+      <a class="episode" data-episode-num="1" href="/play/one-piece.abc/TOK1">Ep 1</a>
+      <a class="episode" href="/play/one-piece.abc/TOK2" data-episode-num="2">Ep 2</a>
+      <a class="nav" href="/play/one-piece.abc/TOK3">senza numero, si ignora</a>
+      <a class="episode" data-episode-num="3" href="/play/one-piece.abc/TOK1">duplicato del token 1, numero nuovo</a>
+    </div>`;
+  const details = parseCardDetails(html, 'world');
+  assert.deepEqual(details.ep, [
+    [1, 'TOK1'],
+    [2, 'TOK2'],
+    [3, 'TOK1'],
+  ]);
+});
+
+test('world: senza anchor episodio non si inventano coppie', () => {
+  const details = parseCardDetails('<div><a href="/play/x.abc/TOK1">Ep 1</a></div>', 'world');
+  assert.equal(details.ep, undefined);
+});

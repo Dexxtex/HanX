@@ -32,7 +32,7 @@ export interface CatalogHit {
   /** Solo AnimeUnity: il tipo della scheda (TV/Movie). */
   type?: string;
   /** Solo AnimeUnity: coppie `[numero, id]` degli episodi, evita la pagina scheda. */
-  ep?: [number, number][];
+  ep?: [number, number | string][];
 }
 
 export interface CatalogQueryOptions {

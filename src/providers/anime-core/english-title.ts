@@ -5,8 +5,9 @@
  * timeout alle chiamate TMDB, che nelle vecchie copie non ne avevano.
  */
 
+import { createHash } from 'node:crypto';
 import { debug } from '../../utils/logger.js';
-import { fetchKitsuAnime, getKitsuMalId, getKitsuMalIdForTmdb } from '../../mapping/live.js';
+import { cached, fetchKitsuAnime, getKitsuMalId, getKitsuMalIdForTmdb } from '../../mapping/live.js';
 import { getTmdbIdFromImdbId } from '../../utils/tmdbResolver.js';
 import { getMalAnimeMetadata, getPreferredMalTitle } from './tenrai-metadata.js';
 import { DEFAULT_FETCH_TIMEOUT } from './fetch-resource.js';
@@ -18,7 +19,7 @@ interface TmdbTitleResponse {
   title?: string;
 }
 
-async function fetchTmdbTitle(tmdbId: string, tmdbKey: string): Promise<string | null> {
+async function fetchTmdbTitle(tmdbId: string, tmdbKey: string): Promise<string> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), DEFAULT_FETCH_TIMEOUT);
   try {
@@ -32,10 +33,21 @@ async function fetchTmdbTitle(tmdbId: string, tmdbKey: string): Promise<string |
       const title = kind === 'tv' ? json.name : json.title;
       if (title) return title;
     }
-    return null;
   } finally {
     clearTimeout(timeoutId);
   }
+  // Lancia invece di tornare null: `cached` non memorizza i rifiuti, quindi un
+  // errore transitorio non resta in cache per sei ore.
+  throw new Error(`titolo TMDB non disponibile per ${tmdbId}`);
+}
+
+/**
+ * I tre provider chiedono lo stesso titolo nello stesso istante: senza cache e
+ * dedupe partono tre GET identiche verso TMDB.
+ */
+function cachedTmdbTitle(tmdbId: string, tmdbKey: string): Promise<string> {
+  const keyHash = createHash('sha256').update(tmdbKey).digest('hex').slice(0, 16);
+  return cached(`tmdb:title:${keyHash}:${tmdbId}`, () => fetchTmdbTitle(tmdbId, tmdbKey));
 }
 
 /**
@@ -96,7 +108,7 @@ export async function getEnglishTitleFromAnyId(
 
   if (tmdbId && tmdbKey) {
     try {
-      const tmdbTitle = await fetchTmdbTitle(tmdbId, tmdbKey);
+      const tmdbTitle = await cachedTmdbTitle(tmdbId, tmdbKey);
       if (tmdbTitle) return tmdbTitle;
     } catch { }
   }

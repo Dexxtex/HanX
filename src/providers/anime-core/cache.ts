@@ -30,6 +30,9 @@ const MAX_CACHE_ENTRIES = 500;
  * Returns the stored value for convenience (allows inline usage).
  */
 export function setCached<T = any>(map: Map<string, CacheEntry<T>>, key: string, value: T, ttlMs: number): T {
+  // Rinfrescare una chiave esistente non la sposta in coda alla Map: senza il
+  // delete la voce piu' calda resterebbe la prima a essere sfrattata.
+  map.delete(key);
   map.set(key, { value, expiresAt: Date.now() + ttlMs });
   // Limite come la cache provider dell'addon: prima scarta le entry scadute,
   // poi le più vecchie. Senza questo la Map cresce per tutta la vita del processo.

@@ -154,3 +154,35 @@ test('catalogo vecchio: le schede si usano lo stesso, il match non guarda genera
 process.on('exit', () => {
   globalThis.fetch = originalFetch;
 });
+
+// Forma reale delle schede: il titolo porta il sottotitolo e la lingua fra
+// parentesi, e il provider normalizza la query togliendo il trattino
+// ("Santen Sensou-hen" -> "Santen Sensouhen"). La fixture vecchia usava
+// "Tutor Hitman Reborn Ita", che non riproduce nessuna delle due cose: per
+// questo la variante ITA persa in 1.1.12 era passata senza un test rosso.
+test('catalogo: la variante ITA sopravvive alla normalizzazione del trattino', async () => {
+  useCatalog([
+    catalogEntry('Tokyo Revengers', 'tokyo-revengers-4ZisN'),
+    catalogEntry('Tokyo Revengers: Santen Sensou-hen', 'tokyo-revengers-arc-MQi7w'),
+    catalogEntry('Tokyo Revengers: Santen Sensou-hen (ITA)', 'tokyo-revengers-arc-ita-Qyig1'),
+  ]);
+  mockAnime('tokyo-revengers-4ZisN', 'Tokyo Revengers');
+  mockAnime('tokyo-revengers-arc-MQi7w', 'Tokyo Revengers: Santen Sensou-hen');
+  mockAnime('tokyo-revengers-arc-ita-Qyig1', 'Tokyo Revengers: Santen Sensou-hen (ITA)');
+  calls.length = 0;
+
+  const { streams } = await provider.handleTitleRequest('Tokyo Revengers: Santen Sensou-hen', 4, 1, false);
+
+  assert.deepEqual(
+    streams.map((stream) => stream.url).sort(),
+    [
+      'https://cdn.example/tokyo-revengers-arc-MQi7w.mp4',
+      'https://cdn.example/tokyo-revengers-arc-ita-Qyig1.mp4',
+    ],
+    'entrambe le varianti dell arco, e non la serie madre'
+  );
+  assert.ok(
+    !animeCalls().some((url) => url.includes('tokyo-revengers-4ZisN')),
+    'la stagione 4 non deve aprire la scheda della serie madre'
+  );
+});

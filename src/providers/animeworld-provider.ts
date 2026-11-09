@@ -303,6 +303,7 @@ function catalogWorldVersions(queries: string[], options: CatalogQueryOptions): 
       searchTitle: hit.title,
       episodes_count: 0,
       language_type: hit.language,
+      ...(hit.ep?.length ? { ep: hit.ep } : {}),
     };
   });
 }
@@ -483,20 +484,30 @@ function findEpisodeUrlTokenInHtml(html: string, episodeNumber: number | null | 
  * AnimeWorld setup) by using the same direct-link approach the page itself
  * exposes for the download button.
  */
-async function awExtractEpisodeStreamFromPlayPage(slug: string, episodeNumber: number | null | undefined, timeoutMs = AW_FETCH_TIMEOUT): Promise<string | null> {
+async function awExtractEpisodeStreamFromPlayPage(
+  slug: string,
+  episodeNumber: number | null | undefined,
+  timeoutMs = AW_FETCH_TIMEOUT,
+  catalogUrlToken = ''
+): Promise<string | null> {
   const animeUrl = `${getWorldBaseUrl()}/play/${slug}`;
-  let playHtml = '';
-  try {
-    // Stessa pagina (e stessa cache aw-play:) gia' scaricata dal probe lingua e da
-    // awGetEpisodes: il fetch era duplicato solo per avere cookie/csrf, che
-    // l'API serverPlayer non richiede (verificato: risponde 200 senza).
-    playHtml = await awFetchHtml(animeUrl, { ttlMs: 5 * 60 * 1000, cacheKey: `aw-play:${slug}`, timeoutMs });
-  } catch (err: any) {
-    console.error('[AnimeWorld][Stream] play page fetch failed for', slug, err?.message);
-    if (isAbortOrTimeoutError(err)) throw err;
-    return null;
-  }
-  const urlToken = findEpisodeUrlTokenInHtml(playHtml, episodeNumber == null ? null : Number(episodeNumber));
+  // Il token dal catalogo evita la pagina /play. Se pero' il sito l'ha ruotato
+  // l'API non restituisce media: in quel caso si rilegge la pagina e si riprova,
+  // cosi' un token vecchio costa un hop in piu' invece di uno stream in meno.
+  const playPageToken = async (): Promise<string> => {
+    try {
+      // Stessa pagina (e stessa cache aw-play:) gia' scaricata dal probe lingua e
+      // da awGetEpisodes: il fetch era duplicato solo per avere cookie/csrf, che
+      // l'API serverPlayer non richiede (verificato: risponde 200 senza).
+      const playHtml = await awFetchHtml(animeUrl, { ttlMs: 5 * 60 * 1000, cacheKey: `aw-play:${slug}`, timeoutMs });
+      return findEpisodeUrlTokenInHtml(playHtml, episodeNumber == null ? null : Number(episodeNumber)) || '';
+    } catch (err: any) {
+      console.error('[AnimeWorld][Stream] play page fetch failed for', slug, err?.message);
+      if (isAbortOrTimeoutError(err)) throw err;
+      return '';
+    }
+  };
+  let urlToken = catalogUrlToken || (await playPageToken());
   if (!urlToken) {
     debug(3, 'AnimeWorld', '[AnimeWorld][Stream] no urlToken found for', slug, 'ep=', episodeNumber);
     return null;
@@ -523,6 +534,25 @@ async function awExtractEpisodeStreamFromPlayPage(slug: string, episodeNumber: n
     const fromApi = collectMediaLinksFromHtml(String(playerHtml || ''))[0] || null;
     if (fromApi) return fromApi;
     debug(3, 'AnimeWorld', '[AnimeWorld][Stream] no media link in serverPlayer payload for', slug, 'ep=', episodeNumber);
+    if (catalogUrlToken) {
+      const fresh = await playPageToken();
+      if (fresh && fresh !== urlToken) {
+        debug(2, 'AnimeWorld', '[AnimeWorld][Stream] token dal catalogo non piu valido, riprovo con quello della pagina', { slug, ep: episodeNumber });
+        urlToken = fresh;
+        const retryHtml = await fetchResource(
+          `${getWorldBaseUrl()}/api/episode/serverPlayerAnimeWorld?id=${encodeURIComponent(fresh)}`,
+          awCaches,
+          {
+            ttlMs: 2 * 60 * 1000,
+            cacheKey: `aw-player:${slug}:${fresh}`,
+            timeoutMs,
+            headers: { ...apiHeaders, referer: `${getWorldBaseUrl()}/play/${slug}/${fresh}` },
+          }
+        );
+        const retried = collectMediaLinksFromHtml(String(retryHtml || ''))[0] || null;
+        if (retried) return retried;
+      }
+    }
   } catch (err: any) {
     console.warn('[AnimeWorld][Stream] serverPlayer request failed, fallback to episode HTML:', slug, urlToken, err?.message || err);
   }
@@ -544,8 +574,18 @@ async function awExtractEpisodeStreamFromPlayPage(slug: string, episodeNumber: n
   return mp4;
 }
 
-async function awGetStream(slug: string, episode?: number, timeoutMs = AW_FETCH_TIMEOUT): Promise<{ mp4_url: string | null }> {
-  const mp4 = await awExtractEpisodeStreamFromPlayPage(slug, episode == null ? null : Number(episode), timeoutMs);
+async function awGetStream(
+  slug: string,
+  episode?: number,
+  timeoutMs = AW_FETCH_TIMEOUT,
+  catalogUrlToken = ''
+): Promise<{ mp4_url: string | null }> {
+  const mp4 = await awExtractEpisodeStreamFromPlayPage(
+    slug,
+    episode == null ? null : Number(episode),
+    timeoutMs,
+    catalogUrlToken
+  );
   return { mp4_url: mp4 };
 }
 
@@ -607,7 +647,14 @@ async function invokePython(args: string[], timeoutMs = AW_FETCH_TIMEOUT): Promi
     const eIdx = args.indexOf('--episode');
     const slug = sIdx >= 0 ? String(args[sIdx + 1] || '') : '';
     const episode = eIdx >= 0 ? Number(args[eIdx + 1]) : undefined;
-    return awGetStream(slug, Number.isFinite(episode as number) ? episode : undefined, timeoutMs);
+    const tIdx = args.indexOf('--url-token');
+    const catalogUrlToken = tIdx >= 0 ? String(args[tIdx + 1] || '') : '';
+    return awGetStream(
+      slug,
+      Number.isFinite(episode as number) ? episode : undefined,
+      timeoutMs,
+      catalogUrlToken
+    );
   }
   throw new Error(`AnimeWorld adapter command non supportato: ${cmd}`);
 }
@@ -1159,7 +1206,12 @@ export class AnimeWorldProvider {
     const episodeInfos = await Promise.all(selected.map(async v => {
       try {
         const t0 = Date.now();
-        const episodes: AnimeWorldEpisode[] = await invokePython(['get_episodes', '--anime-slug', v.slug]);
+        // Con le coppie [numero, token] dal catalogo la pagina /play non serve:
+        // lista episodi e token sono già lì, e ogni hop costa un secondo di pacing.
+        const catalogEp = (v.ep || []).filter(([num]) => Number.isFinite(Number(num)));
+        const episodes: AnimeWorldEpisode[] = catalogEp.length
+          ? catalogEp.map(([num, token]) => ({ id: String(token), number: Number(num) }))
+          : await invokePython(['get_episodes', '--anime-slug', v.slug]);
         if (!episodes || !episodes.length) return null;
         let target: AnimeWorldEpisode | undefined;
         if (isMovie) {
@@ -1174,7 +1226,7 @@ export class AnimeWorldProvider {
           target = episodes[0];
         }
         if (!target) return null;
-        return { v, target, ms: Date.now() - t0 };
+        return { v, target, ms: Date.now() - t0, fromCatalog: catalogEp.length > 0 };
       } catch (e) {
         console.error('[AnimeWorld] get_episodes error', v.slug, e);
         return null;
@@ -1184,13 +1236,15 @@ export class AnimeWorldProvider {
     const streamObjs = await Promise.all(episodeInfos.filter(Boolean).map(async info => {
       if (!info) return null;
       const { v, target } = info;
+      // Il token dal catalogo evita la pagina /play dentro get_stream.
+      const catalogTokenArgs = info.fromCatalog && target.id ? ['--url-token', String(target.id)] : [];
       try {
         const epNum = episodeNumber != null ? episodeNumber : target.number;
         debug(4, 'AnimeWorld', `[AnimeWorld] Fetching stream for slug=${v.slug} ep=${epNum}`);
         let streamData: any = null;
         let timedOut = false;
         try {
-          streamData = await invokePython(['get_stream', '--anime-slug', v.slug, ...(epNum != null ? ['--episode', String(epNum)] : [])]);
+          streamData = await invokePython(['get_stream', '--anime-slug', v.slug, ...(epNum != null ? ['--episode', String(epNum)] : []), ...catalogTokenArgs]);
         } catch (e: any) {
           if (isAbortOrTimeoutError(e)) {
             timedOut = true;
@@ -1201,7 +1255,7 @@ export class AnimeWorldProvider {
         }
         if (timedOut) {
           try {
-            streamData = await invokePython(['get_stream', '--anime-slug', v.slug, ...(epNum != null ? ['--episode', String(epNum)] : [])], 15000);
+            streamData = await invokePython(['get_stream', '--anime-slug', v.slug, ...(epNum != null ? ['--episode', String(epNum)] : []), ...catalogTokenArgs], 15000);
           } catch (e2) {
             console.error('[AnimeWorld] get_stream retry failed', v.slug, e2);
             return null;
