@@ -277,6 +277,8 @@ const tvdbPin = String(process.env.TVDB_PIN || '').trim();
 // cache Cloudflare, quindi non consumano quota.
 const simklClientId = String(process.env.SIMKL_CLIENT_ID || '').trim();
 const simklIdCache = new Map();
+/** Quante schede il ponte Simkl ha recuperato in questa run (0 = spento o inutile). */
+const simklBridge = { tmdb: 0, tvdb: 0, attempts: 0 };
 
 async function simklIds(malId) {
   if (!simklClientId || !malId) return null;
@@ -754,6 +756,7 @@ async function convertCatalogEntry(entry, index) {
     // Stesso ponte, ma con SimKL: copre molti più titoli di MDBList e porta
     // anche il TVDB. La verifica resta la stessa (lingua + anno).
     const ids = await simklIds(entry?.mal_id);
+    if (simklClientId) simklBridge.attempts += 1;
     if (ids?.tmdb) {
       // L'id del ponte può essere morto o di un'altra opera: un 404 non è
       // un'eccezione, è "questo id non serve".
@@ -763,7 +766,10 @@ async function convertCatalogEntry(entry, index) {
       } catch (error) {
         if (!/HTTP 404/.test(String(error?.message || ''))) throw error;
       }
-      if (detail?.id && pickTmdbResult([detail], query.year)) tmdb = detail;
+      if (detail?.id && pickTmdbResult([detail], query.year)) {
+        tmdb = detail;
+        simklBridge.tmdb += 1;
+      }
     }
   }
   if (!tmdb?.id) {
@@ -876,7 +882,11 @@ async function convertFromTvdb(entry, index, record, titleAlt = '') {
     // Kitsu spesso non ha il TVDB di una OVA: SimKL sì, e con quel TVDB la
     // special si allinea alla stagione 0 della serie madre.
     const ids = await simklIds(entry?.mal_id);
-    if (ids?.tvdb) tvdbId = String(ids.tvdb);
+    if (simklClientId) simklBridge.attempts += 1;
+    if (ids?.tvdb) {
+      tvdbId = String(ids.tvdb);
+      simklBridge.tvdb += 1;
+    }
   }
   if (!tvdbId) return { ...record, kitsuId, status: 'no-tmdb' };
 
@@ -1313,6 +1323,11 @@ async function main() {
   console.log(`✓ ${outputFile}`);
   console.log(`  serie: ${Object.keys(index.series).length}, film: ${Object.keys(index.movies).length}`);
   console.log(`  batch: ${processed} entry (${summary})`);
+  console.log(
+    simklClientId
+      ? `  ponte Simkl: ${simklBridge.attempts} tentativi, ${simklBridge.tmdb} TMDB + ${simklBridge.tvdb} TVDB recuperati`
+      : '  ponte Simkl: spento (SIMKL_CLIENT_ID assente)',
+  );
   console.log(
     `  cursore: ${catalogTypes
       .map((type) => `${type} ${state.cursor[type]?.page ?? 1}:${state.cursor[type]?.pos ?? 0}`)
