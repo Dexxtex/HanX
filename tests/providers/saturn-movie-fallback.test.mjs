@@ -40,3 +40,14 @@ test('serie: il romaji è il primo ripiego, budget due', async () => {
   assert.ok(p.queries.length <= 3, 'query: ' + JSON.stringify(p.queries));
   assert.ok(p.queries[0].toLowerCase().includes('kaze'), 'la prima query usa il titolo: ' + JSON.stringify(p.queries));
 });
+
+// "Snow Fairy" è una query di ripiego troncata: l'unico risultato del sito
+// ("A Little Snow Fairy Sugar") è un'altra opera, e veniva servito.
+test('unico risultato di una query di ripiego: non si accetta senza match', async () => {
+  const { filterAnimeResults } = await import('../../dist/providers/animesaturn-provider.js');
+  const results = [{ version: { title: 'A Little Snow Fairy Sugar', url: '/anime/x' }, language_type: 'SUB ITA' }];
+  // Query di ripiego: nessun match di titolo -> scartato.
+  assert.deepEqual(filterAnimeResults(results, ['Yuki: Snow Fairy', 'Snow Fairy'], false), []);
+  // Titolo richiesto: l'euristica resta valida.
+  assert.equal(filterAnimeResults(results, ['Yuki: Snow Fairy'], true).length, 1);
+});

@@ -598,7 +598,8 @@ function catalogSaturnVersions(
 
 export function filterAnimeResults(
   results: { version: AnimeSaturnResult; language_type: string }[],
-  titles: string[]
+  titles: string[],
+  allowSingleSiteMatch = true
 ) {
   const norm = (s: string) => normalizeApostrophes(normalizeUnicodeToAscii(s.toLowerCase().replace(/\s+/g, ' ').trim()));
   const baseRaw = norm(titles[0] || '');
@@ -610,7 +611,10 @@ export function filterAnimeResults(
   // Suzumiya" contro la query "The Disappearance…"): score 0, ma il match l'ha
   // fatto la ricerca del sito. Un solo risultato per una query di almeno due
   // parole è affidabile; i casi ambigui arrivano sempre come liste lunghe.
-  const singleSiteMatch = results.length === 1 && baseRaw.split(' ').filter(Boolean).length >= 2;
+  // Vale solo per il titolo richiesto: su una query di ripiego troncata che ci
+  // siamo inventati noi ("Snow Fairy" da "Yuki: Snow Fairy") l'unico risultato
+  // del sito è un'altra opera, e servirlo dà lo stream sbagliato.
+  const singleSiteMatch = allowSingleSiteMatch && results.length === 1 && baseRaw.split(' ').filter(Boolean).length >= 2;
   const byScore = pickBestScored(scored, REVIEW_SCORE);
   const filtered = byScore.length ? byScore : singleSiteMatch ? results.map((entry) => entry) : [];
   if (singleSiteMatch && !byScore.length) {
@@ -1075,7 +1079,7 @@ export class AnimeSaturnProvider {
       const fallbackBudget = isMovie ? 3 : 2;
       for (const fallbackQuery of candidates.filter((q, i, all) => q && !sameQuery(q, normalizedTitle) && all.indexOf(q) === i).slice(0, fallbackBudget)) {
         titles.push(fallbackQuery);
-        const fallbackVersions = filterAnimeResults(await this.searchAllVersions(fallbackQuery), titles);
+        const fallbackVersions = filterAnimeResults(await this.searchAllVersions(fallbackQuery), titles, false);
         if (fallbackVersions.length) {
           debug(2, 'AnimeSaturn', `[AnimeSaturn] Trovato con query di ripiego: ${fallbackQuery}`);
           animeVersions = fallbackVersions;
