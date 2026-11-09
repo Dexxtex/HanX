@@ -168,9 +168,8 @@ export const TITLE_STOP_WORDS = new Set([
   'no', 'of', 'on', 'the', 'to', 'wa', 'with', 'wo',
 ]);
 const TITLE_LANGUAGE_WORDS = new Set(['cr', 'dub', 'eng', 'ita', 'jp', 'jap', 'sub', 'subita']);
-const QUERY_TRAILING_TOKENS = new Set(
-  ['arc', 'chapter', 'cour', 'hen', 'ona', 'ova', 'part', 'saga', 'season', 'special']
-);
+// Marcatore di film nel titolo: distingue l'opera madre dal suo film.
+const FILM_MARKER = /\b(movie|film)\b/i;
 const TITLE_SEASON_SUFFIXES = new Set([
   'arc', 'chapter', 'cour', 'hen', 'movie', 'ona', 'ova', 'part', 'saga', 'season', 'special',
 ]);
@@ -230,11 +229,10 @@ function buildCleanTokens(title: string, stripTrailingFormat = true): string[] {
     .filter(Boolean)
     // "II" e "2" sono la stessa stagione: senza questo, il titolo trovato viene scartato dal filtro.
     .map((token) => ROMAN_NUMERALS[token] || token.replace(/^(\d+)(?:st|nd|rd|th)$/, '$1'));
-  // "Tenjiku-hen" e "Tenjiku Arc" sono lo stesso sottotitolo. Il taglio vale
-  // per la scheda candidata, così una scheda "... Movie" risponde alla query
-  // corta ("Reborn!"); sulla query no, altrimenti il film servirebbe la serie.
-  const stripSet = stripTrailingFormat ? TITLE_SEASON_SUFFIXES : QUERY_TRAILING_TOKENS;
-  while (tokens.length > 1 && stripSet.has(tokens[tokens.length - 1])) tokens.pop();
+  // "Tenjiku-hen" e "Tenjiku Arc" sono lo stesso sottotitolo.
+  if (stripTrailingFormat) {
+    while (tokens.length > 1 && TITLE_SEASON_SUFFIXES.has(tokens[tokens.length - 1])) tokens.pop();
+  }
   return tokens;
 }
 
@@ -245,7 +243,10 @@ function buildCleanTokens(title: string, stripTrailingFormat = true): string[] {
  * 0 = non correlato.
  */
 export function titleMatchScore(requested: string, candidate: string): number {
-  const query = titleTokens(requested, false);
+  // Se la richiesta è un film e la scheda non lo dichiara, la scheda è l'opera
+  // madre: "Yu-Gi-Oh!: The Movie" contro "Yu-Gi-Oh!" darebbe la serie.
+  if (FILM_MARKER.test(String(requested || '')) && !FILM_MARKER.test(String(candidate || ''))) return 0;
+  const query = titleTokens(requested);
   const found = titleTokens(candidate);
   if (!query.length || !found.length) return 0;
 

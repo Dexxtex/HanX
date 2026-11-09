@@ -362,3 +362,13 @@ test('film: la serie omonima non risponde alla richiesta del film', () => {
     ['yu-gi-oh-movie']
   );
 });
+
+// "given The Movie" e la scheda "Given Movie" sono lo stesso film: entrambi
+// dichiarano il formato, quindi il confronto resta esatto.
+test('film: due titoli che dichiarano il film combaciano', () => {
+  fixture({ sites: { saturn: [entry('Given Movie', 'given-movie')] } });
+  assert.deepEqual(
+    lookupTitle('saturn', ['given The Movie'], { isMovie: true }).hits.map((h) => h.slug),
+    ['given-movie']
+  );
+});
