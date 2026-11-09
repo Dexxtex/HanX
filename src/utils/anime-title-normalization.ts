@@ -163,7 +163,7 @@ export function buildTitleFallbackQueries(normalized: string, season?: number | 
   return queries;
 }
 
-const TITLE_STOP_WORDS = new Set([
+export const TITLE_STOP_WORDS = new Set([
   'a', 'an', 'and', 'dei', 'del', 'della', 'delle', 'di', 'e', 'for', 'ga', 'in',
   'no', 'of', 'on', 'the', 'to', 'wa', 'with', 'wo',
 ]);

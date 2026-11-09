@@ -14,6 +14,7 @@ import {
   resolveExactMapKey,
   sameQuery,
   titleMatchScoreAny,
+  TITLE_STOP_WORDS,
   type TitleNormalizationOptions,
 } from '../utils/anime-title-normalization.js';
 import {
@@ -871,6 +872,42 @@ export class AnimeWorldProvider {
     }
   }
 
+  /**
+   * I film hanno sul sito uno slug italiano ("naruto-movie-03-i-guardiani...")
+   * mentre la query arriva in inglese: il filtro slug non può mai combaciare.
+   * La ricerca del sito matcha per sottostringa, quindi la query senza stopword
+   * ("Naruto Movie 3") trova la scheda ("3" sta dentro "03"): qui la si filtra
+   * per franchise + numero del film.
+   */
+  private async movieFranchiseVersions(normalized: string): Promise<AnimeWorldResult[]> {
+    const head = normalized.split(':')[0].trim();
+    const m = /(.+?)\s+movie(?:\s+(\d+))?$/i.exec(head);
+    if (!m) return [];
+    const franchise = m[1].toLowerCase().split(/\s+/).filter(w => !TITLE_STOP_WORDS.has(w)).join('-');
+    if (!franchise) return [];
+    const number = m[2] ? String(Number(m[2])) : '';
+    // Il numero NON va nella query: la ricerca del sito è letterale e
+    // "naruto shippuden movie 1" non combacia con "Movie 01" (verificato live
+    // 12/11/2026: con numero = listone generico, senza = le schede giuste).
+    // Il numero seleziona dopo, col filtro prefix+numero qui sotto.
+    const results = await this.searchAllVersions([franchise.replace(/-/g, ' '), 'movie'].filter(Boolean).join(' '), () => true);
+    const prefix = `${franchise}-movie-`;
+    const cards = results.filter(v => {
+      const base = String(v.slug || '').toLowerCase().split('.')[0];
+      if (!base.startsWith(prefix)) return false;
+      if (!number) return true;
+      const numPart = base.slice(prefix.length).match(/^\d+/);
+      return !!numPart && String(Number(numPart[0])) === number;
+    });
+    // Senza numero nella query tutte le schede del franchise combaciano: se ne
+    // resta più di una è ambiguo, meglio zero stream che il film sbagliato.
+    if (!number) {
+      const bases = new Set(cards.map(v => animeWorldSlugBase(v.slug)));
+      if (bases.size > 1) return [];
+    }
+    return cards;
+  }
+
   /** Quello che la risoluzione condivisa deve sapere di questo provider. */
   private titleContext(): TitleResolutionContext {
     return {
@@ -1079,6 +1116,15 @@ export class AnimeWorldProvider {
             filtered = versions;
           }
           debug(3, 'AnimeWorld', `[AnimeWorld] Strict base filter applied (${normSlugKey}) from ${beforeCount} -> ${filtered.length}`);
+          if (!filtered.length && isMovie) {
+            // Slug italiano del sito vs query inglese: il filtro slug non può
+            // mai combaciare per i film; si ripiega su franchise + numero.
+            const movieCards = await this.movieFranchiseVersions(normalized);
+            if (movieCards.length) {
+              debug(2, 'AnimeWorld', `[AnimeWorld] Film: ripiego franchise+numero, schede: ${movieCards.map(v => v.slug).join(', ')}`);
+              filtered = movieCards;
+            }
+          }
           if (!filtered.length) {
             debug(3, 'AnimeWorld', '[AnimeWorld] Strict filter produced 0 results, NOT restoring broad matches (no full title match).');
             const fallbackDate = (this as any)._lastKitsuStartDate as string | undefined;
