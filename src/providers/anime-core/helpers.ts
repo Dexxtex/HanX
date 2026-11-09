@@ -67,7 +67,9 @@ export function italianSeasonQuery(
   if (!title) return '';
   // Un film non ha stagione: il titolo italiano è l'identità dell'opera, ed è
   // quello che i siti usano ("Quando c'era Marnie" per "When Marnie Was There").
-  if (isMovie) return title;
+  // Se però TMDB lo dà in giapponese non è una query utile sui siti italiani, e
+  // cercarla fa perdere la scheda che il titolo inglese trovava.
+  if (isMovie) return /[\u3000-\u9fff\uac00-\ud7af]/.test(title) ? '' : title;
   if (season && season > 1) return `${title} ${season}`;
   if (season === 1) return title;
   // Gli id Kitsu mappano una stagione per entry: `season` è null, la stagione

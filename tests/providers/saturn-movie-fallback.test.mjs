@@ -58,6 +58,9 @@ test('unico risultato di una query di ripiego: non si accetta senza match', asyn
 test('film: il titolo italiano non viene scartato perche season e null', async () => {
   const { italianSeasonQuery } = await import('../../dist/providers/anime-core/helpers.js');
   assert.equal(italianSeasonQuery("Quando c'era Marnie", null, 'When Marnie Was There', true), "Quando c'era Marnie");
+  // Un titolo giapponese non è una query utile sui siti italiani: usarlo faceva
+  // perdere la scheda che il titolo inglese trovava (Gundam SEED Freedom Zero).
+  assert.equal(italianSeasonQuery('機動戦士ガンダムSEED FREEDOM ZERO', null, 'Mobile Suit Gundam SEED Freedom Zero', true), '');
   // Le serie restano com'erano: senza stagione esplicita il titolo dell'opera
   // prenderebbe la scheda sbagliata.
   assert.equal(italianSeasonQuery('Tokyo Revengers', null, 'Tokyo Revengers'), '');
