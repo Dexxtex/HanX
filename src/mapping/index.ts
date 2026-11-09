@@ -21,6 +21,7 @@ import type { AnimeMappingIndex, MappingCredentialsInput, MappingProvider, Mappi
 import { MAPPING_SCHEMA_VERSION } from './types.js';
 import { getSeasonTitle, resolveLiveTarget } from './live.js';
 import { debug } from '../utils/logger.js';
+import { writeAtomic } from '../utils/fs.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -293,12 +294,6 @@ export function resetMappingCache(): void {
   snapshot = null;
 }
 
-function writeAtomic(filePath: string, content: string): void {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  const temp = `${filePath}.tmp`;
-  fs.writeFileSync(temp, content);
-  fs.renameSync(temp, filePath);
-}
 
 function readEtag(filePath: string): string {
   try {

@@ -117,6 +117,35 @@ export function catalogFile(): string {
   return path.join(catalogDir(), 'catalog-titles.json');
 }
 
+/**
+ * Stato del catalogo per `/status.json`, con la stessa forma del mapping.
+ * Senza, la domanda "questo file è vecchio?" aveva risposta solo per una delle
+ * due pipeline: un catalogo fermo (CI che non pubblica, download fallito
+ * dall'avvio) si vedeva solo come latenza.
+ */
+export function getCatalogStatus(staleMs: number) {
+  try {
+    const file = catalogFile();
+    const { mtimeMs } = fs.statSync(file);
+    const index = loadIndex();
+    const sites = index?.sites || ({} as TitleIndexFile['sites']);
+    const counts = {
+      saturn: sites.saturn?.length || 0,
+      world: sites.world?.length || 0,
+      unity: sites.unity?.length || 0,
+    };
+    return {
+      generatedAt: index?.generatedAt ?? null,
+      entries: counts.saturn + counts.world + counts.unity,
+      sites: counts,
+      ageMs: Math.max(0, Date.now() - mtimeMs),
+      stale: Date.now() - mtimeMs > staleMs,
+    };
+  } catch {
+    return { generatedAt: null, entries: 0, sites: { saturn: 0, world: 0, unity: 0 }, ageMs: null, stale: true };
+  }
+}
+
 /** Rilegge il file solo se è cambiato: una stat per chiamata, 15k schede in memoria. */
 function loadIndex(): TitleIndexFile | null {
   const file = catalogFile();

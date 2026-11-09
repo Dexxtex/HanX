@@ -44,6 +44,7 @@ import {
   qualityTag,
   italianSeasonQuery,
   pickBestScored,
+  isAbortOrTimeoutError,
   seasonFromTitle,
 } from './anime-core/index.js';
 import {
@@ -273,10 +274,15 @@ async function searchEndpoint(query: string, _dubbed = false): Promise<AnimeUnit
       }
     );
   } catch (error: any) {
+    const message = String(error?.message || error);
     // Il sito throttla aggressivamente: evita la catena di fallback per un minuto.
-    if (/\b429\b/.test(String(error?.message || error))) {
+    if (/\b429\b/.test(message)) {
       searchCooldownUntil = Date.now() + 60_000;
       console.warn('[AnimeUnity] Ricerca in rate limit (429): pausa 60s');
+    } else if (/\b403\b/.test(message) || isAbortOrTimeoutError(error)) {
+      // Un blocco WAF o un timeout non sono "titolo non trovato": senza questa
+      // riga il sintomo a valle era "Nessun risultato trovato per il titolo".
+      console.warn(`[AnimeUnity] Ricerca fallita (${/\b403\b/.test(message) ? '403 WAF' : 'timeout'}): ${message}`);
     }
     return [];
   }
@@ -909,7 +915,12 @@ export class AnimeUnityProvider {
           title = await getEnglishTitleFromAnyId(request.id, 'kitsu', this.config.tmdbApiKey);
         } catch { }
       }
-      if (!title) return { streams: [] };
+      if (!title) {
+        // Nessun titolo = nessuna ricerca possibile. Va detto: senza questa riga
+        // l'uscita era indistinguibile da "anime non presente sui siti".
+        console.warn('[AnimeUnity] Nessun titolo recuperabile per l id richiesto: nessuna ricerca');
+        return { streams: [] };
+      }
       // L'id Kitsu non porta stagione: la fornisce l'indice insieme al titolo italiano.
       const target = await resolveAnimeTarget(request, this.config);
       return this.handleTitleRequest(title, null, request.episode, request.isMovie, target?.titleAlt, target?.titleIt, target?.titleItSeason);

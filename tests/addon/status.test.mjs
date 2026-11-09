@@ -103,9 +103,11 @@ test('GET /status.json: header, body esatto, versione del manifest e cache legat
     assert.equal(res.headers.get('access-control-allow-origin'), '*');
     assert.equal(res.headers.get('cache-control'), 'no-store');
 
-    assert.deepEqual(Object.keys(body).sort(), ['addon', 'cache', 'mapping']);
+    assert.deepEqual(Object.keys(body).sort(), ['addon', 'cache', 'catalog', 'mapping']);
     assert.deepEqual(Object.keys(body.addon).sort(), ['uptimeMs', 'version']);
     assert.deepEqual(Object.keys(body.mapping).sort(), ['ageMs', 'generatedAt', 'movies', 'schemaVersion', 'series', 'signature', 'stale']);
+    assert.deepEqual(Object.keys(body.catalog).sort(), ['ageMs', 'entries', 'generatedAt', 'sites', 'stale']);
+    assert.deepEqual(Object.keys(body.catalog.sites).sort(), ['saturn', 'unity', 'world']);
     assert.deepEqual(Object.keys(body.cache).sort(), ['disabled', 'entries', 'maxEntries', 'ttlMs']);
 
     // addon.version è quella servita dal manifest, non package.json.

@@ -869,7 +869,12 @@ export class AnimeWorldProvider {
           title = await getEnglishTitleFromAnyId(kitsuId, 'kitsu', this.config.tmdbApiKey, ALLOW_EMPTY_TITLE);
         } catch {}
       }
-      if (!title) return { streams: [] };
+      if (!title) {
+        // Nessun titolo = nessuna ricerca possibile. Va detto: senza questa riga
+        // l'uscita era indistinguibile da "anime non presente sui siti".
+        console.warn('[AnimeWorld] Nessun titolo recuperabile per l id richiesto: nessuna ricerca');
+        return { streams: [] };
+      }
       // Kitsu has one season per entry, so no external season label is used.
       // La stagione per la query italiana arriva comunque dall'indice.
       const target = await resolveAnimeTarget(request, this.config);

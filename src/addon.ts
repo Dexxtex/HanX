@@ -16,11 +16,14 @@ import {
     resolvePlaybackProxyUrl,
 } from './config.js';
 import { AnimeUnityProvider } from './providers/animeunity-provider.js';
+import { dispatchRequest } from './providers/registry.js';
+import { collectProviderStreams } from './stream.js';
 import { providerRequestStore } from './providers/anime-core/fetch-resource.js';
 import { providerLabel } from './utils/unifiedNames.js';
 import { landingTemplate } from './landingPage.js';
 import { toNumericId, parseRequestId } from './mapping/request.js';
-import { getMappingStatus, getMappingVersion, MAPPING_REFRESH_INTERVAL_MS, refreshMappingFromUrl } from './mapping/index.js';
+import { getCatalogStatus } from './catalog/matcher.js';
+import { getMappingStatus, getMappingVersion, MAPPING_REFRESH_INTERVAL_MS, MAPPING_STALE_MS, refreshMappingFromUrl } from './mapping/index.js';
 import { CATALOG_REFRESH_INTERVAL_MS, refreshCatalogFromUrl } from './catalog/remote.js';
 import { debug, DEBUG_LEVEL } from './utils/logger.js';
 import { unifyStreams, providerRank } from './utils/streamTitle.js';
@@ -54,7 +57,7 @@ function sortStreamsByPriority(streams: { url?: string; title?: string }[]): voi
 // ================= MANIFEST BASE (restored) =================
 const baseManifest: Manifest = {
     id: "org.stremio.hanx",
-    version: "1.1.18",
+    version: "1.1.19",
     name: "HanX",
     description: "HanX addon dedicato ad AnimeUnity, AnimeSaturn e AnimeWorld",
     types: ["movie", "series", "anime"],
@@ -461,46 +464,27 @@ export function createBuilder() {
                         providerPromises.push(runProvider(name, enabled, handler, streamName, timeoutMs));
                     };
                     // AnimeUnity
-                    scheduleProviderRun('AnimeUnity', animeUnityEnabled, async () => {
-                        const animeUnityProvider = new AnimeUnityProvider(animeUnityConfig);
-                        if (id.startsWith('kitsu:')) return animeUnityProvider.handleKitsuRequest(id);
-                        if (id.startsWith('mal:')) return animeUnityProvider.handleMalRequest(id);
-                        if (id.startsWith('tt')) return animeUnityProvider.handleImdbRequest(id, seasonNumber, episodeNumber, isMovie);
-                        if (id.startsWith('tmdb:')) return animeUnityProvider.handleTmdbRequest(toNumericId(id), seasonNumber, episodeNumber, isMovie);
-                        if (id.startsWith('tvdb:')) return animeUnityProvider.handleTvdbRequest(toNumericId(id), seasonNumber, episodeNumber, isMovie);
-                        return { streams: [] };
-                    }, providerLabel('animeunity'));
+                    scheduleProviderRun('AnimeUnity', animeUnityEnabled, async () =>
+                        dispatchRequest(new AnimeUnityProvider(animeUnityConfig), id, seasonNumber, episodeNumber, isMovie),
+                        providerLabel('animeunity'));
 
                     // AnimeSaturn
                     scheduleProviderRun('AnimeSaturn', animeSaturnEnabled, async () => {
                         const { AnimeSaturnProvider } = await import('./providers/animesaturn-provider.js');
-                        const animeSaturnProvider = new AnimeSaturnProvider(animeSaturnConfig);
-                        if (id.startsWith('kitsu:')) return animeSaturnProvider.handleKitsuRequest(id);
-                        if (id.startsWith('mal:')) return animeSaturnProvider.handleMalRequest(id);
-                        if (id.startsWith('tt')) return animeSaturnProvider.handleImdbRequest(id, seasonNumber, episodeNumber, isMovie);
-                        if (id.startsWith('tmdb:')) return animeSaturnProvider.handleTmdbRequest(toNumericId(id), seasonNumber, episodeNumber, isMovie);
-                        if (id.startsWith('tvdb:')) return animeSaturnProvider.handleTvdbRequest(toNumericId(id), seasonNumber, episodeNumber, isMovie);
-                        return { streams: [] };
+                        return dispatchRequest(new AnimeSaturnProvider(animeSaturnConfig), id, seasonNumber, episodeNumber, isMovie);
                     }, providerLabel('animesaturn'));
 
                     // AnimeWorld
                     scheduleProviderRun('AnimeWorld', animeWorldEnabled, async () => {
                         const { AnimeWorldProvider } = await import('./providers/animeworld-provider.js');
-                        const animeWorldProvider = new AnimeWorldProvider(animeWorldConfig);
-                        if (id.startsWith('kitsu:')) return animeWorldProvider.handleKitsuRequest(id);
-                        if (id.startsWith('mal:')) return animeWorldProvider.handleMalRequest(id);
-                        if (id.startsWith('tt')) return animeWorldProvider.handleImdbRequest(id, seasonNumber, episodeNumber, isMovie);
-                        if (id.startsWith('tmdb:')) return animeWorldProvider.handleTmdbRequest(toNumericId(id), seasonNumber, episodeNumber, isMovie);
-                        if (id.startsWith('tvdb:')) return animeWorldProvider.handleTvdbRequest(toNumericId(id), seasonNumber, episodeNumber, isMovie);
-                        return { streams: [] };
+                        return dispatchRequest(new AnimeWorldProvider(animeWorldConfig), id, seasonNumber, episodeNumber, isMovie);
                     }, providerLabel('animeworld'));
 
                     // Si aspettano tutti: consegnare una lista tagliata toglie i
                     // provider lenti, e su una serie mai vista sono 7-10 s.
-                    const allProviderResults = await Promise.all(providerPromises);
-                    for (const group of allProviderResults) {
-                        for (const s of group) allStreams.push(s);
-                    }
+                    // L'attesa sta in stream.ts perché è il punto dove è già
+                    // passato il bug del budget di risposta.
+                    allStreams.push(...(await collectProviderStreams(providerPromises)));
 
                 }
 
@@ -592,6 +576,9 @@ app.get('/status.json', (_req: Request, res: ExpressResponse) => {
             uptimeMs: Math.round(process.uptime() * 1000),
         },
         mapping: getMappingStatus(),
+        // Il catalogo ha la stessa soglia di "vecchio" del mapping: due pipeline,
+        // una sola idea di quando un file è da rifare.
+        catalog: getCatalogStatus(MAPPING_STALE_MS),
         cache: {
             entries: _providerStreamCache.size,
             maxEntries: PROVIDER_CACHE_MAX_ENTRIES,

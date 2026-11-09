@@ -163,7 +163,13 @@ export async function getKitsuTitle(kitsuId: string): Promise<string> {
   if (!kitsuId) return '';
   try {
     return (await fetchKitsuAnime(kitsuId))?.title || '';
-  } catch {
+  } catch (error: any) {
+    // Un outage di Kitsu non è "questo anime non è mappato": senza questa riga
+    // il provider usciva con zero stream e nessun indizio sulla causa.
+    debug(1, 'Mapping/Live', 'titolo Kitsu non recuperato', {
+      kitsuId,
+      error: (error as any)?.message || String(error),
+    });
     return '';
   }
 }

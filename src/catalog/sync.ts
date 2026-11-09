@@ -3,6 +3,7 @@ import path from 'node:path';
 import * as cheerio from 'cheerio';
 import { compactKey } from './text.js';
 import { htmlToText } from '../utils/html.js';
+import { writeJsonAtomic } from '../utils/fs.js';
 
 export type CatalogSite = 'saturn' | 'world' | 'unity';
 
@@ -613,13 +614,8 @@ export function buildTitleIndex(catalog: CatalogFile): TitleIndexFile {
 }
 
 /** Scrive su .tmp e rinomina: un crash non lascia un file a metà. */
-export function writeJsonAtomic(file: string, data: unknown): void {
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  const tmp = `${file}.tmp`;
-  fs.writeFileSync(tmp, `${JSON.stringify(data)}
-`);
-  fs.renameSync(tmp, file);
-}
+// Unica implementazione in utils/fs.ts: qui resta solo il nome usato dal file.
+export { writeJsonAtomic };
 
 /** Scrive prima i due temporanei, poi rinomina: un crash non lascia la coppia a metà. */
 export function writeCatalogsAtomic(dir: string, catalog: CatalogFile, index: TitleIndexFile): void {

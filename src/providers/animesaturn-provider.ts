@@ -939,7 +939,12 @@ export class AnimeSaturnProvider {
           title = await getEnglishTitleFromAnyId(request.id, 'kitsu', this.config.tmdbApiKey);
         } catch {}
       }
-      if (!title) return { streams: [] };
+      if (!title) {
+        // Nessun titolo = nessuna ricerca possibile. Va detto: senza questa riga
+        // l'uscita era indistinguibile da "anime non presente sui siti".
+        console.warn('[AnimeSaturn] Nessun titolo recuperabile per l id richiesto: nessuna ricerca');
+        return { streams: [] };
+      }
       // L'id Kitsu non porta stagione: la fornisce l'indice insieme al titolo italiano.
       const target = await resolveAnimeTarget(request, this.config);
       return this.handleTitleRequest(title, null, request.episode, request.isMovie, target?.titleAlt, target?.titleIt, target?.titleItSeason);

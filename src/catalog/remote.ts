@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import { debug } from '../utils/logger.js';
 import { catalogFile, catalogDir } from './matcher.js';
-import { writeJsonAtomic } from './sync.js';
+import { writeJsonAtomic } from '../utils/fs.js';
 
 /** Controllo ogni 6 ore, download al massimo una volta al giorno. */
 export const CATALOG_REFRESH_INTERVAL_MS = 6 * 60 * 60 * 1000;
