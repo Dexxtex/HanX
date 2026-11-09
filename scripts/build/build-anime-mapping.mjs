@@ -283,39 +283,6 @@ const tvdbPin = String(process.env.TVDB_PIN || '').trim();
 // SimKL come ponte per gli id esterni: Kitsu spesso non ha il TVDB di una OVA,
 // SimKL sì. /redirect e /anime/{id} accettano la sola client_id e stanno in
 // cache Cloudflare, quindi non consumano quota.
-const simklClientId = String(process.env.SIMKL_CLIENT_ID || '').trim();
-const simklIdCache = new Map();
-/** Quante schede il ponte Simkl ha recuperato in questa run (0 = spento o inutile). */
-const simklBridge = { tmdb: 0, tvdb: 0, attempts: 0 };
-
-async function simklIds(malId) {
-  if (!simklClientId || !malId) return null;
-  const key = String(malId);
-  if (simklIdCache.has(key)) return simklIdCache.get(key);
-  let ids = null;
-  try {
-    const query = `client_id=${simklClientId}&app-name=HanX&app-version=0.1.0`;
-    const headers = { 'User-Agent': 'HanX/0.1.0' };
-    const redirect = await fetch(`https://api.simkl.com/redirect?to=simkl&mal=${key}&${query}`, {
-      redirect: 'manual',
-      headers,
-      signal: AbortSignal.timeout(15000),
-    });
-    const match = (redirect.headers.get('location') || '').match(/\/(movies|tv|anime)\/(\d+)\//);
-    if (match) {
-      const detail = await fetch(`https://api.simkl.com/${match[1]}/${match[2]}?${query}`, {
-        headers,
-        signal: AbortSignal.timeout(15000),
-      });
-      if (detail.ok) ids = (await detail.json())?.ids || null;
-    }
-  } catch {
-    ids = null;
-  }
-  simklIdCache.set(key, ids);
-  return ids;
-}
-
 if (isDirectRun && (!tmdbKey || !tvdbKey) && !backfillTitles) {
   console.error('✗ Missing TMDB_API_KEY and/or TVDB_API_KEY.');
   console.error('  Set both environment variables, then rerun: pnpm mapping:build');
@@ -761,26 +728,6 @@ async function convertCatalogEntry(entry, index) {
     }
   }
   if (!tmdb?.id) {
-    // Stesso ponte, ma con SimKL: copre molti più titoli di MDBList e porta
-    // anche il TVDB. La verifica resta la stessa (lingua + anno).
-    const ids = await simklIds(entry?.mal_id);
-    if (simklClientId) simklBridge.attempts += 1;
-    if (ids?.tmdb) {
-      // L'id del ponte può essere morto o di un'altra opera: un 404 non è
-      // un'eccezione, è "questo id non serve".
-      let detail = null;
-      try {
-        detail = await fetchJson(`${TMDB}/${query.kind}/${ids.tmdb}?api_key=${encodeURIComponent(tmdbKey)}&language=it-IT`);
-      } catch (error) {
-        if (!/HTTP 404/.test(String(error?.message || ''))) throw error;
-      }
-      if (detail?.id && pickTmdbResult([detail], query.year)) {
-        tmdb = detail;
-        simklBridge.tmdb += 1;
-      }
-    }
-  }
-  if (!tmdb?.id) {
     return query.kind === 'tv'
       ? await convertFromTvdb(entry, index, record, titleAlt)
       : { ...record, status: 'no-tmdb' };
@@ -886,16 +833,6 @@ async function convertFromTvdb(entry, index, record, titleAlt = '') {
   if (!kitsuId) return { ...record, status: 'no-kitsu' };
 
   let tvdbId = (await tvdbIdFromKitsu(kitsuId)) || (await tvdbIdBySearch(entry));
-  if (!tvdbId) {
-    // Kitsu spesso non ha il TVDB di una OVA: SimKL sì, e con quel TVDB la
-    // special si allinea alla stagione 0 della serie madre.
-    const ids = await simklIds(entry?.mal_id);
-    if (simklClientId) simklBridge.attempts += 1;
-    if (ids?.tvdb) {
-      tvdbId = String(ids.tvdb);
-      simklBridge.tvdb += 1;
-    }
-  }
   if (!tvdbId) return { ...record, kitsuId, status: 'no-tmdb' };
 
   let result = null;
@@ -1367,11 +1304,6 @@ async function main() {
   console.log(`✓ ${outputFile}`);
   console.log(`  serie: ${Object.keys(index.series).length}, film: ${Object.keys(index.movies).length}`);
   console.log(`  batch: ${processed} entry (${summary})`);
-  console.log(
-    simklClientId
-      ? `  ponte Simkl: ${simklBridge.attempts} tentativi, ${simklBridge.tmdb} TMDB + ${simklBridge.tvdb} TVDB recuperati`
-      : '  ponte Simkl: spento (SIMKL_CLIENT_ID assente)',
-  );
   console.log(
     `  cursore: ${catalogTypes
       .map((type) => `${type} ${state.cursor[type]?.page ?? 1}:${state.cursor[type]?.pos ?? 0}`)

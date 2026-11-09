@@ -40,9 +40,6 @@ jobs:
       TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
       TVDB_API_KEY: ${{ secrets.TVDB_API_KEY }}
       TVDB_PIN: ${{ secrets.TVDB_PIN }}
-      # Ponte per le schede che TMDB non trova: senza questa il codice esce
-      # subito e resta spento (3922 voci su 25217 finite in `no-tmdb`).
-      SIMKL_CLIENT_ID: ${{ secrets.SIMKL_CLIENT_ID }}
       ANIME_MAPPING_FILE: data/anime-seasons.json
       ANIME_MAPPING_STATE: data/jikan-progress.json
     steps:
