@@ -66,3 +66,14 @@ test('film: il titolo italiano non viene scartato perche season e null', async (
   assert.equal(italianSeasonQuery('Tokyo Revengers', null, 'Tokyo Revengers'), '');
   assert.equal(italianSeasonQuery('La malinconia di Haruhi Suzumiya', 2, 'The Melancholy of Haruhi Suzumiya'), 'La malinconia di Haruhi Suzumiya 2');
 });
+
+// Il sito risponde con l'opera madre ("Jujutsu Kaisen") alla richiesta del film
+// ("Jujutsu Kaisen: Execution"): servirebbe l'episodio 1 della serie.
+test('film: l opera madre non risponde al posto del film', async () => {
+  const { filterAnimeResults } = await import('../../dist/providers/animesaturn-provider.js');
+  const series = [{ version: { title: 'Jujutsu Kaisen', url: '/anime/jjk' }, language_type: 'SUB ITA' }];
+  assert.deepEqual(filterAnimeResults(series, ['Jujutsu Kaisen: Execution'], true), []);
+  // Il titolo italiano che diverge resta accettato: non è un prefisso.
+  const italian = [{ version: { title: 'La scomparsa di Haruhi Suzumiya', url: '/anime/haruhi' }, language_type: 'SUB ITA' }];
+  assert.equal(filterAnimeResults(italian, ['The Disappearance of Haruhi Suzumiya'], true).length, 1);
+});

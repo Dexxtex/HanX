@@ -10,6 +10,7 @@ import { buildEasyProxyHlsUrl, buildEasyProxyStreamUrl } from '../utils/easyprox
 import { lookupTitle, REVIEW_SCORE, type CatalogQueryOptions } from '../catalog/matcher.js';
 import {
   buildTitleFallbackQueries,
+  matchKeys,
   normalizeTitleForSearch,
   sameQuery,
   titleMatchScoreAny,
@@ -614,7 +615,19 @@ export function filterAnimeResults(
   // Vale solo per il titolo richiesto: su una query di ripiego troncata che ci
   // siamo inventati noi ("Snow Fairy" da "Yuki: Snow Fairy") l'unico risultato
   // del sito è un'altra opera, e servirlo dà lo stream sbagliato.
-  const singleSiteMatch = allowSingleSiteMatch && results.length === 1 && baseRaw.split(' ').filter(Boolean).length >= 2;
+  // Se la scheda è un prefisso stretto della query il sito ha risposto con
+  // l'opera madre: "Jujutsu Kaisen" per il film "Jujutsu Kaisen: Execution"
+  // darebbe l'episodio 1 della serie al posto del film.
+  const isStrictPrefix = (candidate: string, query: string) => {
+    const c = matchKeys(candidate).tokens;
+    const q = matchKeys(query).tokens;
+    return c.length > 0 && c.length < q.length && c.every((token, i) => token === q[i]);
+  };
+  const singleSiteMatch =
+    allowSingleSiteMatch &&
+    results.length === 1 &&
+    baseRaw.split(' ').filter(Boolean).length >= 2 &&
+    !isStrictPrefix(results[0].version.title, titles[0] || '');
   const byScore = pickBestScored(scored, REVIEW_SCORE);
   const filtered = byScore.length ? byScore : singleSiteMatch ? results.map((entry) => entry) : [];
   if (singleSiteMatch && !byScore.length) {
