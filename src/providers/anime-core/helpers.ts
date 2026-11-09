@@ -315,6 +315,26 @@ export function normalizeEpisodesList(
 }
 
 /**
+ * Dal punteggio di ogni scheda alla lista filtrata: tiene solo il punteggio
+ * migliore, e niente se sotto soglia.
+ *
+ * La soglia arriva da fuori (`REVIEW_SCORE` del matcher) invece di essere un
+ * 0.5 scritto qui: un titolo che non la supera non è un match, e la regola deve
+ * essere una sola.
+ *
+ * Cosa NON fa: decidere se un singolo risultato del sito vale come match. Le
+ * tre politiche sono diverse per scelta e restano nei provider:
+ *   - AnimeSaturn: una scheda e query di almeno due parole, sempre
+ *   - AnimeWorld:  una scheda (o due con la stessa base) solo se la ricerca
+ *                  era un ripiego
+ *   - AnimeUnity:  nessun ripiego
+ */
+export function pickBestScored<T>(scored: { result: T; score: number }[], threshold: number): T[] {
+  const best = scored.reduce((max, entry) => Math.max(max, entry.score), 0);
+  return best >= threshold ? scored.filter((entry) => entry.score === best).map((entry) => entry.result) : [];
+}
+
+/**
  * Pick the episode entry whose number matches the requested one.
  * Solo match esatto: la scheda ITA di AnimeUnity può avere un solo episodio
  * (es. Black Clover 2 ITA = ep 1) e un ripiego per indice o "episodio unico"

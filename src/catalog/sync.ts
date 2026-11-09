@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import * as cheerio from 'cheerio';
 import { compactKey } from './text.js';
+import { htmlToText } from '../utils/html.js';
 
 export type CatalogSite = 'saturn' | 'world' | 'unity';
 
@@ -410,14 +411,7 @@ function positive(value: unknown): number | undefined {
 
 /** Testo di una scheda: senza markup ripetuto, senza spazi doppi, o assente. */
 function cleanText(value: unknown, max = 1200): string | undefined {
-  const text = String(value ?? '')
-    .replace(/<[^>]*>/g, ' ')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&quot;/g, '"')
-    .replace(/&#0?39;/g, "'")
-    .replace(/\s+/g, ' ')
-    .trim();
+  const text = htmlToText(String(value ?? ''));
   return text ? text.slice(0, max) : undefined;
 }
 

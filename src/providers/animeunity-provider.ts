@@ -19,7 +19,7 @@ import { SocksProxyAgent } from 'socks-proxy-agent';
 import { ProxyAgent as UndiciProxyAgent } from 'undici';
 import { checkIsAnimeById, applyUniversalAnimeTitleNormalization } from '../utils/animeGate.js';
 import { providerLabel } from '../utils/unifiedNames.js';
-import { lookupTitle, type CatalogQueryOptions } from '../catalog/matcher.js';
+import { lookupTitle, REVIEW_SCORE, type CatalogQueryOptions } from '../catalog/matcher.js';
 import {
   buildTitleFallbackQueries,
   normalizeTitleForSearch as normalizeAnimeTitleForSearch,
@@ -43,6 +43,7 @@ import {
   episodeTag,
   qualityTag,
   italianSeasonQuery,
+  pickBestScored,
   seasonFromTitle,
 } from './anime-core/index.js';
 import {
@@ -575,8 +576,7 @@ function filterAnimeResults(results: { version: AnimeUnitySearchResult; language
     const score = Math.max(0, ...titles.map((title) => titleMatchScoreAny(queryTitles, title)));
     return { result, score };
   }).filter((entry) => entry.score > 0);
-  const best = scored.reduce((max, entry) => Math.max(max, entry.score), 0);
-  const filtered = best >= 0.5 ? scored.filter((entry) => entry.score === best).map((entry) => entry.result) : [];
+  const filtered = pickBestScored(scored, REVIEW_SCORE);
 
   debug(4, 'AnimeUnity', `[UniversalTitle][Filter][Legacy] Query ricerca: "${queryTitles.join(' | ')}"`);
   debug(4, 'AnimeUnity', `[UniversalTitle][Filter][Legacy] Risultati prima del filtro:`, results.map(r => `${r.version.name} [it:"${r.version.name_it || 'N/A'}" eng:"${r.version.name_eng || 'N/A'}"]`));

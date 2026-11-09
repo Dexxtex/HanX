@@ -6,6 +6,7 @@
 import * as cheerio from 'cheerio';
 import { parseEpisodeNumber, parsePositiveInt } from './anime-core/index.js';
 import { ensurePlaylistM3u8 } from '../utils/tmdbResolver.js';
+import { decodeHtmlEntities } from '../utils/html.js';
 
 export interface AnimeUnitySearchHit {
   id: number;
@@ -83,12 +84,7 @@ export function parseEpisodesFromAnimeHtml(html: string): AnimeUnityPageEpisode[
 
 /** Decodifica i valori negli attributi HTML (il sito .co li scrive con &quot;). */
 export function decodeHtmlAttribute(value: string): string {
-  return String(value || '')
-    .replace(/&quot;/g, '"')
-    .replace(/&#0?39;/g, "'")
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&amp;/g, '&');
+  return decodeHtmlEntities(value);
 }
 
 /**

@@ -3,9 +3,10 @@ import * as cheerio from 'cheerio';
 import { selectHighestHlsVariant } from './animeunity-parsers.js';
 import { getDomain } from '../utils/domains.js';
 import { debug, redactUrl } from '../utils/logger.js';
+import { decodeHtmlEntities } from '../utils/html.js';
 import { checkIsAnimeById, applyUniversalAnimeTitleNormalization } from '../utils/animeGate.js';
 import { buildEasyProxyHlsUrl, buildEasyProxyStreamUrl } from '../utils/easyproxy.js';
-import { lookupTitle, type CatalogQueryOptions } from '../catalog/matcher.js';
+import { lookupTitle, REVIEW_SCORE, type CatalogQueryOptions } from '../catalog/matcher.js';
 import {
   buildTitleFallbackQueries,
   normalizeTitleForSearch,
@@ -27,6 +28,7 @@ import {
   getEnglishTitleFromAnyId,
   episodeTag,
   italianSeasonQuery,
+  pickBestScored,
 } from './anime-core/index.js';
 import {
   resolveMappingRequest,
@@ -128,19 +130,8 @@ function sanitizeAnimeTitle(rawTitle: string | null | undefined): string | null 
   return text || null;
 }
 
-export function decodeHtmlEntities(value: string | null | undefined): string {
-  return String(value || '')
-    .replace(/&quot;/gi, '"')
-    .replace(/&#x([0-9a-f]+);/gi, (_, hex: string) => String.fromCodePoint(Number.parseInt(hex, 16)))
-    // Il sito scrive le entità con lo zero davanti (`&#039;`), quindi il decodificatore
-    // non può elencare `&#39;`: qualunque entità numerica va convertita.
-    .replace(/&#0*(\d+);/g, (_, dec: string) => String.fromCodePoint(Number(dec)))
-    .replace(/&apos;/gi, "'")
-    .replace(/&amp;/gi, '&')
-    .replace(/&lt;/gi, '<')
-    .replace(/&gt;/gi, '>')
-    .replace(/&nbsp;/gi, ' ');
-}
+// Unica implementazione in utils/html.ts: qui resta solo il nome usato dal file.
+export { decodeHtmlEntities };
 
 function stripHtmlTags(value: string | null | undefined): string {
   return decodeHtmlEntities(String(value || '').replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
@@ -611,12 +602,9 @@ export function filterAnimeResults(
   // fatto la ricerca del sito. Un solo risultato per una query di almeno due
   // parole è affidabile; i casi ambigui arrivano sempre come liste lunghe.
   const singleSiteMatch = results.length === 1 && baseRaw.split(' ').filter(Boolean).length >= 2;
-  const filtered = best >= 0.5
-    ? scored.filter((entry) => entry.score === best).map((entry) => entry.result)
-    : singleSiteMatch
-      ? results.map((entry) => entry)
-      : [];
-  if (singleSiteMatch && best < 0.5) {
+  const byScore = pickBestScored(scored, REVIEW_SCORE);
+  const filtered = byScore.length ? byScore : singleSiteMatch ? results.map((entry) => entry) : [];
+  if (singleSiteMatch && !byScore.length) {
     debug(2, 'AnimeSaturn', `[AnimeSaturn] Unico risultato del sito accettato senza match di titolo: "${results[0].version.title}"`);
   }
 

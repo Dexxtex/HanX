@@ -59,6 +59,7 @@ export {
   normalizeHostLabel,
   normalizeEpisodesList,
   pickEpisodeEntry,
+  pickBestScored,
   collectMediaLinksFromEmbedHtml,
   episodeTag,
   qualityTag,

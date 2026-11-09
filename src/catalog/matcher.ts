@@ -8,7 +8,7 @@ import type { CatalogLanguage, CatalogSite, TitleIndexEntry, TitleIndexFile } fr
 
 /** Sopra questa soglia il match è automatico; sotto 0.5 si ignora. */
 const AUTO_SCORE = 0.8;
-const REVIEW_SCORE = 0.5;
+export const REVIEW_SCORE = 0.5;
 /** Due schede con punteggi così vicini sono in gara: decide stagione o tipo. */
 const TIE_MARGIN = 0.05;
 /** Oltre questa soglia il numero non è una stagione ("86 Eighty Six"). */

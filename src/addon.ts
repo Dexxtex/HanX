@@ -1,7 +1,7 @@
 import stremioAddonSdk from "stremio-addon-sdk";
 const { addonBuilder, getRouter } = stremioAddonSdk;
 import type { Manifest, Stream } from "stremio-addon-sdk";
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname } from 'node:path';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -54,7 +54,7 @@ function sortStreamsByPriority(streams: { url?: string; title?: string }[]): voi
 // ================= MANIFEST BASE (restored) =================
 const baseManifest: Manifest = {
     id: "org.stremio.hanx",
-    version: "1.1.17",
+    version: "1.1.18",
     name: "HanX",
     description: "HanX addon dedicato ad AnimeUnity, AnimeSaturn e AnimeWorld",
     types: ["movie", "series", "anime"],
@@ -219,7 +219,7 @@ function _providerCacheSet(type: string, id: string, configDigest: string, strea
 }
 
 // Funzione per creare il builder con configurazione dinamica
-function createBuilder() {
+export function createBuilder() {
     const manifest = loadCustomConfig();
     const builder = new addonBuilder(manifest);
 
@@ -698,9 +698,13 @@ app.get('/', (req: Request, res: ExpressResponse) => {
     }
 });
 
-// Avvia il server Express
+// Avvia il server Express solo se questo modulo è l'entry point. Importarlo da
+// un test non deve legare una porta né armare i timer: è la condizione per
+// poter provare il fan-out a comportamento invece che con una regex.
+const isEntryPoint = Boolean(process.argv[1]) && pathToFileURL(process.argv[1]).href === import.meta.url;
+
 const PORT = parseInt(process.env.PORT || '7000', 10);
-const server = app.listen(PORT, '0.0.0.0', () => {
+const server = isEntryPoint ? app.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 HanX addon listening on http://0.0.0.0:${PORT}`);
     // L'indice mapping (13 MB) si carica qui e non alla prima richiesta: dopo un
     // refresh lo snapshot è nullo, e il primo utente pagherebbe parse + hash.
@@ -711,7 +715,7 @@ const server = app.listen(PORT, '0.0.0.0', () => {
     // Catalogo dei titoli (branch `data`): stesso schema, non blocca l'avvio.
     void refreshCatalogFromUrl();
     setInterval(() => void refreshCatalogFromUrl(), CATALOG_REFRESH_INTERVAL_MS).unref();
-});
+}) : null;
 
 let isShuttingDown = false;
 const onShutdown = (signal: string) => {
@@ -720,7 +724,8 @@ const onShutdown = (signal: string) => {
     debug(1, 'Server', `Ricevuto segnale ${signal}, chiusura server...`);
     const forceTimer = setTimeout(() => process.exit(0), 5000);
     forceTimer.unref();
-    (server as any).closeIdleConnections?.();
+    (server as any)?.closeIdleConnections?.();
+    if (!server) process.exit(0);
     server.close(() => process.exit(0));
 };
 process.on('SIGTERM', () => onShutdown('SIGTERM'));
