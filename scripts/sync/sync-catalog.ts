@@ -125,7 +125,11 @@ interface CrawlResult {
   capped: boolean;
 }
 
-/** Tetto del walk di /filter: 206 pagine reali, il resto è margine, non un piano. */
+/**
+ * Tetto del walk di /filter, su tutte le partizioni di tipo insieme. Il walk
+ * arriva in fondo quando una partizione risponde con una pagina vuota: il
+ * budget è solo un freno, non un piano.
+ */
 const SATURN_WALK_BUDGET = 260;
 
 async function crawlSaturn(maxPages: number): Promise<CrawlResult> {
@@ -183,7 +187,10 @@ async function crawlSaturn(maxPages: number): Promise<CrawlResult> {
     const gap = saturnListingGap(enriched.size, spine);
     if (gap) throw new Error(gap);
   }
-  return { entries: [...bySlug.values()], capped: parts.length > maxPages || budget === 0 };
+  // `budget === 0` da solo non vuol dire troncato: il walk può finire esattamente
+  // sull'ultima unità e aver coperto tutto. Conta solo se una partizione non è
+  // arrivata alla pagina vuota.
+  return { entries: [...bySlug.values()], capped: parts.length > maxPages || truncatedByCap };
 }
 
 async function crawlWorld(maxPages: number): Promise<CrawlResult> {
@@ -293,7 +300,7 @@ function parseArgs(argv: string[]): Options {
   const options: Options = {
     sites: [...CATALOG_SITES],
     maxPages: {
-      saturn: 260,
+      saturn: Number(process.env.CATALOG_SATURN_MAX_PAGES) || 260,
       world: Number(process.env.CATALOG_WORLD_MAX_PAGES) || 300,
       unity: Number(process.env.CATALOG_UNITY_MAX_PAGES) || 300,
     },
