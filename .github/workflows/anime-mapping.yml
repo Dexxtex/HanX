@@ -15,6 +15,9 @@ on:
       retry:
         description: 'Esiti da riaprire (es. no-tmdb). Vuoto = nessuno. Riapre al massimo `limit` entry'
         default: ''
+      titleit-cap:
+        description: 'Richieste TMDB per il backfill titleIt dei film (0 = off)'
+        default: '600'
 
 # Il branch lo scrive la run, non un push: il token di default è read-only.
 permissions:
@@ -86,6 +89,7 @@ jobs:
         run: >-
           node scripts/build/build-anime-mapping.mjs
           --limit=${{ inputs.limit || 100 }}
+          --titleit-cap=${{ inputs.titleit-cap || 600 }}
           --publish
           ${{ inputs.retry && format('--retry={0} --retry-limit={1}', inputs.retry, inputs.limit || 100) || '' }}
 

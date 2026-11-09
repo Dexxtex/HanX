@@ -72,6 +72,9 @@ const retryStatuses = retryArg
 const retryLimit = Number((args.find((arg) => arg.startsWith('--retry-limit=')) || '').split('=')[1]) || 0;
 const publish = args.includes('--publish');
 const backfillTitles = args.includes('--backfill-titles');
+// --titleit-cap=N: dopo il build, riempie il titolo italiano dei film già in
+// indice (propagazione gratis + richieste TMDB fino al tetto N per run).
+const titleItCap = Number((args.find((arg) => arg.startsWith('--titleit-cap=')) || '').split('=')[1]) || 0;
 const limitArg = args.find((arg) => arg.startsWith('--limit='));
 const parsedLimit = limitArg ? Number.parseInt(limitArg.split('=')[1], 10) : 200;
 // 0 (o un valore non numerico) significa "tutto il catalogo in un colpo".
@@ -1322,6 +1325,41 @@ async function main() {
     console.error('✗ Indice non valido (batch scritto comunque nel file).');
     for (const error of errors.slice(0, 50)) console.error(`  - ${error}`);
     process.exit(1);
+  }
+
+  // titleIt per i film: il resolver legge la voce della chiave richiesta
+  // (imdb:ttXXX da Stremio), ma il titolo italiano finiva solo sulla chiave
+  // che l'ha creato. Si propaga alle voci sorelle (stesso kitsuId) e le opere
+  // scoperte chiedono TMDB: il tetto limita le richieste per run.
+  if (titleItCap > 0) {
+    const groups = new Map();
+    for (const [key, entry] of Object.entries(index.movies)) {
+      const gk = entry.kitsuId ? `kitsu:${entry.kitsuId}` : `key:${key}`;
+      if (!groups.has(gk)) groups.set(gk, []);
+      groups.get(gk).push([key, entry]);
+    }
+    let itAsked = 0;
+    let itTouched = 0;
+    // 1. Propagazione gratis: il titolo italiano già su una chiave vale per
+    //    l'opera intera.
+    for (const entries of groups.values()) {
+      const have = entries.find(([, e]) => e.titleIt);
+      if (!have) continue;
+      for (const [, e] of entries) if (!e.titleIt) { e.titleIt = have[1].titleIt; itTouched += 1; }
+    }
+    // 2. Le opere senza titolo italiano chiedono TMDB, fino al tetto.
+    for (const entries of groups.values()) {
+      if (itAsked >= titleItCap) break;
+      if (entries.some(([, e]) => e.titleIt)) continue;
+      const tmdbEntry = entries.find(([k]) => k.startsWith('tmdb:'));
+      if (!tmdbEntry) continue;
+      const titleIt = await getTmdbItalianTitle('movie', tmdbEntry[0].slice('tmdb:'.length));
+      itAsked += 1;
+      if (!titleIt || samePlainTitle(titleIt, tmdbEntry[1].title)) continue;
+      for (const [, e] of entries) e.titleIt = titleIt;
+      itTouched += 1;
+    }
+    console.log(`  titleIt film: ${itTouched} voci riempite (${itAsked} richieste TMDB, tetto ${titleItCap})`);
   }
 
   persist();
