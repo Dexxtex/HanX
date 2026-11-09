@@ -96,7 +96,11 @@ export interface TitleIndexEntry {
   ep?: [number, number | string][];
 }
 
+/** Cambiare quando cambia la forma di `TitleIndexEntry`: un file vecchio va scartato, non servito a metà. */
+export const CATALOG_SCHEMA_VERSION = 1;
+
 export interface TitleIndexFile {
+  version?: number;
   generatedAt: string | null;
   sites: Record<CatalogSite, TitleIndexEntry[]>;
 }
@@ -610,7 +614,7 @@ export function buildTitleIndex(catalog: CatalogFile): TitleIndexFile {
       ...(entry.ep ? { ep: entry.ep } : {}),
     }));
   }
-  return { generatedAt: catalog.generatedAt, sites };
+  return { version: CATALOG_SCHEMA_VERSION, generatedAt: catalog.generatedAt, sites };
 }
 
 /** Scrive su .tmp e rinomina: un crash non lascia un file a metà. */

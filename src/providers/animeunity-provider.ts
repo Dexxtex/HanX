@@ -1,3 +1,4 @@
+import { normalizeBool } from '../config.js';
 import { getDomain } from '../utils/domains.js';
 import { debug, redactUrl } from '../utils/logger.js';
 import { buildEasyProxyHlsUrl } from '../utils/easyproxy.js';
@@ -60,8 +61,6 @@ import {
 
 const USER_AGENT =
   process.env.AU_USER_AGENT ||
-  process.env.AS_USER_AGENT ||
-  process.env.AW_USER_AGENT ||
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36';
 
 const FETCH_TIMEOUT = Number.parseInt(process.env.ANIMEUNITY_FETCH_TIMEOUT_MS || '10000', 10) || 10000;
@@ -975,7 +974,7 @@ export class AnimeUnityProvider {
       return { streams: [] };
     }
     try {
-      const gateEnabled = (process.env.ANIME_GATE_ENABLED || 'true') !== 'false';
+      const gateEnabled = (normalizeBool(process.env.ANIME_GATE_ENABLED) ?? true);
       if (gateEnabled) {
         const gate = await checkIsAnimeById('imdb', imdbId, this.config.tmdbApiKey, isMovie ? 'movie' : 'tv');
         if (!gate.isAnime) {
@@ -1007,7 +1006,7 @@ export class AnimeUnityProvider {
       return { streams: [] };
     }
     try {
-      const gateEnabled = (process.env.ANIME_GATE_ENABLED || 'true') !== 'false';
+      const gateEnabled = (normalizeBool(process.env.ANIME_GATE_ENABLED) ?? true);
       if (gateEnabled) {
         const gate = await checkIsAnimeById('tmdb', tmdbId, this.config.tmdbApiKey, isMovie ? 'movie' : 'tv');
         if (!gate.isAnime) {
@@ -1039,7 +1038,7 @@ export class AnimeUnityProvider {
       return { streams: [] };
     }
     try {
-      const gateEnabled = (process.env.ANIME_GATE_ENABLED || 'true') !== 'false';
+      const gateEnabled = (normalizeBool(process.env.ANIME_GATE_ENABLED) ?? true);
       if (gateEnabled) {
         const gate = await checkIsAnimeById('tvdb', tvdbId, this.config.tmdbApiKey, isMovie ? 'movie' : 'tv');
         if (!gate.isAnime) {

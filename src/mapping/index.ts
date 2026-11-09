@@ -73,10 +73,12 @@ function remoteCachePath(): string {
  */
 function indexFilePath(): string {
   if (process.env.ANIME_MAPPING_FILE) return path.resolve(process.env.ANIME_MAPPING_FILE);
-  if (process.env.ANIME_MAPPING_URL) {
-    const cached = remoteCachePath();
-    if (statMtime(cached) !== -1) return cached;
-  }
+  // Il file in `data/` vince sullo stub dell'immagine anche senza
+  // ANIME_MAPPING_URL: è la stessa cartella del catalogo, e chi monta l'indice
+  // lì dentro si aspettava di trovarlo. Prima, senza URL, si leggeva lo stub
+  // da 80 byte e ogni id cadeva nel fallback live senza dirlo.
+  const cached = remoteCachePath();
+  if (statMtime(cached) !== -1) return cached;
   return defaultIndexPath();
 }
 

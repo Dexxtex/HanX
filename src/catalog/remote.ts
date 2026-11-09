@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import { debug } from '../utils/logger.js';
 import { catalogFile, catalogDir } from './matcher.js';
 import { writeJsonAtomic } from '../utils/fs.js';
+import { CATALOG_SCHEMA_VERSION } from './sync.js';
 
 /** Controllo ogni 6 ore, download al massimo una volta al giorno. */
 export const CATALOG_REFRESH_INTERVAL_MS = 6 * 60 * 60 * 1000;
@@ -35,6 +36,12 @@ export async function refreshCatalogFromUrl(): Promise<void> {
     const sites = data?.sites || {};
     if (!Array.isArray(sites.saturn) && !Array.isArray(sites.world) && !Array.isArray(sites.unity)) {
       throw new Error('schema non riconosciuto');
+    }
+    // Un file di formato vecchio verrebbe accettato e servirebbe zero hit in
+    // silenzio fino alla scadenza del TTL. "Assente" vale 1 per una release.
+    const version = Number(data?.version ?? 1);
+    if (version !== CATALOG_SCHEMA_VERSION) {
+      throw new Error(`versione di schema non supportata: ${version} (attesa ${CATALOG_SCHEMA_VERSION})`);
     }
     fs.mkdirSync(catalogDir(), { recursive: true });
     writeJsonAtomic(target, data);

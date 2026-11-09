@@ -9,6 +9,7 @@
 export type ExternalIdType = 'imdb' | 'tmdb' | 'tvdb';
 import { hasMappedEntry, hasMappedSeries } from '../mapping/index.js';
 import { debug } from './logger.js';
+import { normalizeBool } from '../config.js';
 
 export interface AnimeGateResult {
   isAnime: boolean;
@@ -148,7 +149,7 @@ async function resolveAnimeGate(
     return { isAnime: true, hasMal: false, hasKitsu: false, reason: 'no-tmdb-id' };
   }
   // Un-mapped: only official TMDB details decide.
-  const allowTmdbFallback = (process.env.ANIME_GATE_TMDB_FALLBACK || 'true') !== 'false';
+  const allowTmdbFallback = (normalizeBool(process.env.ANIME_GATE_TMDB_FALLBACK) ?? true);
   if (!allowTmdbFallback) {
     return { isAnime: false, hasMal: false, hasKitsu: false, reason: 'no-mapping-and-fallback-disabled' };
   }

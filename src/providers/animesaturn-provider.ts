@@ -1,6 +1,7 @@
 import { AnimeSaturnConfig, AnimeSaturnResult, StreamForStremio } from '../types/animeunity.js';
 import * as cheerio from 'cheerio';
 import { selectHighestHlsVariant } from './animeunity-parsers.js';
+import { normalizeBool } from '../config.js';
 import { getDomain } from '../utils/domains.js';
 import { debug, redactUrl } from '../utils/logger.js';
 import { decodeHtmlEntities } from '../utils/html.js';
@@ -46,7 +47,9 @@ const AS_FETCH_TIMEOUT = Number.parseInt(process.env.ANIMESATURN_FETCH_TIMEOUT_M
 // ricerca (e di ripresentare la raffica al WAF) a ogni apertura.
 const SEARCH_TTL_MS = 12 * 60 * 60 * 1000;
 const asCaches = createCaches();
-const AS_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36';
+const AS_USER_AGENT =
+  process.env.AS_USER_AGENT ||
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36';
 
 function buildSaturnHeaders(referer?: string): Record<string, string> {
   const h: Record<string, string> = {
@@ -993,7 +996,7 @@ export class AnimeSaturnProvider {
       return { streams: [] };
     }
     try {
-      const gateEnabled = (process.env.ANIME_GATE_ENABLED || 'true') !== 'false';
+      const gateEnabled = (normalizeBool(process.env.ANIME_GATE_ENABLED) ?? true);
       if (gateEnabled) {
         const gate = await checkIsAnimeById('imdb', imdbId, this.config.tmdbApiKey, isMovie ? 'movie' : 'tv');
         if (!gate.isAnime) {
@@ -1024,7 +1027,7 @@ export class AnimeSaturnProvider {
       return { streams: [] };
     }
     try {
-      const gateEnabled = (process.env.ANIME_GATE_ENABLED || 'true') !== 'false';
+      const gateEnabled = (normalizeBool(process.env.ANIME_GATE_ENABLED) ?? true);
       if (gateEnabled) {
         const gate = await checkIsAnimeById('tmdb', tmdbId, this.config.tmdbApiKey, isMovie ? 'movie' : 'tv');
         if (!gate.isAnime) {
@@ -1055,7 +1058,7 @@ export class AnimeSaturnProvider {
       return { streams: [] };
     }
     try {
-      const gateEnabled = (process.env.ANIME_GATE_ENABLED || 'true') !== 'false';
+      const gateEnabled = (normalizeBool(process.env.ANIME_GATE_ENABLED) ?? true);
       if (gateEnabled) {
         const gate = await checkIsAnimeById('tvdb', tvdbId, this.config.tmdbApiKey, isMovie ? 'movie' : 'tv');
         if (!gate.isAnime) {

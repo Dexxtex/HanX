@@ -13,11 +13,16 @@ const fetchImpl: typeof globalThis.fetch = globalThis.fetch;
 import nodeFetch from 'node-fetch';
 import { fetch as undiciFetch, ProxyAgent } from 'undici';
 import { SocksProxyAgent } from 'socks-proxy-agent';
+import { cooldownFor, exitKeyFor, hostOf, isCoolingDown, paceHost } from './net-policy.js';
 
+// Riesportati: i test e il barrel li prendevano da qui.
+export { minHostIntervalMs, paceHost, hostOf } from './net-policy.js';
+
+// Override globale. Gli UA per sito (`AU_/AS_/AW_USER_AGENT`) si leggono nel
+// provider che li usa: prima erano concatenati qui, quindi `AS_USER_AGENT`
+// cambiava anche lo UA di AnimeUnity e i due restavano decorativi.
 export const DEFAULT_USER_AGENT =
-  process.env.AU_USER_AGENT ||
-  process.env.AS_USER_AGENT ||
-  process.env.AW_USER_AGENT ||
+  process.env.ANIME_USER_AGENT ||
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36';
 
 export const DEFAULT_FETCH_TIMEOUT = Number.parseInt(
@@ -55,54 +60,6 @@ function getProxyAgent(proxyUrl: string): any {
 }
 
 type ProxyPlatform = 'animeunity' | 'animesaturn' | 'animeworld';
-
-// Un host alla volta, con un minimo tra due richieste: le raffiche (un titolo
-// costa fino a 15 richieste in meno di un secondo) fanno scattare il WAF, e
-// l'uscita condivisa si brucia. 0 disattiva l'intervallo. Un episodio freddo
-// costa 4 richieste per host, quindi l'intervallo e' anche il pavimento del
-// tempo di risposta: 1 s misurato a ~4,4 s contro ~7,7 s a 2 s, senza blocchi.
-const hostTails = new Map<string, Promise<unknown>>();
-const hostLastAt = new Map<string, number>();
-
-/** Letto a ogni chiamata: i test lo azzerano senza toccare il resto. */
-export function minHostIntervalMs(): number {
-  const raw = process.env.ANIME_HOST_MIN_INTERVAL_MS;
-  // Solo il letterale `0` spegne il pacing. Una variabile vuota o con un typo
-  // non deve poter togliere la protezione che è costata un 403.
-  if (raw === undefined || !raw.trim()) return 1000;
-  const parsed = Number.parseInt(raw, 10);
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 1000;
-}
-
-function paceHost<T>(host: string, task: () => Promise<T>): Promise<T> {
-  const interval = minHostIntervalMs();
-  if (!host || interval === 0) return task();
-  const previous = hostTails.get(host) || Promise.resolve();
-  const run = previous.then(async () => {
-    const wait = (hostLastAt.get(host) || 0) + interval - Date.now();
-    if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
-    hostLastAt.set(host, Date.now());
-    return task();
-  });
-  // La coda non deve trascinare gli errori: la richiesta dopo parte comunque.
-  hostTails.set(host, run.catch(() => undefined));
-  return run;
-}
-
-// 403 = WAF, 429 = troppe richieste: insistere prolunga il blocco. Il cooldown
-// e' per host E uscita: un 403 via proxy non deve spegnere anche il diretto.
-const blockedHosts = new Map<string, number>();
-const BLOCK_403_MS = 10 * 60 * 1000;
-const BLOCK_429_MS = 60 * 1000;
-
-function hostOf(url: string): string {
-  try {
-    return new URL(url).hostname;
-  } catch {
-    return '';
-  }
-}
-
 
 /**
  * Ordine richiesto: proxy della piattaforma, poi proxy globale, poi diretto.
@@ -162,6 +119,12 @@ export interface FetchResourceOptions {
   proxyPlatform?: ProxyPlatform;
   /** Uscita di questa richiesta (hop di proxy o 'diretto'): cooldown separato. */
   exitLabel?: string;
+  /**
+   * Header che dipendono dall'uscita. Serve ai cookie legati all'IP: un cookie
+   * preso uscendo dal proxy non vale uscendo diretti, e con un solo slot i due
+   * si sovrascrivevano a vicenda.
+   */
+  headersForExit?: (exitLabel: string) => Record<string, string>;
 }
 
 /**
@@ -288,9 +251,12 @@ export async function fetchResource(
 
     // Uscita respinta poco fa: nessuna rete, insistere rinnova il blocco.
     const host = hostOf(url);
-    const exitKey = `${options.exitLabel || 'diretto'}:${host}`;
-    if ((blockedHosts.get(exitKey) || 0) > Date.now()) {
-      throw new Error(`HTTP 403 (${exitKey} in cooldown) for ${url}`);
+    const exitKey = exitKeyFor(options.exitLabel, host);
+    if (isCoolingDown(exitKey)) {
+      // Non è un 403 del sito: è il nostro cooldown, e la richiesta non è mai
+      // uscita. Scriverlo come "HTTP 403" faceva sembrare un blocco WAF vivo
+      // una pausa che stiamo imponendo noi.
+      throw new Error(`cooldown ${exitKey} for ${url} (nessuna richiesta inviata)`);
     }
 
     // 3. Execute fetch
@@ -311,6 +277,7 @@ export async function fetchResource(
             'user-agent': DEFAULT_USER_AGENT,
             'accept-language': 'it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7',
             ...headers,
+            ...(options.headersForExit ? options.headersForExit(options.exitLabel || 'diretto') : {}),
           },
           body,
           agent: resolvedAgent,
@@ -326,9 +293,7 @@ export async function fetchResource(
           statusText: response.statusText,
           ms: Date.now() - startedAt,
         });
-        if (response.status === 403 || response.status === 429) {
-          blockedHosts.set(exitKey, Date.now() + (response.status === 403 ? BLOCK_403_MS : BLOCK_429_MS));
-        }
+        cooldownFor(exitKey, response.status);
         throw new Error(`HTTP ${response.status} ${response.statusText} for ${url}`);
       }
 

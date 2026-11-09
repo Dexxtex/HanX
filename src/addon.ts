@@ -14,6 +14,7 @@ import {
     providerCacheKey,
     providerConfigDigest,
     resolvePlaybackProxyUrl,
+    type AddonConfig,
 } from './config.js';
 import { AnimeUnityProvider } from './providers/animeunity-provider.js';
 import { dispatchRequest } from './providers/registry.js';
@@ -57,7 +58,7 @@ function sortStreamsByPriority(streams: { url?: string; title?: string }[]): voi
 // ================= MANIFEST BASE (restored) =================
 const baseManifest: Manifest = {
     id: "org.stremio.hanx",
-    version: "1.1.19",
+    version: "1.1.20",
     name: "HanX",
     description: "HanX addon dedicato ad AnimeUnity, AnimeSaturn e AnimeWorld",
     types: ["movie", "series", "anime"],
@@ -168,7 +169,7 @@ const PROVIDER_CACHE_DISABLED: boolean = (() => {
 // provider nuovo che dimentica il quinto argomento blocca `Promise.all` e la
 // risposta non parte mai.
 const PROVIDER_TIMEOUT_MS = 30000;
-const _providerStreamCache = new Map<string, { streams: any[]; ts: number }>();
+const _providerStreamCache = new Map<string, { streams: Stream[]; ts: number }>();
 
 function _providerCacheGet(type: string, id: string, configDigest: string): any[] | null {
     if (PROVIDER_CACHE_DISABLED) return null;
@@ -253,7 +254,7 @@ export function createBuilder() {
                 // EasyProxy viene preso dalla config dell'utente (requestConfig)
                 // Se l'utente non ha EasyProxy configurato, usa env vars come fallback (per installazioni locali)
                 // MAI da una cache globale (che era il bug: veniva contaminata da altri utenti)
-                let config: any = {};
+                let config: AddonConfig = {};
                 if (requestConfig && typeof requestConfig === 'string') {
                     // Edge case: SDK passed config as raw string (base64/JSON) instead of parsed object
                     try {
@@ -624,31 +625,6 @@ app.use((req: Request, res: ExpressResponse, next: NextFunction) => {
                 debug(4, 'Addon', '[Base64→JSON] Configuration segment rewritten');
             }
         }
-    }
-
-    // ...
-
-    // PATCH: Inject full search query for AnimeWorld catalog search
-    if (
-        req.path === '/catalog/animeworld/anime/search.json' &&
-        req.query && typeof req.query.query === 'string'
-    ) {
-        debug(3, 'Addon', '🔎 PATCH: Injecting full search query from req.query.query:', req.query.query);
-        // Ensure req.query.extra is always an object
-        let extraObj: any = {};
-        if (req.query.extra) {
-            if (typeof req.query.extra === 'string') {
-                try {
-                    extraObj = JSON.parse(req.query.extra);
-                } catch {
-                    extraObj = {};
-                }
-            } else if (typeof req.query.extra === 'object') {
-                extraObj = req.query.extra;
-            }
-        }
-        extraObj.search = req.query.query;
-        req.query.extra = extraObj;
     }
 
     // ✅ Inizializza il router globale se non è ancora stato fatto

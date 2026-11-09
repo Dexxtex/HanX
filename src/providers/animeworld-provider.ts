@@ -48,9 +48,19 @@ const awCaches = createCaches();
 //           location.href="http://www.animeworld.ac/<same>?d=1";</script>
 // The cookie value is stable per IP, so we extract it once and replay every
 // subsequent request with the cookie + ?d=1 to obtain the real page.
-let awSecurityCookie: string | null = null;
+//
+// Per IP, appunto: un cookie preso uscendo dal proxy non vale uscendo diretti.
+// Con un solo slot i due si sovrascrivevano a vicenda e ogni cambio di uscita
+// ripresentava la challenge. Qui è una mappa per etichetta di uscita.
+const awSecurityCookies = new Map<string, string>();
 
-const AW_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36';
+function awCookieFor(exitLabel: string): string | null {
+  return awSecurityCookies.get(exitLabel) || null;
+}
+
+const AW_USER_AGENT =
+  process.env.AW_USER_AGENT ||
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36';
 // Le liste cambiano di rado: 12 ore evitano di rifare la stessa ricerca (e di
 // ripresentare la raffica al WAF) a ogni apertura.
 const AW_SEARCH_TTL_MS = 12 * 60 * 60 * 1000;
@@ -90,26 +100,32 @@ async function awFetchHtml(
 ): Promise<string> {
   const { ttlMs = 0, cacheKey, extraCookie, extraHeaders, timeoutMs = AW_FETCH_TIMEOUT } = opts;
 
-  const buildHeaders = (): Record<string, string> => {
-    const h: Record<string, string> = { ...(extraHeaders || {}) };
-    const cookie = mergeCookies(awSecurityCookie, extraCookie);
-    if (cookie) h.cookie = cookie;
-    return h;
+  // Il cookie giusto dipende dall'uscita, che si conosce solo dentro fetchResource:
+  // lo si fornisce per etichetta invece di sceglierne uno prima. L'ultima
+  // etichetta vista è quella che ha risposto, e a lei va il cookie estratto.
+  let usedExit = 'diretto';
+  const headersForExit = (exitLabel: string): Record<string, string> => {
+    usedExit = exitLabel;
+    const cookie = mergeCookies(awCookieFor(exitLabel), extraCookie);
+    return cookie ? { cookie } : {};
   };
-
-  const targetUrl = awSecurityCookie ? appendDParam(url) : url;
-  const hadCookie = !!awSecurityCookie;
+  const anyCookie = awSecurityCookies.size > 0;
+  const targetUrl = anyCookie ? appendDParam(url) : url;
+  const hadCookie = anyCookie;
   let html = await fetchResource(targetUrl, awCaches, {
     ttlMs,
-    cacheKey: cacheKey ? `${cacheKey}:d=${awSecurityCookie ? 1 : 0}` : undefined,
+    cacheKey: cacheKey ? `${cacheKey}:d=${anyCookie ? 1 : 0}` : undefined,
     timeoutMs,
-    headers: buildHeaders(),
+    headers: { ...(extraHeaders || {}) },
+    headersForExit,
   });
 
   if (looksLikeAwChallenge(html)) {
     const extracted = extractSecurityCookieFromHtml(html);
     if (extracted) {
-      awSecurityCookie = extracted;
+      // Il cookie vale per l'IP che ha risposto: si memorizza sotto l'uscita
+      // che ha prodotto la challenge, non in uno slot unico.
+      awSecurityCookies.set(usedExit, extracted);
       debug(4, 'AnimeWorld', '[AnimeWorld][Challenge] captured SecurityAW2 cookie, replaying with d=1');
       // Replay sotto la chiave che il path normale legge (:d=1). Con un cookie
       // gia' presente il primo fetch ha pero' appena cachato lo stub sotto :d=1:
@@ -118,7 +134,8 @@ async function awFetchHtml(
         ttlMs,
         cacheKey: cacheKey ? `${cacheKey}:d=1${hadCookie ? ':retry' : ''}` : undefined,
         timeoutMs,
-        headers: buildHeaders(),
+        headers: { ...(extraHeaders || {}) },
+        headersForExit,
       });
     } else {
       console.warn('[AnimeWorld][Challenge] stub detected but no cookie extracted for', url);
@@ -914,7 +931,7 @@ export class AnimeWorldProvider {
   async handleImdbRequest(imdbId: string, seasonNumber: number | null, episodeNumber: number | null, isMovie=false): Promise<{ streams: StreamForStremio[] }> {
     if (!this.config.enabled) return { streams: [] };
     try {
-      const gateEnabled = (process.env.ANIME_GATE_ENABLED || 'true') !== 'false';
+      const gateEnabled = (normalizeBool(process.env.ANIME_GATE_ENABLED) ?? true);
       if (gateEnabled) {
         const gate = await checkIsAnimeById('imdb', imdbId, this.config.tmdbApiKey, isMovie ? 'movie' : 'tv');
         if (!gate.isAnime) {
@@ -939,7 +956,7 @@ export class AnimeWorldProvider {
   async handleTmdbRequest(tmdbId: string, seasonNumber: number | null, episodeNumber: number | null, isMovie=false): Promise<{ streams: StreamForStremio[] }> {
     if (!this.config.enabled) return { streams: [] };
     try {
-      const gateEnabled = (process.env.ANIME_GATE_ENABLED || 'true') !== 'false';
+      const gateEnabled = (normalizeBool(process.env.ANIME_GATE_ENABLED) ?? true);
       if (gateEnabled) {
         const gate = await checkIsAnimeById('tmdb', tmdbId, this.config.tmdbApiKey, isMovie ? 'movie' : 'tv');
         if (!gate.isAnime) {
@@ -965,7 +982,7 @@ export class AnimeWorldProvider {
   async handleTvdbRequest(tvdbId: string, seasonNumber: number | null, episodeNumber: number | null, isMovie=false): Promise<{ streams: StreamForStremio[] }> {
     if (!this.config.enabled) return { streams: [] };
     try {
-      const gateEnabled = (process.env.ANIME_GATE_ENABLED || 'true') !== 'false';
+      const gateEnabled = (normalizeBool(process.env.ANIME_GATE_ENABLED) ?? true);
       if (gateEnabled) {
         const gate = await checkIsAnimeById('tvdb', tvdbId, this.config.tmdbApiKey, isMovie ? 'movie' : 'tv');
         if (!gate.isAnime) {
