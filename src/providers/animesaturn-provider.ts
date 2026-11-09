@@ -1058,10 +1058,22 @@ export class AnimeSaturnProvider {
       // sui siti che indicizzano in italiano: "La malinconia di Haruhi Suzumiya".
       const bareItRaw = titleIt ? normalizeTitleForSearch(titleIt, animeSaturnTitleNormalization) : '';
       const bareItQuery = sameQuery(bareItRaw, normalizedTitle) || sameQuery(bareItRaw, itQuery) ? '' : bareItRaw;
-      const candidates = hasSubtitle
-        ? [altQuery, bareItQuery, ...buildTitleFallbackQueries(normalizedTitle, seasonNumber)]
-        : [itQuery, altQuery, ...buildTitleFallbackQueries(normalizedTitle, seasonNumber)];
-      for (const fallbackQuery of candidates.filter((q, i, all) => q && !sameQuery(q, normalizedTitle) && all.indexOf(q) === i).slice(0, 2)) {
+      // I film hanno schede italiane sul sito e il titolo TMDB italiano a volte
+      // diverge nel prefisso ("Naruto Il film ..." vs scheda "Naruto Movie 01
+      // ..."): la coda italiana invece combacia, quindi viene prima del romaji.
+      // I ripieghi vanno generati dal titolo RAW (la normalizzazione toglie ':'
+      // e '-', e senza quelli non esistono colonTail/dashTail); la frase
+      // completa (bareItQuery) è ridondante: quando combacia, combacia anche
+      // la coda.
+      const candidates = isMovie
+        ? [...buildTitleFallbackQueries(titleIt || ''), altQuery, ...buildTitleFallbackQueries(normalizedTitle, seasonNumber)]
+        : hasSubtitle
+          ? [altQuery, bareItQuery, ...buildTitleFallbackQueries(normalizedTitle, seasonNumber)]
+          : [itQuery, altQuery, ...buildTitleFallbackQueries(normalizedTitle, seasonNumber)];
+      // Il terzo ripiego è solo per i film: la coda italiana è il tentativo che
+      // li sblocca quando il prefisso diverge. Le serie restano a due.
+      const fallbackBudget = isMovie ? 3 : 2;
+      for (const fallbackQuery of candidates.filter((q, i, all) => q && !sameQuery(q, normalizedTitle) && all.indexOf(q) === i).slice(0, fallbackBudget)) {
         titles.push(fallbackQuery);
         const fallbackVersions = filterAnimeResults(await this.searchAllVersions(fallbackQuery), titles);
         if (fallbackVersions.length) {
