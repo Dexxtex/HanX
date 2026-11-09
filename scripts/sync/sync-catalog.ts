@@ -132,7 +132,7 @@ interface CrawlResult {
  */
 const SATURN_WALK_BUDGET = 260;
 
-async function crawlSaturn(maxPages: number): Promise<CrawlResult> {
+async function crawlSaturn(maxPages: number, deadline: number): Promise<CrawlResult> {
   const index = await request(`${BASES.saturn}/sitemap.xml`);
   const parts = parseSaturnSitemapIndex(index.body);
   if (!parts.length) throw new Error('sitemap index senza parti /sitemap-anime-*.xml');
@@ -153,7 +153,7 @@ async function crawlSaturn(maxPages: number): Promise<CrawlResult> {
   const enriched = new Set<string>();
   for (const type of SATURN_TYPES) {
     let closed = false;
-    for (let page = 1; page <= maxPages && budget > 0; page += 1) {
+    for (let page = 1; page <= maxPages && budget > 0 && Date.now() < deadline; page += 1) {
       budget -= 1;
       walked += 1;
       const url = `${BASES.saturn}/filter?types%5B%5D=${encodeURIComponent(type)}&page=${page}`;
@@ -193,11 +193,11 @@ async function crawlSaturn(maxPages: number): Promise<CrawlResult> {
   return { entries: [...bySlug.values()], capped: parts.length > maxPages || truncatedByCap };
 }
 
-async function crawlWorld(maxPages: number): Promise<CrawlResult> {
+async function crawlWorld(maxPages: number, deadline: number): Promise<CrawlResult> {
   const entries: CatalogEntry[] = [];
   const seen = new Set<string>();
   let declared: number | null = null;
-  for (let page = 1; page <= (declared === null ? maxPages : Math.min(maxPages, declared)); page += 1) {
+  for (let page = 1; page <= (declared === null ? maxPages : Math.min(maxPages, declared)) && Date.now() < deadline; page += 1) {
     const html = await request(`${BASES.world}/filter?page=${page}`);
     if (page === 1) {
       declared = parseWorldMaxPage(html.body);
@@ -209,8 +209,10 @@ async function crawlWorld(maxPages: number): Promise<CrawlResult> {
     for (const entry of fresh) seen.add(entry.slug);
     entries.push(...fresh);
   }
-  // Troncato solo se il dichiarato supera il tetto, o se il numero non è dichiarato.
-  return { entries, capped: declared === null || declared > maxPages };
+  // Troncato se il dichiarato supera il tetto, se il numero non è dichiarato,
+  // o se il tappo di tempo ha fermato il walk prima della fine.
+  const ranOutOfTime = Date.now() >= deadline;
+  return { entries, capped: declared === null || declared > maxPages || ranOutOfTime };
 }
 
 function csrfFrom(html: string): { xsrf: string; token: string } {
@@ -219,7 +221,7 @@ function csrfFrom(html: string): { xsrf: string; token: string } {
   return { xsrf, token };
 }
 
-async function crawlUnity(maxPages: number): Promise<CrawlResult> {
+async function crawlUnity(maxPages: number, deadline: number): Promise<CrawlResult> {
   // Il GET serve al token CSRF (Laravel) e fa da canary: i dati arrivano dal POST.
   const page = await request(`${BASES.unity}/archivio`);
   const { xsrf, token } = csrfFrom(page.body);
@@ -228,7 +230,7 @@ async function crawlUnity(maxPages: number): Promise<CrawlResult> {
   const seen = new Set<string>();
   let offset = 0;
   let total = Number.POSITIVE_INFINITY;
-  for (let chunk = 0; chunk < maxPages && offset < total; chunk += 1) {
+  for (let chunk = 0; chunk < maxPages && offset < total && Date.now() < deadline; chunk += 1) {
     const response = await request(`${BASES.unity}/archivio/get-animes`, {
       method: 'POST',
       headers: {
@@ -254,13 +256,27 @@ async function crawlUnity(maxPages: number): Promise<CrawlResult> {
     }
     offset += parsed.entries.length;
   }
-  return { entries, capped: offset < total };
+  return { entries, capped: offset < total || Date.now() >= deadline };
 }
 
-/** Schede a cui prendere il malId per run: 300 richieste ≈ 15 min a 3 s. */
+/** Schede a cui prendere il malId per run: a 3,3 s di pacing, 650 ≈ 36 min. */
 const MALID_MAX_REQUESTS = Number(process.env.CATALOG_MALID_MAX_REQUESTS) || 300;
-/** Oltre questo minuto dall'avvio la fase si ferma: il job ha 60 min di tetto. */
+/** Oltre questo minuto dall'avvio l'arricchimento si ferma: il job ha 60 min di tetto. */
 const MALID_DEADLINE_MIN = Number(process.env.CATALOG_MALID_DEADLINE_MIN) || 52;
+/**
+ * Oltre questo minuto il crawl si ferma, anche a metà sito: il tempo che resta
+ * è dell'arricchimento, che è quello che riempie i dati mancanti. Senza tappo
+ * il crawl dei tre siti si mangiava 37 minuti su 52 per trovare ~2 schede nuove.
+ */
+const CRAWL_DEADLINE_MIN = Number(process.env.CATALOG_CRAWL_DEADLINE_MIN) || 34;
+/**
+ * Un sito per notte. Il crawl completo dei tre costa ~37 minuti su 52 per
+ * trovare ~2 schede nuove, mentre l'arricchimento — che riempie gli id episodio
+ * e i malId — resta a secco. A rotazione ogni sito si riallinea ogni tre
+ * giorni: il catalogo è un'accelerazione, non la fonte di verità, quindi una
+ * scheda nuova che arriva con due giorni di ritardo costa una ricerca di rete.
+ */
+const CRAWL_ROTATION: CatalogSite[] = ['saturn', 'world', 'unity'];
 
 /**
  * Wrapper di I/O per l'arricchimento: la logica sta in `src/catalog/enrich.ts`
@@ -281,7 +297,7 @@ function enrichMalIds(catalog: CatalogFile, startedAt: number) {
   });
 }
 
-const CRAWLERS: Record<CatalogSite, (maxPages: number) => Promise<CrawlResult>> = {
+const CRAWLERS: Record<CatalogSite, (maxPages: number, deadline: number) => Promise<CrawlResult>> = {
   saturn: crawlSaturn,
   world: crawlWorld,
   unity: crawlUnity,
@@ -294,6 +310,8 @@ interface Options {
   dataDir: string;
   /** Solo arricchimento del catalogo già presente: nessun crawl. */
   enrichOnly: boolean;
+  /** Crawl di tutti i siti in una run, invece della rotazione di uno per notte. */
+  allSites: boolean;
 }
 
 function parseArgs(argv: string[]): Options {
@@ -307,11 +325,13 @@ function parseArgs(argv: string[]): Options {
     dryRun: false,
     dataDir: DATA_DIR,
     enrichOnly: false,
+    allSites: false,
   };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--dry-run') options.dryRun = true;
     else if (arg === '--enrich-only') options.enrichOnly = true;
+    else if (arg === '--all') options.allSites = true;
     else if (arg === '--site') {
       const site = argv[++i] as CatalogSite;
       if (!CATALOG_SITES.includes(site)) throw new Error(`sito sconosciuto: ${site}`);
@@ -363,9 +383,18 @@ async function main(): Promise<number> {
   const catalog = emptyCatalog();
   const startedAt = Date.now();
   const failures: string[] = [];
+  const crawlDeadline = startedAt + CRAWL_DEADLINE_MIN * 60_000;
+  // `--all` o `--site` espliciti vincono; altrimenti un sito per notte.
+  const crawlSites: CatalogSite[] =
+    options.allSites || options.sites.length === 1
+      ? options.sites
+      : [CRAWL_ROTATION[Math.floor(Date.now() / 86_400_000) % CRAWL_ROTATION.length]];
+  if (crawlSites.length < CATALOG_SITES.length) {
+    console.log(`[catalog] rotazione: stanotte si aggiorna ${crawlSites.join(', ')}`);
+  }
 
   for (const site of CATALOG_SITES) {
-    if (!options.sites.includes(site)) {
+    if (!crawlSites.includes(site)) {
       catalog.sites[site] = previous.sites[site];
       if (previous.truncated[site]) catalog.truncated[site] = true;
       continue;
@@ -373,7 +402,7 @@ async function main(): Promise<number> {
     const siteStart = Date.now();
     let result: CrawlResult;
     try {
-      result = await CRAWLERS[site](options.maxPages[site]);
+      result = await CRAWLERS[site](options.maxPages[site], crawlDeadline);
     } catch (err: any) {
       // Un sito bloccato non ferma gli altri (host diversi): il suo catalogo
       // resta quello di ieri, gli altri si aggiornano e il job esce rosso.
@@ -404,17 +433,16 @@ async function main(): Promise<number> {
 
   const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
   const total = CATALOG_SITES.reduce((sum, site) => sum + catalog.sites[site].length, 0);
-  // Solo con la rete libera: dopo i tre crawl, con il tempo che resta.
-  if (options.sites.includes('saturn') || options.sites.includes('world')) {
-    const result = await enrichMalIds(catalog, startedAt);
-    // Stessa regola di `--enrich-only`: niente letto su un backlog non vuoto
-    // vuol dire WAF o deadline già scaduta, non "arricchimento fatto".
-    if (enrichmentStalled(result)) {
-      const { pending } = result;
-      const message = `arricchimento: nessuna scheda letta su ${pending} da leggere`;
-      console.error(`[catalog] ${message}`);
-      failures.push(message);
-    }
+  // Sempre: il catalogo contiene tutti i siti (quelli non crawlerati stanotte
+  // restano a ieri), e l'arricchimento è la parte che riempie i dati mancanti.
+  const enriched = await enrichMalIds(catalog, startedAt);
+  // Stessa regola di `--enrich-only`: niente letto su un backlog non vuoto
+  // vuol dire WAF o deadline già scaduta, non "arricchimento fatto".
+  if (enrichmentStalled(enriched)) {
+    const { pending } = enriched;
+    const message = `arricchimento: nessuna scheda letta su ${pending} da leggere`;
+    console.error(`[catalog] ${message}`);
+    failures.push(message);
   }
 
   if (options.dryRun) {
