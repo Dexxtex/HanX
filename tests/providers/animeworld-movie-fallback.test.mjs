@@ -51,3 +51,51 @@ test("film: titolo senza il pattern 'movie N' non cerca nulla", async () => {
   assert.deepEqual(await p.movieFranchiseVersions('Boruto'), []);
   assert.deepEqual(p.queries, []);
 });
+
+
+// Il catalogo matcha per titolo ("Quando c'era Marnie" per "When Marnie Was
+// There"): lo slug è in un'altra lingua e il filtro stretto lo scartava prima
+// ancora di provare la scheda. Catalogo fixture + rete stubbata.
+test('film dal catalogo: lo slug in un altra lingua non viene scartato', async () => {
+  const fs = await import('node:fs');
+  const os = await import('node:os');
+  const path = await import('node:path');
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hanx-aw-marnie-'));
+  fs.writeFileSync(
+    path.join(dir, 'catalog-titles.json'),
+    JSON.stringify({
+      generatedAt: new Date().toISOString(),
+      sites: {
+        world: [
+          {
+            slug: 'quando-cera-marnie.W3Cwk',
+            url: 'https://www.animeworld.ac/play/quando-cera-marnie.W3Cwk',
+            title: "Quando c'era Marnie",
+            key: '',
+          },
+        ],
+      },
+    })
+  );
+  process.env.CATALOG_DIR = dir;
+
+  const PLAY = '<html><a data-id="tok1" data-episode-num="1" href="/play/quando-cera-marnie.W3Cwk/tok1">Ep 1</a></html>';
+  const PLAYER = '<html>file: "https://cdn.example.test/marnie.mp4"</html>';
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const href = String(url?.url || url);
+    // La ricerca non deve trovare nulla: la scheda arriva solo dal catalogo.
+    const body = href.includes('/filter?') ? '<html></html>' : href.includes('serverPlayer') ? PLAYER : PLAY;
+    return new Response(body, { status: 200, headers: { 'content-type': 'text/html' } });
+  };
+  try {
+    const { AnimeWorldProvider } = await import('../../dist/providers/animeworld-provider.js');
+    const p = new AnimeWorldProvider({ enabled: true, proxyUrl: '' });
+    const out = await p.handleTitleRequest('When Marnie Was There', null, 1, true, 'Omoide no Marnie', "Quando c'era Marnie");
+    assert.ok(out.streams.length > 0, 'la scheda del catalogo è stata scartata dal filtro slug');
+  } finally {
+    globalThis.fetch = originalFetch;
+    process.env.CATALOG_DIR = path.join(os.tmpdir(), 'hanx-test-catalog-vuoto');
+  }
+});

@@ -60,10 +60,14 @@ export function seasonFromTitle(title: string): number | null {
 export function italianSeasonQuery(
   titleIt: string | null | undefined,
   season: number | null,
-  requestedTitle: string | null | undefined = ''
+  requestedTitle: string | null | undefined = '',
+  isMovie = false
 ): string {
   const title = String(titleIt || '').trim();
   if (!title) return '';
+  // Un film non ha stagione: il titolo italiano è l'identità dell'opera, ed è
+  // quello che i siti usano ("Quando c'era Marnie" per "When Marnie Was There").
+  if (isMovie) return title;
   if (season && season > 1) return `${title} ${season}`;
   if (season === 1) return title;
   // Gli id Kitsu mappano una stagione per entry: `season` è null, la stagione

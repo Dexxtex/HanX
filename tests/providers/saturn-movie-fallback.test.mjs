@@ -51,3 +51,15 @@ test('unico risultato di una query di ripiego: non si accetta senza match', asyn
   // Titolo richiesto: l'euristica resta valida.
   assert.equal(filterAnimeResults(results, ['Yuki: Snow Fairy'], true).length, 1);
 });
+
+// Un film non ha stagione: il titolo italiano è l'identità dell'opera e va usato.
+// Prima veniva scartato (season null -> ''), quindi "Quando c'era Marnie" non
+// entrava mai tra le query di "When Marnie Was There".
+test('film: il titolo italiano non viene scartato perche season e null', async () => {
+  const { italianSeasonQuery } = await import('../../dist/providers/anime-core/helpers.js');
+  assert.equal(italianSeasonQuery("Quando c'era Marnie", null, 'When Marnie Was There', true), "Quando c'era Marnie");
+  // Le serie restano com'erano: senza stagione esplicita il titolo dell'opera
+  // prenderebbe la scheda sbagliata.
+  assert.equal(italianSeasonQuery('Tokyo Revengers', null, 'Tokyo Revengers'), '');
+  assert.equal(italianSeasonQuery('La malinconia di Haruhi Suzumiya', 2, 'The Melancholy of Haruhi Suzumiya'), 'La malinconia di Haruhi Suzumiya 2');
+});

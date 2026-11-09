@@ -1034,7 +1034,7 @@ export class AnimeSaturnProvider {
     const altRaw = titleAlt ? normalizeTitleForSearch(titleAlt, animeSaturnTitleNormalization) : '';
     const altQuery = sameQuery(altRaw, normalizedTitle) ? '' : altRaw;
     // Saturn indicizza i titoli italiani: senza sottotitolo è il primo ripiego.
-    const itQueryRaw = italianSeasonQuery(titleIt, titleItSeason ?? seasonNumber, normalizedTitle);
+    const itQueryRaw = italianSeasonQuery(titleIt, titleItSeason ?? seasonNumber, normalizedTitle, isMovie);
     const itQuery = sameQuery(itQueryRaw, normalizedTitle) ? '' : itQueryRaw;
     const hasSeason = Boolean(seasonNumber && new RegExp(`(?:\\b|\\s)${seasonNumber}$`, 'i').test(normalizedTitle));
     const seasonTitle = (!isMovie && seasonNumber && seasonNumber > 1 && !hasSeason) ? `${normalizedTitle} ${seasonNumber}` : '';

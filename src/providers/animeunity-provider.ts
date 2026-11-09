@@ -1008,7 +1008,7 @@ export class AnimeUnityProvider {
     // Titolo italiano (TMDB): molti record di .co hanno solo name_it/name_eng
     // italiani, che l'inglese non tocca. Se coincide con la query italiana non
     // aggiunge nulla (es. "Cyberpunk: Edgerunners" ha lo stesso nome in it-IT).
-    const itQueryRaw = italianSeasonQuery(titleIt, titleItSeason ?? seasonNumber, normalizedTitle);
+    const itQueryRaw = italianSeasonQuery(titleIt, titleItSeason ?? seasonNumber, normalizedTitle, isMovie);
     const itQuery = sameQuery(itQueryRaw, normalizedTitle) ? '' : itQueryRaw;
     const queryTitles = [normalizedTitle];
     if (itQuery) queryTitles.push(itQuery);

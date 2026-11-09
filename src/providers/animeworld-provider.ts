@@ -1011,7 +1011,7 @@ export class AnimeWorldProvider {
     const titleKeys = [normalized];
     // Il titolo mostrato sulla scheda è spesso italiano, mentre lo slug resta
     // romaji: la query italiana va cercata e confrontata anche col searchTitle.
-    const itQueryRaw = italianSeasonQuery(titleIt, titleItSeason ?? seasonNumber, normalized);
+    const itQueryRaw = italianSeasonQuery(titleIt, titleItSeason ?? seasonNumber, normalized, isMovie);
     const itQuery = sameQuery(itQueryRaw, normalized) ? '' : itQueryRaw;
     if (itQuery) titleKeys.push(itQuery);
     // Anche il romaji passa dalla normalizzazione ("... Season 2" -> "... 2").
@@ -1043,6 +1043,10 @@ export class AnimeWorldProvider {
 
     const catalogVersions = catalogWorldVersions([normalized, itQuery, altQuery], { season: seasonNumber, isMovie, malId, episode: episodeNumber });
     let versions = catalogVersions.length ? catalogVersions : await searchWithLogging(normalized);
+    // Il catalogo ha già matchato per titolo (banda auto): lo slug può essere in
+    // un'altra lingua ("quando-cera-marnie" per "When Marnie Was There") e il
+    // filtro stretto sullo slug lo scarterebbe. Vale soprattutto per i film.
+    const fromCatalog = catalogVersions.length > 0;
     let versionsFromFallback = false;
 
     if (!skipExtraNormalization && !versions.length) {
@@ -1100,7 +1104,7 @@ export class AnimeWorldProvider {
       try {
         if (!wantsRewrite) {
           const beforeCount = versions.length;
-          let filtered = versions.filter(matchesBaseSlug);
+          let filtered = fromCatalog ? versions : versions.filter(matchesBaseSlug);
           if (!filtered.length && titleAlt && titleAlt !== normalized) {
             // Stessi risultati già scaricati, filtro più largo: nessuna richiesta.
             titleKeys.push(titleAlt);
