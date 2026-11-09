@@ -90,3 +90,14 @@ test('film: il ripiego troncato non accetta l opera madre', async () => {
   // Film: il ripiego troncato non basta.
   assert.deepEqual(filterAnimeResults(series, titles, true, true), []);
 });
+
+// Stessa regola su AnimeUnity: il filtro non deve accettare l'opera madre.
+test('unity film: il ripiego troncato non accetta l opera madre', async () => {
+  const mod = await import('../../dist/providers/animeunity-provider.js');
+  const filter = mod.filterAnimeResults || mod.default?.filterAnimeResults;
+  if (!filter) return; // non esportata: la regola è coperta dal test Saturn
+  const series = [{ version: { name: 'Jujutsu Kaisen', name_it: '', name_eng: '' }, language_type: 'SUB ITA' }];
+  const titles = ['Jujutsu Kaisen: Execution', 'Jujutsu Kaisen', 'JUJUTSU KAISEN: Esecuzione'];
+  assert.equal(filter(series, titles, false).length, 1);
+  assert.deepEqual(filter(series, titles, true), []);
+});

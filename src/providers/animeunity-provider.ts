@@ -21,6 +21,7 @@ import { providerLabel } from '../utils/unifiedNames.js';
 import { lookupTitle, REVIEW_SCORE, type CatalogQueryOptions } from '../catalog/matcher.js';
 import {
   buildTitleFallbackQueries,
+  matchKeys,
   normalizeTitleForSearch as normalizeAnimeTitleForSearch,
   sameQuery,
   titleMatchScoreAny,
@@ -581,10 +582,26 @@ function catalogUnityVersions(
   return versions;
 }
 
-function filterAnimeResults(results: { version: AnimeUnitySearchResult; language_type: string }[], queryTitles: string[]) {
+function filterAnimeResults(
+  results: { version: AnimeUnitySearchResult; language_type: string }[],
+  queryTitles: string[],
+  isMovie = false
+) {
+  // Per un film il sottotitolo è parte dell'identità: un ripiego troncato
+  // ("Jujutsu Kaisen" da "Jujutsu Kaisen: Execution") non deve far accettare
+  // l'opera madre al posto del film.
+  const tokensOf = (value: string) => matchKeys(value).tokens;
+  const isTruncationOf = (short: string, full: string) => {
+    const s = tokensOf(short);
+    const f = tokensOf(full);
+    return s.length > 0 && s.length < f.length && s.every((token, i) => token === f[i]);
+  };
+  const scoringTitles = isMovie
+    ? queryTitles.filter((title) => !isTruncationOf(title, queryTitles[0] || ''))
+    : queryTitles;
   const scored = results.map((result) => {
     const titles = [result.version.name_eng || '', result.version.name_it || '', result.version.name || ''].filter(Boolean);
-    const score = Math.max(0, ...titles.map((title) => titleMatchScoreAny(queryTitles, title)));
+    const score = Math.max(0, ...titles.map((title) => titleMatchScoreAny(scoringTitles, title)));
     return { result, score };
   }).filter((entry) => entry.score > 0);
   const filtered = pickBestScored(scored, REVIEW_SCORE);
@@ -1028,10 +1045,10 @@ export class AnimeUnityProvider {
       debug(3, 'AnimeUnity', `[AnimeUnity][Catalog] ${animeVersions.length} schede dal catalogo, nessuna ricerca`);
     } else if (!skipFilter) {
       const rawVersions = animeVersions;
-      animeVersions = filterAnimeResults(rawVersions, queryTitles);
+      animeVersions = filterAnimeResults(rawVersions, queryTitles, isMovie);
       if (!animeVersions.length && altQuery) {
         queryTitles.push(altQuery);
-        animeVersions = filterAnimeResults(rawVersions, queryTitles);
+        animeVersions = filterAnimeResults(rawVersions, queryTitles, isMovie);
         if (animeVersions.length) {
           debug(2, 'AnimeUnity', `[AnimeUnity] Match con titolo alternativo "${altQuery}"`);
         }
@@ -1091,7 +1108,7 @@ export class AnimeUnityProvider {
         : [itQuery, altQuery, ...buildTitleFallbackQueries(normalizedTitle, seasonNumber)];
       for (const fallbackQuery of candidates.filter((q, i, all) => q && !sameQuery(q, normalizedTitle) && all.indexOf(q) === i).slice(0, 2)) {
         queryTitles.push(fallbackQuery);
-        const fallbackVersions = filterAnimeResults(await this.searchAllVersions(fallbackQuery), queryTitles);
+        const fallbackVersions = filterAnimeResults(await this.searchAllVersions(fallbackQuery), queryTitles, isMovie);
         if (fallbackVersions.length) {
           debug(2, 'AnimeUnity', `[AnimeUnity] Trovato con query di ripiego: ${fallbackQuery}`);
           animeVersions = fallbackVersions;
