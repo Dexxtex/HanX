@@ -6,7 +6,8 @@
  *
  * Usage:
  *   node scripts/build/build-anime-mapping.mjs [--limit=N] [--type=tv|movie|ova|ona|special|tv_special] [--publish]
- *                                        [--status] [--reset] [--retry=status,...] [--check]
+ *                                        [--status] [--reset] [--retry=status,...]
+ *                                        [--retry-limit=N] [--check]
  *                                        [--backfill-titles]
  *
  * Each run converts the next N catalog entries (default 200) and merges them
@@ -65,6 +66,10 @@ const retryStatuses = retryArg
   : retryError
     ? ['error']
     : [];
+// `--retry` riapre TUTTE le entry con quell'esito. Su un backlog di migliaia
+// vuol dire rimetterle in coda per settimane: con `--retry-limit` se ne
+// riaprono solo N, così la prova si misura e si annulla.
+const retryLimit = Number((args.find((arg) => arg.startsWith('--retry-limit=')) || '').split('=')[1]) || 0;
 const publish = args.includes('--publish');
 const backfillTitles = args.includes('--backfill-titles');
 const limitArg = args.find((arg) => arg.startsWith('--limit='));
@@ -1236,6 +1241,7 @@ async function main() {
   if (retryStatuses.length > 0) {
     let retried = 0;
     for (const [malId, record] of Object.entries(state.done)) {
+      if (retryLimit && retried >= retryLimit) break;
       if (!retryStatuses.includes(record?.status)) continue;
       delete state.done[malId];
       retried += 1;

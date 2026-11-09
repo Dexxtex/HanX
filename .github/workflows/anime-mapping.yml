@@ -12,6 +12,9 @@ on:
       limit:
         description: 'Entry nuove da convertire in questa run'
         default: '100'
+      retry:
+        description: 'Esiti da riaprire (es. no-tmdb). Vuoto = nessuno. Riapre al massimo `limit` entry'
+        default: ''
 
 # Il branch lo scrive la run, non un push: il token di default è read-only.
 permissions:
@@ -80,7 +83,11 @@ jobs:
           fi
 
       - name: Converti e pubblica
-        run: node scripts/build/build-anime-mapping.mjs --limit=${{ inputs.limit || 100 }} --publish
+        run: >-
+          node scripts/build/build-anime-mapping.mjs
+          --limit=${{ inputs.limit || 100 }}
+          --publish
+          ${{ inputs.retry && format('--retry={0} --retry-limit={1}', inputs.retry, inputs.limit || 100) || '' }}
 
       # La release conteneva solo gli asset: ora vivono sul branch.
       - name: Ritira la vecchia release mapping
