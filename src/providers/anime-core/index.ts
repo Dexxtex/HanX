@@ -25,6 +25,16 @@ export {
   proxyAgentFor,
 } from './fetch-resource.js';
 
+// Risoluzione id -> titolo, condivisa dai tre provider.
+export {
+  resolveKitsuRequest,
+  resolveMalRequest,
+  resolveImdbRequest,
+  resolveTmdbRequest,
+  resolveTvdbRequest,
+  type TitleResolutionContext,
+} from './resolve-title.js';
+
 // Provider URL resolution
 export {
   getProviderUrl,

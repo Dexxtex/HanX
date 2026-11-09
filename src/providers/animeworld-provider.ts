@@ -24,6 +24,12 @@ import {
   isAbortOrTimeoutError,
   episodeTag,
   italianSeasonQuery,
+  resolveKitsuRequest,
+  resolveMalRequest,
+  resolveImdbRequest,
+  resolveTmdbRequest,
+  resolveTvdbRequest,
+  type TitleResolutionContext,
 } from './anime-core/index.js';
 import {
   resolveMappingRequest,
@@ -865,51 +871,35 @@ export class AnimeWorldProvider {
     }
   }
 
+  /** Quello che la risoluzione condivisa deve sapere di questo provider. */
+  private titleContext(): TitleResolutionContext {
+    return {
+      label: 'AnimeWorld',
+      tmdbApiKey: this.config.tmdbApiKey,
+      allowEmptyTitle: ALLOW_EMPTY_TITLE,
+      handleTitleRequest: (title, season, episode, isMovie, titleAlt, titleIt, titleItSeason, malId) =>
+        this.handleTitleRequest(title, season, episode, isMovie, titleAlt, titleIt, titleItSeason, malId),
+      handleUnmappedSeries: (request, episodeNumber) => this.handleUnmappedSeries(request, episodeNumber),
+    };
+  }
+
   async handleKitsuRequest(kitsuIdString: string): Promise<{ streams: StreamForStremio[] }> {
     if (!this.config.enabled) return { streams: [] };
     try {
-      const request = resolveMappingRequest(kitsuIdString);
-      if (!request) return { streams: [] };
-      const kitsuId = request.id;
-      // Single quick Kitsu call: canonical title (for stream label) + startDate (for fallback filter-year)
-      let quickTitle = '';
-      try {
-        const kitsuAnime = await fetchKitsuAnime(kitsuId);
-        if (kitsuAnime?.startDate) (this as any)._lastKitsuStartDate = kitsuAnime.startDate;
-        quickTitle = kitsuAnime?.title || '';
-      } catch (e) {
-        console.warn('[AnimeWorld] quick Kitsu meta fetch failed', e);
-      }
-      let title = quickTitle;
-      if (!title) {
-        try {
-          title = await getEnglishTitleFromAnyId(kitsuId, 'kitsu', this.config.tmdbApiKey, ALLOW_EMPTY_TITLE);
-        } catch {}
-      }
-      if (!title) {
-        // Nessun titolo = nessuna ricerca possibile. Va detto: senza questa riga
-        // l'uscita era indistinguibile da "anime non presente sui siti".
-        console.warn('[AnimeWorld] Nessun titolo recuperabile per l id richiesto: nessuna ricerca');
-        return { streams: [] };
-      }
-      // Kitsu has one season per entry, so no external season label is used.
-      // La stagione per la query italiana arriva comunque dall'indice.
-      const target = await resolveAnimeTarget(request, this.config);
-      return await this.handleTitleRequest(title, null, request.episode, request.isMovie, target?.titleAlt, target?.titleIt, target?.titleItSeason);
-    } catch (e) {
-      console.error('[AnimeWorld] kitsu handler error', e);
+      return await resolveKitsuRequest(kitsuIdString, this.titleContext());
+    } catch (error) {
+      console.error('Error handling Kitsu request:', error);
       return { streams: [] };
     }
   }
   async handleMalRequest(malIdString: string): Promise<{ streams: StreamForStremio[] }> {
     if (!this.config.enabled) return { streams: [] };
     try {
-      const request = resolveMappingRequest(malIdString);
-      if (!request) return { streams: [] };
-      const englishTitle = await getEnglishTitleFromAnyId(request.id, 'mal', this.config.tmdbApiKey, ALLOW_EMPTY_TITLE);
-      const malId = Number(request.id);
-      return this.handleTitleRequest(englishTitle, request.season, request.episode, request.isMovie, undefined, undefined, undefined, malId);
-    } catch (e) { console.error('[AnimeWorld] mal handler error', e); return { streams: [] }; }
+      return await resolveMalRequest(malIdString, this.titleContext());
+    } catch (error) {
+      console.error('Error handling MAL request:', error);
+      return { streams: [] };
+    }
   }
   /** Split-cour safety net: season title on a mapping miss, never the base series title. */
   private async handleUnmappedSeries(
@@ -928,82 +918,33 @@ export class AnimeWorldProvider {
     return this.handleTitleRequest(seasonTitle, season, episodeNumber, false);
   }
 
-  async handleImdbRequest(imdbId: string, seasonNumber: number | null, episodeNumber: number | null, isMovie=false): Promise<{ streams: StreamForStremio[] }> {
+  async handleImdbRequest(imdbId: string, seasonNumber: number | null, episodeNumber: number | null, isMovie = false): Promise<{ streams: StreamForStremio[] }> {
     if (!this.config.enabled) return { streams: [] };
     try {
-      const gateEnabled = (normalizeBool(process.env.ANIME_GATE_ENABLED) ?? true);
-      if (gateEnabled) {
-        const gate = await checkIsAnimeById('imdb', imdbId, this.config.tmdbApiKey, isMovie ? 'movie' : 'tv');
-        if (!gate.isAnime) {
-          debug(2, 'AnimeWorld', `[AnimeWorld] Skipping anime search: no MAL/Kitsu mapping (${gate.reason}) for ${imdbId}`);
-          return { streams: [] };
-        }
-      }
-      const request = resolveMappingRequest(imdbId, seasonNumber, episodeNumber, isMovie);
-      if (request) {
-        const target = await resolveAnimeTarget(request, this.config);
-        const title = target ? target.title || (await getKitsuTitle(target.kitsuId)) : '';
-        if (target && title) {
-          return this.handleTitleRequest(title, target.displaySeason, target.kitsuEpisode, request.isMovie, target.titleAlt, target.titleIt, target.titleItSeason);
-        }
-      }
-      const unmapped = await this.handleUnmappedSeries(request, episodeNumber);
-      if (unmapped) return unmapped;
-      const englishTitle = await getEnglishTitleFromAnyId(imdbId, 'imdb', this.config.tmdbApiKey, ALLOW_EMPTY_TITLE);
-      return this.handleTitleRequest(englishTitle, seasonNumber, episodeNumber, isMovie);
-    } catch(e){ console.error('[AnimeWorld] imdb handler error', e); return { streams: [] }; }
+      return await resolveImdbRequest(imdbId, seasonNumber, episodeNumber, isMovie, this.titleContext());
+    } catch (error) {
+      console.error('Error handling IMDB request:', error);
+      return { streams: [] };
+    }
   }
-  async handleTmdbRequest(tmdbId: string, seasonNumber: number | null, episodeNumber: number | null, isMovie=false): Promise<{ streams: StreamForStremio[] }> {
+  async handleTmdbRequest(tmdbId: string, seasonNumber: number | null, episodeNumber: number | null, isMovie = false): Promise<{ streams: StreamForStremio[] }> {
     if (!this.config.enabled) return { streams: [] };
     try {
-      const gateEnabled = (normalizeBool(process.env.ANIME_GATE_ENABLED) ?? true);
-      if (gateEnabled) {
-        const gate = await checkIsAnimeById('tmdb', tmdbId, this.config.tmdbApiKey, isMovie ? 'movie' : 'tv');
-        if (!gate.isAnime) {
-          debug(2, 'AnimeWorld', `[AnimeWorld] Skipping anime search: no MAL/Kitsu mapping (${gate.reason}) for TMDB ${tmdbId}`);
-          return { streams: [] };
-        }
-      }
-      const request = resolveMappingRequest(`tmdb:${tmdbId}`, seasonNumber, episodeNumber, isMovie);
-      if (request) {
-        const target = await resolveAnimeTarget(request, this.config);
-        const title = target ? target.title || (await getKitsuTitle(target.kitsuId)) : '';
-        if (target && title) {
-          return this.handleTitleRequest(title, target.displaySeason, target.kitsuEpisode, request.isMovie, target.titleAlt, target.titleIt, target.titleItSeason);
-        }
-      }
-      const unmapped = await this.handleUnmappedSeries(request, episodeNumber);
-      if (unmapped) return unmapped;
-      const englishTitle = await getEnglishTitleFromAnyId(tmdbId, 'tmdb', this.config.tmdbApiKey, ALLOW_EMPTY_TITLE);
-      return this.handleTitleRequest(englishTitle, seasonNumber, episodeNumber, isMovie);
-    } catch(e){ console.error('[AnimeWorld] tmdb handler error', e); return { streams: [] }; }
+      return await resolveTmdbRequest(tmdbId, seasonNumber, episodeNumber, isMovie, this.titleContext());
+    } catch (error) {
+      console.error('Error handling TMDB request:', error);
+      return { streams: [] };
+    }
   }
 
-  async handleTvdbRequest(tvdbId: string, seasonNumber: number | null, episodeNumber: number | null, isMovie=false): Promise<{ streams: StreamForStremio[] }> {
+  async handleTvdbRequest(tvdbId: string, seasonNumber: number | null, episodeNumber: number | null, isMovie = false): Promise<{ streams: StreamForStremio[] }> {
     if (!this.config.enabled) return { streams: [] };
     try {
-      const gateEnabled = (normalizeBool(process.env.ANIME_GATE_ENABLED) ?? true);
-      if (gateEnabled) {
-        const gate = await checkIsAnimeById('tvdb', tvdbId, this.config.tmdbApiKey, isMovie ? 'movie' : 'tv');
-        if (!gate.isAnime) {
-          debug(2, 'AnimeWorld', `[AnimeWorld] Skipping anime search: no Kitsu mapping (${gate.reason}) for TVDB ${tvdbId}`);
-          return { streams: [] };
-        }
-      }
-      const request = resolveMappingRequest(`tvdb:${tvdbId}`, seasonNumber, episodeNumber, isMovie);
-      if (request) {
-        const target = await resolveAnimeTarget(request, this.config);
-        const title = target ? target.title || (await getKitsuTitle(target.kitsuId)) : '';
-        if (target && title) {
-          return this.handleTitleRequest(title, target.displaySeason, target.kitsuEpisode, request.isMovie, target.titleAlt, target.titleIt, target.titleItSeason);
-        }
-      }
-      const unmapped = await this.handleUnmappedSeries(request, episodeNumber);
-      if (unmapped) return unmapped;
-      const fallbackTitle = await getTvdbTitle(tvdbId, this.config);
-      if (!fallbackTitle) return { streams: [] };
-      return this.handleTitleRequest(fallbackTitle, seasonNumber, episodeNumber, isMovie);
-    } catch(e){ console.error('[AnimeWorld] tvdb handler error', e); return { streams: [] }; }
+      return await resolveTvdbRequest(tvdbId, seasonNumber, episodeNumber, isMovie, this.titleContext());
+    } catch (error) {
+      console.error('Error handling TVDB request:', error);
+      return { streams: [] };
+    }
   }
 
   async handleTitleRequest(title: string, seasonNumber: number | null, episodeNumber: number | null, isMovie = false, titleAlt?: string | null, titleIt?: string | null, titleItSeason?: number | null, malId?: number | null): Promise<{ streams: StreamForStremio[] }> {

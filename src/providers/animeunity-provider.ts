@@ -45,6 +45,12 @@ import {
   pickBestScored,
   isAbortOrTimeoutError,
   proxyAgentFor,
+  resolveKitsuRequest,
+  resolveMalRequest,
+  resolveImdbRequest,
+  resolveTmdbRequest,
+  resolveTvdbRequest,
+  type TitleResolutionContext,
   seasonFromTitle,
 } from './anime-core/index.js';
 import {
@@ -901,28 +907,21 @@ export class AnimeUnityProvider {
     }
   }
 
+  /** Quello che la risoluzione condivisa deve sapere di questo provider. */
+  private titleContext(): TitleResolutionContext {
+    return {
+      label: 'AnimeUnity',
+      tmdbApiKey: this.config.tmdbApiKey,
+      handleTitleRequest: (title, season, episode, isMovie, titleAlt, titleIt, titleItSeason, malId) =>
+        this.handleTitleRequest(title, season, episode, isMovie, titleAlt, titleIt, titleItSeason, malId),
+      handleUnmappedSeries: (request, episodeNumber) => this.handleUnmappedSeries(request, episodeNumber),
+    };
+  }
+
   async handleKitsuRequest(kitsuIdString: string): Promise<{ streams: StreamForStremio[] }> {
-    if (!this.config.enabled) {
-      return { streams: [] };
-    }
+    if (!this.config.enabled) return { streams: [] };
     try {
-      const request = resolveMappingRequest(kitsuIdString);
-      if (!request) return { streams: [] };
-      let title = await getKitsuTitle(request.id);
-      if (!title) {
-        try {
-          title = await getEnglishTitleFromAnyId(request.id, 'kitsu', this.config.tmdbApiKey);
-        } catch { }
-      }
-      if (!title) {
-        // Nessun titolo = nessuna ricerca possibile. Va detto: senza questa riga
-        // l'uscita era indistinguibile da "anime non presente sui siti".
-        console.warn('[AnimeUnity] Nessun titolo recuperabile per l id richiesto: nessuna ricerca');
-        return { streams: [] };
-      }
-      // L'id Kitsu non porta stagione: la fornisce l'indice insieme al titolo italiano.
-      const target = await resolveAnimeTarget(request, this.config);
-      return this.handleTitleRequest(title, null, request.episode, request.isMovie, target?.titleAlt, target?.titleIt, target?.titleItSeason);
+      return await resolveKitsuRequest(kitsuIdString, this.titleContext());
     } catch (error) {
       console.error('Error handling Kitsu request:', error);
       return { streams: [] };
@@ -933,16 +932,9 @@ export class AnimeUnityProvider {
    * Gestisce la ricerca AnimeUnity partendo da un ID MAL (mal:ID[:STAGIONE][:EPISODIO])
    */
   async handleMalRequest(malIdString: string): Promise<{ streams: StreamForStremio[] }> {
-    if (!this.config.enabled) {
-      return { streams: [] };
-    }
+    if (!this.config.enabled) return { streams: [] };
     try {
-      const request = resolveMappingRequest(malIdString);
-      if (!request) return { streams: [] };
-      const englishTitle = await getEnglishTitleFromAnyId(request.id, 'mal', this.config.tmdbApiKey);
-      debug(2, 'AnimeUnity', `[AnimeUnity] Ricerca con titolo inglese: ${englishTitle}`);
-      const malId = Number(request.id);
-      return this.handleTitleRequest(englishTitle, request.season, request.episode, request.isMovie, undefined, undefined, undefined, malId);
+      return await resolveMalRequest(malIdString, this.titleContext());
     } catch (error) {
       console.error('Error handling MAL request:', error);
       return { streams: [] };
@@ -970,31 +962,9 @@ export class AnimeUnityProvider {
   }
 
   async handleImdbRequest(imdbId: string, seasonNumber: number | null, episodeNumber: number | null, isMovie = false): Promise<{ streams: StreamForStremio[] }> {
-    if (!this.config.enabled) {
-      return { streams: [] };
-    }
+    if (!this.config.enabled) return { streams: [] };
     try {
-      const gateEnabled = (normalizeBool(process.env.ANIME_GATE_ENABLED) ?? true);
-      if (gateEnabled) {
-        const gate = await checkIsAnimeById('imdb', imdbId, this.config.tmdbApiKey, isMovie ? 'movie' : 'tv');
-        if (!gate.isAnime) {
-          debug(2, 'AnimeUnity', `[AnimeUnity] Skipping anime search: no MAL/Kitsu mapping (${gate.reason}) for ${imdbId}`);
-          return { streams: [] };
-        }
-      }
-      const request = resolveMappingRequest(imdbId, seasonNumber, episodeNumber, isMovie);
-      if (request) {
-        const target = await resolveAnimeTarget(request, this.config);
-        const title = target ? target.title || (await getKitsuTitle(target.kitsuId)) : '';
-        if (target && title) {
-          return this.handleTitleRequest(title, target.displaySeason, target.kitsuEpisode, request.isMovie, target.titleAlt, target.titleIt, target.titleItSeason);
-        }
-      }
-      const unmapped = await this.handleUnmappedSeries(request, episodeNumber);
-      if (unmapped) return unmapped;
-      const englishTitle = await getEnglishTitleFromAnyId(imdbId, 'imdb', this.config.tmdbApiKey);
-      debug(2, 'AnimeUnity', `[AnimeUnity] Ricerca con titolo inglese: ${englishTitle}`);
-      return this.handleTitleRequest(englishTitle, seasonNumber, episodeNumber, isMovie);
+      return await resolveImdbRequest(imdbId, seasonNumber, episodeNumber, isMovie, this.titleContext());
     } catch (error) {
       console.error('Error handling IMDB request:', error);
       return { streams: [] };
@@ -1002,31 +972,9 @@ export class AnimeUnityProvider {
   }
 
   async handleTmdbRequest(tmdbId: string, seasonNumber: number | null, episodeNumber: number | null, isMovie = false): Promise<{ streams: StreamForStremio[] }> {
-    if (!this.config.enabled) {
-      return { streams: [] };
-    }
+    if (!this.config.enabled) return { streams: [] };
     try {
-      const gateEnabled = (normalizeBool(process.env.ANIME_GATE_ENABLED) ?? true);
-      if (gateEnabled) {
-        const gate = await checkIsAnimeById('tmdb', tmdbId, this.config.tmdbApiKey, isMovie ? 'movie' : 'tv');
-        if (!gate.isAnime) {
-          debug(2, 'AnimeUnity', `[AnimeUnity] Skipping anime search: no MAL/Kitsu mapping (${gate.reason}) for TMDB ${tmdbId}`);
-          return { streams: [] };
-        }
-      }
-      const request = resolveMappingRequest(`tmdb:${tmdbId}`, seasonNumber, episodeNumber, isMovie);
-      if (request) {
-        const target = await resolveAnimeTarget(request, this.config);
-        const title = target ? target.title || (await getKitsuTitle(target.kitsuId)) : '';
-        if (target && title) {
-          return this.handleTitleRequest(title, target.displaySeason, target.kitsuEpisode, request.isMovie, target.titleAlt, target.titleIt, target.titleItSeason);
-        }
-      }
-      const unmapped = await this.handleUnmappedSeries(request, episodeNumber);
-      if (unmapped) return unmapped;
-      const englishTitle = await getEnglishTitleFromAnyId(tmdbId, 'tmdb', this.config.tmdbApiKey);
-      debug(2, 'AnimeUnity', `[AnimeUnity] Ricerca con titolo inglese: ${englishTitle}`);
-      return this.handleTitleRequest(englishTitle, seasonNumber, episodeNumber, isMovie);
+      return await resolveTmdbRequest(tmdbId, seasonNumber, episodeNumber, isMovie, this.titleContext());
     } catch (error) {
       console.error('Error handling TMDB request:', error);
       return { streams: [] };
@@ -1034,32 +982,9 @@ export class AnimeUnityProvider {
   }
 
   async handleTvdbRequest(tvdbId: string, seasonNumber: number | null, episodeNumber: number | null, isMovie = false): Promise<{ streams: StreamForStremio[] }> {
-    if (!this.config.enabled) {
-      return { streams: [] };
-    }
+    if (!this.config.enabled) return { streams: [] };
     try {
-      const gateEnabled = (normalizeBool(process.env.ANIME_GATE_ENABLED) ?? true);
-      if (gateEnabled) {
-        const gate = await checkIsAnimeById('tvdb', tvdbId, this.config.tmdbApiKey, isMovie ? 'movie' : 'tv');
-        if (!gate.isAnime) {
-          debug(2, 'AnimeUnity', `[AnimeUnity] Skipping anime search: no Kitsu mapping (${gate.reason}) for TVDB ${tvdbId}`);
-          return { streams: [] };
-        }
-      }
-      const request = resolveMappingRequest(`tvdb:${tvdbId}`, seasonNumber, episodeNumber, isMovie);
-      if (request) {
-        const target = await resolveAnimeTarget(request, this.config);
-        const title = target ? target.title || (await getKitsuTitle(target.kitsuId)) : '';
-        if (target && title) {
-          return this.handleTitleRequest(title, target.displaySeason, target.kitsuEpisode, request.isMovie, target.titleAlt, target.titleIt, target.titleItSeason);
-        }
-      }
-      const unmapped = await this.handleUnmappedSeries(request, episodeNumber);
-      if (unmapped) return unmapped;
-      const fallbackTitle = await getTvdbTitle(tvdbId, this.config);
-      if (!fallbackTitle) return { streams: [] };
-      debug(2, 'AnimeUnity', `[AnimeUnity] Ricerca con titolo TVDB: ${fallbackTitle}`);
-      return this.handleTitleRequest(fallbackTitle, seasonNumber, episodeNumber, isMovie);
+      return await resolveTvdbRequest(tvdbId, seasonNumber, episodeNumber, isMovie, this.titleContext());
     } catch (error) {
       console.error('Error handling TVDB request:', error);
       return { streams: [] };
