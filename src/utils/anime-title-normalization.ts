@@ -252,8 +252,10 @@ export function titleMatchScore(requested: string, candidate: string): number {
   // Kyoukai Movie 1" / "Kara no Kyoukai 1: Vista dall'Alto") è lo stesso film e
   // non deve essere scartato.
   if (FILM_MARKER.test(String(requested || '')) && !FILM_MARKER.test(String(candidate || ''))) {
+    // Confronto sulla forma concatenata: la normalizzazione può unire
+    // "Yu-Gi-Oh!" in "yugioh", e il confronto token per token non lo vedrebbe.
     const withoutMarker = titleTokens(String(requested || '').replace(FILM_MARKER, ' '));
-    if (withoutMarker.length === found.length && withoutMarker.every((token, i) => token === found[i])) return 0;
+    if (withoutMarker.join('') === found.join('')) return 0;
   }
 
   const queryKey = query.join(' ');
