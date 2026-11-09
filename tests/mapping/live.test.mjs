@@ -89,3 +89,57 @@ test('tre richieste concorrenti allo stesso anime fanno una sola GET', async () 
     globalThis.fetch = originalFetch;
   }
 });
+
+// `getSeasonTitle` e `getTmdbEpisode` leggono lo stesso URL della stagione, e
+// `getSeasonTitle` lo chiedono tutti e tre i provider: senza cache erano fino a
+// tre GET identiche per richiesta.
+test('la stagione TMDB si scarica una volta sola, anche fra chiamate diverse', async () => {
+  let calls = 0;
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    if (/\/tv\/777\d+\/season\/2/.test(url)) {
+      calls += 1;
+      return jsonResponse({ name: 'Arco di Prova', episodes: [{ episode_number: 1, air_date: '2024-01-01' }] });
+    }
+    return jsonResponse({});
+  };
+
+  try {
+    const request = { provider: 'tmdb', id: '77701', season: 2, episode: 1, isMovie: false };
+    const first = await getSeasonTitle(request, 2, { tmdbApiKey: 'test-key' });
+    const second = await getSeasonTitle(request, 2, { tmdbApiKey: 'test-key' });
+    assert.equal(first, 'Arco di Prova');
+    assert.equal(second, 'Arco di Prova');
+    assert.equal(calls, 1, 'la seconda chiamata deve leggere dalla cache');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('la scheda TVDB estesa si scarica una volta sola fra titolo e stagione', async () => {
+  let extended = 0;
+  globalThis.fetch = async (input, init) => {
+    const url = String(input);
+    if (url.endsWith('/login')) return jsonResponse({ data: { token: 'tok' } });
+    if (/\/series\/8801\/extended/.test(url)) {
+      extended += 1;
+      return jsonResponse({ data: { name: 'Serie Prova', seasons: [{ number: 2, name: 'Arco Due' }] } });
+    }
+    return jsonResponse({});
+  };
+
+  try {
+    const { getTvdbTitle } = await import('../../dist/mapping/live.js');
+    const credentials = { tvdbApiKey: 'test-key', tvdbPin: '' };
+    assert.equal(await getTvdbTitle('8801', credentials), 'Serie Prova');
+    const name = await getSeasonTitle(
+      { provider: 'tvdb', id: '8801', season: 2, episode: 1, isMovie: false },
+      2,
+      credentials
+    );
+    assert.equal(name, 'Arco Due');
+    assert.equal(extended, 1, 'la seconda lettura deve venire dalla cache');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

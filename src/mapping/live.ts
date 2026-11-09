@@ -244,11 +244,29 @@ async function getTvdbEpisodes(tvdbId: string, season?: number, credentials: Map
   });
 }
 
-export async function getTvdbTitle(tvdbId: string, credentials: MappingCredentialsInput = {}): Promise<string> {
-  const json = await tvdbGet(
-    `/series/${encodeURIComponent(tvdbId)}/extended?short=true`,
-    normalizeMappingCredentials(credentials)
+/**
+ * La scheda TVDB estesa serve sia al titolo della serie sia al nome della
+ * stagione: senza cache erano due GET identiche per richiesta.
+ */
+function tvdbSeriesExtended(tvdbId: string, credentials: MappingCredentials): Promise<any | null> {
+  return cached(`tvdb:extended:${tvdbId}`, () =>
+    tvdbGet(`/series/${encodeURIComponent(tvdbId)}/extended?short=true`, credentials)
   );
+}
+
+/**
+ * La stagione TMDB serve sia all'episodio sia al nome della stagione, sullo
+ * stesso URL: una sola chiave, così il secondo lettore non riscarica il payload.
+ */
+function tmdbSeasonJson(tmdbKey: string, tmdbId: string, season: number): Promise<any> {
+  return cached(
+    `tmdb:season:${createHash('sha256').update(tmdbKey).digest('hex').slice(0, 16)}:${tmdbId}:${season}`,
+    () => fetchJson<any>(`${TMDB_API}/tv/${encodeURIComponent(tmdbId)}/season/${season}?api_key=${tmdbKey}`)
+  );
+}
+
+export async function getTvdbTitle(tvdbId: string, credentials: MappingCredentialsInput = {}): Promise<string> {
+  const json = await tvdbSeriesExtended(tvdbId, normalizeMappingCredentials(credentials));
   return json?.data?.name || '';
 }
 
@@ -467,12 +485,7 @@ async function getTmdbEpisode(
   else if (request.provider === 'imdb') tmdbId = await getTmdbIdFromImdbId(request.id, tmdbKey, 'tv');
   if (!tmdbId) return null;
 
-  const json = await cached(
-    `tmdb:season:${createHash('sha256').update(tmdbKey).digest('hex').slice(0, 16)}:${tmdbId}:${season}`,
-    () => fetchJson<any>(
-      `${TMDB_API}/tv/${encodeURIComponent(tmdbId)}/season/${season}?api_key=${tmdbKey}`
-    )
-  );
+  const json = await tmdbSeasonJson(tmdbKey, tmdbId, season);
   const episode = Array.isArray(json?.episodes)
     ? json.episodes.find((item: any) => Number(item?.episode_number) === request.episode)
     : null;
@@ -617,7 +630,7 @@ export async function getSeasonTitle(
   const credentials = normalizeMappingCredentials(credentialsInput);
   try {
     if (request.provider === 'tvdb') {
-      const json = await tvdbGet(`/series/${encodeURIComponent(request.id)}/extended?short=true`, credentials);
+      const json = await tvdbSeriesExtended(request.id, credentials);
       const name = String(seasonName(json?.data?.seasons, season) || '').trim();
       return name && !isGenericSeasonName(name) ? name : null;
     }
@@ -626,7 +639,7 @@ export async function getSeasonTitle(
       if (!tmdbKey) return null;
       const tmdbId = request.provider === 'tmdb' ? request.id : await getTmdbIdFromImdbId(request.id, tmdbKey, 'tv');
       if (!tmdbId) return null;
-      const json = await fetchJson<any>(`${TMDB_API}/tv/${encodeURIComponent(tmdbId)}/season/${season}?api_key=${tmdbKey}`);
+      const json = await tmdbSeasonJson(tmdbKey, String(tmdbId), season);
       const name = String(json?.name || '').trim();
       return name && !isGenericSeasonName(name) ? name : null;
     }
