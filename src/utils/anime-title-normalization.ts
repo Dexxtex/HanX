@@ -168,9 +168,14 @@ export const TITLE_STOP_WORDS = new Set([
   'no', 'of', 'on', 'the', 'to', 'wa', 'with', 'wo',
 ]);
 const TITLE_LANGUAGE_WORDS = new Set(['cr', 'dub', 'eng', 'ita', 'jp', 'jap', 'sub', 'subita']);
+const QUERY_TRAILING_TOKENS = new Set(
+  ['arc', 'chapter', 'cour', 'hen', 'ona', 'ova', 'part', 'saga', 'season', 'special']
+);
 const TITLE_SEASON_SUFFIXES = new Set([
   'arc', 'chapter', 'cour', 'hen', 'movie', 'ona', 'ova', 'part', 'saga', 'season', 'special',
 ]);
+// Alla query "movie" non si toglie: è ciò che distingue il film dalla serie
+// ("Yu-Gi-Oh!: The Movie" non deve combaciare con "Yu-Gi-Oh!").
 // Suffissi che non identificano un'altra opera: "Show: Sub" e "Show: Sub
 // Special" restano la stessa scheda. Un sottotitolo nuovo ("...: Final
 // Member Selection Match") invece è un'altra stagione o un altro anime.
@@ -195,22 +200,22 @@ function memoize(cache: Map<string, string[]>, key: string, build: () => string[
   return value;
 }
 
-function titleTokens(title: string): string[] {
-  const key = String(title || '');
+function titleTokens(title: string, stripTrailingFormat = true): string[] {
+  const key = `${stripTrailingFormat ? '1' : '0'}:${String(title || '')}`;
   return memoize(filteredTokenCache, key, () =>
-    cleanTokens(key).filter(
+    cleanTokens(String(title || ''), stripTrailingFormat).filter(
       (token) => !TITLE_STOP_WORDS.has(token) && !TITLE_LANGUAGE_WORDS.has(token)
     )
   );
 }
 
 /** Token senza filtri di stopword: serve per confrontare "Mission-E" con "MissionE". */
-function cleanTokens(title: string): string[] {
-  const key = String(title || '');
-  return memoize(tokenCache, key, () => buildCleanTokens(key));
+function cleanTokens(title: string, stripTrailingFormat = true): string[] {
+  const key = `${stripTrailingFormat ? '1' : '0'}:${String(title || '')}`;
+  return memoize(tokenCache, key, () => buildCleanTokens(String(title || ''), stripTrailingFormat));
 }
 
-function buildCleanTokens(title: string): string[] {
+function buildCleanTokens(title: string, stripTrailingFormat = true): string[] {
   const tokens = normalizeHomoglyphs(String(title || ''))
     .normalize('NFKD')
     .replace(/[\u0300-\u036f]/g, '')
@@ -225,8 +230,11 @@ function buildCleanTokens(title: string): string[] {
     .filter(Boolean)
     // "II" e "2" sono la stessa stagione: senza questo, il titolo trovato viene scartato dal filtro.
     .map((token) => ROMAN_NUMERALS[token] || token.replace(/^(\d+)(?:st|nd|rd|th)$/, '$1'));
-  // "Tenjiku-hen" e "Tenjiku Arc" sono lo stesso sottotitolo.
-  while (tokens.length > 1 && TITLE_SEASON_SUFFIXES.has(tokens[tokens.length - 1])) tokens.pop();
+  // "Tenjiku-hen" e "Tenjiku Arc" sono lo stesso sottotitolo. Il taglio vale
+  // per la scheda candidata, così una scheda "... Movie" risponde alla query
+  // corta ("Reborn!"); sulla query no, altrimenti il film servirebbe la serie.
+  const stripSet = stripTrailingFormat ? TITLE_SEASON_SUFFIXES : QUERY_TRAILING_TOKENS;
+  while (tokens.length > 1 && stripSet.has(tokens[tokens.length - 1])) tokens.pop();
   return tokens;
 }
 
@@ -237,7 +245,7 @@ function buildCleanTokens(title: string): string[] {
  * 0 = non correlato.
  */
 export function titleMatchScore(requested: string, candidate: string): number {
-  const query = titleTokens(requested);
+  const query = titleTokens(requested, false);
   const found = titleTokens(candidate);
   if (!query.length || !found.length) return 0;
 

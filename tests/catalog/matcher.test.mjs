@@ -349,3 +349,16 @@ test('un token corto non combacia con la coda di un titolo piu lungo', () => {
     ['wolf']
   );
 });
+
+// Per un film non si serve la serie omonima: "Yu-Gi-Oh!: The Movie" combaciava
+// con la scheda "Yu-Gi-Oh!" perché "movie" veniva tolto dai token della query.
+test('film: la serie omonima non risponde alla richiesta del film', () => {
+  fixture({ sites: { saturn: [entry('Yu-Gi-Oh!', 'yu-gi-oh'), entry('Yu-Gi-Oh! Sevens', 'yu-gi-oh-sevens')] } });
+  assert.deepEqual(lookupTitle('saturn', ['Yu-Gi-Oh!: The Movie'], { isMovie: true }).hits, []);
+  // La scheda del film, quando c'è, resta raggiungibile.
+  fixture({ sites: { saturn: [entry('Yu-Gi-Oh!', 'yu-gi-oh'), entry('Yu-Gi-Oh! The Movie', 'yu-gi-oh-movie')] } });
+  assert.deepEqual(
+    lookupTitle('saturn', ['Yu-Gi-Oh!: The Movie'], { isMovie: true }).hits.map((h) => h.slug),
+    ['yu-gi-oh-movie']
+  );
+});
