@@ -33,6 +33,9 @@ graphify-out
 scripts/*
 !scripts/build/build-copy.js
 !scripts/build/build-anime-mapping.mjs
+# Tabelle di join del converter: senza, il backfill gira con le mappe vuote.
+!scripts/build/mdblist-tmdb.json
+!scripts/build/simkl-kitsu.json
 
 # --- Backup generati a runtime ---
 config/*.jsonbk

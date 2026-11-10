@@ -5,12 +5,13 @@
  * Budget di rete (dichiarato prima delle richieste, regole in AGENTS.md):
  * - una richiesta alla volta, 3 s tra la fine di una e l'inizio della successiva;
  * - timeout 15 s, User-Agent esplicito, 2 retry con backoff solo su 5xx/rete;
- * - 403 e 429 fermano tutto: il WAF si prolunga se si insiste;
- * - tetti giornalieri: Saturn 2 richieste di sitemap + ~206 pagine di listing (una
- *   partizione per tipo), World fino alle pagine
- *   dichiarate dal sito (172 oggi, 40 schede) con tetto 300, Unity 1 + 300
- *   pagine (30 schede). Totale massimo ~545, ~29 minuti; il tetto di World è
- *   solo una sicurezza, `truncated` scatta se il dichiarato lo supera.
+ * - 403 ferma tutto subito; 429 fa **una** attesa di 60 s e un retry, poi ferma
+ *   tutto (regola di AGENTS.md: un rate-limit transitorio non è un WAF);
+ * - tetti per sito: Saturn 2 sitemap + 260 pagine, World 300, Unity 300. Il
+ *   tetto vero però è la deadline del crawl (34 minuti): a 3 s per richiesta
+ *   sono ~680 richieste, quindi i cap delle pagine sono una sicurezza e non la
+ *   pianificazione. L'arricchimento ha una deadline propria (52 minuti) e
+ *   un tetto per run. `truncated` dice quale sito è stato tagliato.
  *
  * Uso: pnpm run sync-catalog [-- --site unity --max-pages 2 --dry-run]
  */
@@ -104,18 +105,35 @@ async function request(url: string, init: RequestInit = {}): Promise<{ body: str
       await sleep(BACKOFF_MS[attempt]);
       continue;
     } finally {
+      // Slot consumato all'arrivo degli header: copre anche i rami d'errore,
+      // che altrimenti farebbero ripartire il retry prima dell'intervallo.
       nextSlot = Date.now() + INTERVAL_MS;
     }
     rememberCookies(response.headers);
-    if (response.status === 403 || response.status === 429) {
-      throw new BlockedError(`${response.status} su ${url}`);
+    if (response.status === 403) {
+      throw new BlockedError(`403 su ${url}`);
+    }
+    if (response.status === 429) {
+      // Una sola attesa di 60 s e un retry, poi stop: un 429 transitorio non è
+      // un WAF e non deve far saltare la notte a quel sito.
+      // `RETRIES` vale 2, quindi `attempt < RETRIES` darebbe DUE attese: la
+      // regola è una sola attesa e un retry.
+      if (attempt === 0) {
+        await sleep(60_000);
+        continue;
+      }
+      throw new BlockedError(`429 su ${url} dopo ${attempt + 1} tentativi`);
     }
     if (response.status >= 500 && attempt < RETRIES) {
       await sleep(BACKOFF_MS[attempt]);
       continue;
     }
     if (!response.ok) throw new Error(`${response.status} su ${url}`);
-    return { body: await response.text(), headers: response.headers };
+    const body = await response.text();
+    // Ricalcolato a fine corpo: prima restava fissato agli header, quindi il gap
+    // reale era header→header e la pagina lenta accorciava il pacing.
+    nextSlot = Date.now() + INTERVAL_MS;
+    return { body, headers: response.headers };
   }
 }
 

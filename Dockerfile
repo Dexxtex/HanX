@@ -51,12 +51,21 @@ COPY --from=builder --chown=appuser:nodejs /app/package.json ./package.json
 COPY --from=builder --chown=appuser:nodejs /app/addon-config.json ./addon-config.json
 COPY --from=builder --chown=appuser:nodejs /app/config ./config
 COPY --from=builder --chown=appuser:nodejs /app/public ./public
-# Converter incrementale del mapping (gira a mano: docker exec HanX node ...).
+# Converter incrementale del mapping. Va lanciato puntando l'indice sul volume,
+# altrimenti scrive fuori dal volume (il file si perde alla ricreazione del
+# container) mentre il ledger sul volume avanza lo stesso:
+#   docker exec -e ANIME_MAPPING_FILE=/app/data/anime-seasons.json HanX node scripts/build/build-anime-mapping.mjs --limit=200
+# Qui servono solo gli script e le correzioni manuali: l'indice lo passa l'env.
 COPY --from=builder --chown=appuser:nodejs /app/scripts ./scripts
+COPY --from=builder --chown=appuser:nodejs /app/src/mapping/overrides.json ./src/mapping/overrides.json
 
 # Switcha a utente non-root
 USER appuser
 
+# EXPOSE si espande a build time: resta 7000 anche con `-e PORT=8123`. La porta
+# pubblicata e `PORT` devono coincidere (`-p 8123:8123 -e PORT=8123`); `-P` vale
+# solo con la porta di default.
+ENV PORT=7000
 EXPOSE 7000
 
 # Health check per orchestrator (Docker/Kubernetes)

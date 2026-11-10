@@ -6,10 +6,14 @@ on:
 
 jobs:
   generate-pr-animeworld:
+    # La label la applica il form: senza questo controllo chiunque apre una
+    # issue e ottiene un workflow con contents:write che pusha e apre una PR.
     if: |
-      contains(github.event.issue.labels.*.name, 'normalizzazione-animeworld') ||
-      contains(github.event.issue.labels.*.name, 'richiesta-animeworld')
+      (contains(github.event.issue.labels.*.name, 'normalizzazione-animeworld') ||
+       contains(github.event.issue.labels.*.name, 'richiesta-animeworld')) &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: write
       pull-requests: write
@@ -21,8 +25,8 @@ jobs:
         env:
           ISSUE_BODY: ${{ github.event.issue.body }}
         run: |
-          MAL_NAME=$(printf '%s\n' "$ISSUE_BODY" | awk '/^### MAL English name/{getline; while($0 ~ /^ *$/){getline}; print $0}')
-          AW_NAME=$(printf '%s\n' "$ISSUE_BODY" | awk '/^### AnimeWorld name/{getline; while($0 ~ /^ *$/){getline}; print $0}')
+          MAL_NAME=$(printf '%s\n' "$ISSUE_BODY" | awk '/^### MAL English name/{getline; while($0 ~ /^ *$/ && getline > 0); print $0}')
+          AW_NAME=$(printf '%s\n' "$ISSUE_BODY" | awk '/^### AnimeWorld name/{getline; while($0 ~ /^ *$/ && getline > 0); print $0}')
           if [ -z "$MAL_NAME" ] || [ -z "$AW_NAME" ]; then
             echo "Campi MAL/AnimeWorld mancanti nella issue." >&2
             exit 1

@@ -22,7 +22,37 @@ env:
   DOCKERHUB_IMAGE: lextutor/hanx
 
 jobs:
+  # Un'immagine può uscire solo da codice che passa la suite. Prima il tag veniva
+  # creato e la build lanciata senza che `pnpm test` fosse mai stato eseguito su
+  # quel commit: un'immagine rotta poteva essere pubblicata verde.
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 12.15.0
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Type-check scripts
+        run: pnpm run typecheck:scripts
+
+      - name: Test
+        run: pnpm test
+
   build-and-push:
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -99,8 +129,9 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
             # Non c'è più la build su main: latest si muove con la release
-            # oppure con un run manuale esplicito.
-            type=raw,value=latest,enable=${{ github.ref_type == 'tag' || github.event_name == 'workflow_dispatch' }}
+            # oppure con un run manuale esplicito, ma solo dal branch di default:
+            # un dispatch da un branch qualsiasi pubblicava quel codice come latest.
+            type=raw,value=latest,enable=${{ github.ref_type == 'tag' || (github.event_name == 'workflow_dispatch' && github.ref_name == github.event.repository.default_branch) }}
             type=sha,format=short
 
       - name: Build and push Docker image

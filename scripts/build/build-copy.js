@@ -31,28 +31,10 @@ function copyRecursive(src, dest) {
   }
 }
 
-// cp src/config/*.json dist/config/ (directory is optional)
-function copyConfigFiles() {
-  const srcConfig = path.join(root, 'src', 'config');
-  if (!fs.existsSync(srcConfig)) return;
-
-  const distConfig = path.join(root, 'dist', 'config');
-  mkdirp(distConfig);
-
-  const files = fs.readdirSync(srcConfig).filter(f => f.endsWith('.json'));
-  for (const file of files) {
-    copyRecursive(
-      path.join(srcConfig, file),
-      path.join(distConfig, file)
-    );
-  }
-}
-
 // Esecuzione
 const distConfig = path.join(root, 'dist', 'config');
 mkdirp(distConfig);
 copyRecursive(path.join(root, 'config'), distConfig);
-copyConfigFiles();
 
 // Anime mapping data (JSON) + optional overrides
 const mappingDataSrc = path.join(root, 'src', 'mapping', 'data');

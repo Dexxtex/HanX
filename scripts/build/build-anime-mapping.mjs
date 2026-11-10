@@ -133,6 +133,8 @@ async function fetchJson(url, init, useCache = true) {
     try {
       const response = await fetch(url, {
         ...init,
+        // Senza timeout una socket appesa tiene il job fino al tetto del runner.
+        signal: AbortSignal.timeout(15_000),
         headers: {
           // Kitsu parla JSON:API e risponde 406 a "application/json".
           accept: new URL(url).host.endsWith('kitsu.io') ? 'application/vnd.api+json' : 'application/json',
@@ -156,7 +158,8 @@ async function fetchJson(url, init, useCache = true) {
       lastError = new Error(`HTTP ${response.status} for ${new URL(url).host}${new URL(url).pathname}`);
       if (response.status !== 429 && response.status < 500) throw lastError;
       const retryAfter = Number.parseInt(response.headers?.get?.('retry-after') || '', 10);
-      if (Number.isFinite(retryAfter)) waitMs = retryAfter * 1000;
+      // Con un tetto: un Retry-After grande faceva dormire la run per ore.
+      if (Number.isFinite(retryAfter)) waitMs = Math.min(retryAfter * 1000, 60_000);
     } catch (error) {
       if (error === lastError) throw error; // non-retryable HTTP status
       lastError = error; // network/parse error: retry
@@ -1167,7 +1170,15 @@ async function buildSeriesSeedFromTmdbOnly(seed) {
 }
 
 async function main() {
+  // `readJson` torna null anche su un file corrotto, non solo su uno assente:
+  // senza distinguerli la run ripartiva da `series: {}` e ripubblicava un
+  // indice quasi vuoto, sostituendo quello buono.
   const existing = reset ? null : readJson(outputFile);
+  if (!reset && existing === null && fs.existsSync(outputFile)) {
+    // Non suggerire `--reset`: azzera anche il ledger (`state.done`), cioè
+    // settimane di lavoro, per un file che si può ripristinare dal branch.
+    throw new Error(`${outputFile} esiste ma non è leggibile: ripristinalo (branch mapping) o cancellalo a mano. Ripartire da zero qui ripubblicherebbe un indice vuoto.`);
+  }
   const index = {
     version: SCHEMA_VERSION,
     generatedAt: new Date().toISOString(),
@@ -1334,6 +1345,7 @@ function ghHeaders(extra = {}) {
 async function ghApi(url, init = {}) {
   const response = await fetch(url.startsWith('http') ? url : `https://api.github.com${url}`, {
     ...init,
+    signal: AbortSignal.timeout(15_000),
     headers: ghHeaders(init.headers),
   });
   if (!response.ok) {
