@@ -113,6 +113,25 @@ export function sameQuery(a: string | null | undefined, b: string | null | undef
 }
 
 /** Query di ripiego usate quando la ricerca normale non restituisce risultati. */
+/**
+ * Titolo senza il numerale di parte finale: "… Infinity Castle I" -> "… Infinity
+ * Castle". MAL distingue le parti col numerale, i siti tengono una scheda sola
+ * senza, e la ricerca letterale con la "I" dà 0 risultati.
+ * Solo se il token prima del numerale non è una congiunzione: "The Popstar
+ * Water Deer and I" è un pronome, non una parte.
+ */
+export function stripPartNumeral(title: string): string | null {
+  const text = String(title || '').trim();
+  // Solo i titoli "franchise: sottotitolo". Senza i due punti il numerale è un
+  // seguito vero ("Farm House II"): toglierlo cercherebbe il film precedente.
+  if (!text.includes(':')) return null;
+  const match = /^(.*\S)\s+(i{1,3}|iv|v)$/i.exec(text);
+  if (!match) return null;
+  const before = match[1].split(/\s+/).pop()?.toLowerCase() || '';
+  if (!before || TITLE_STOP_WORDS.has(before)) return null;
+  return match[1].trim();
+}
+
 export function buildTitleFallbackQueries(normalized: string, season?: number | null): string[] {
   const queries: string[] = [];
   // Kitsu scrive l'apostrofo tipografico ("Inukai-san’s"), il sito quello
@@ -144,6 +163,12 @@ export function buildTitleFallbackQueries(normalized: string, season?: number | 
   );
   if (colonTail && tailDistinctive && colonTail !== normalized && tailTokens.length >= 2) queries.push(colonTail);
   if (romanDigits !== normalized && !queries.includes(romanDigits)) queries.push(romanDigits);
+  // Dopo la variante a cifre: se il sito ha "… 2" quella vince, e solo se non
+  // esiste si prova il titolo senza numerale ("… Infinity Castle I" -> "…").
+  const withoutPartNumeral = stripPartNumeral(normalized);
+  if (withoutPartNumeral && withoutPartNumeral.split(/\s+/).length >= 2 && !queries.includes(withoutPartNumeral)) {
+    queries.push(withoutPartNumeral);
+  }
   if (ordinalDigits !== normalized && !queries.includes(ordinalDigits)) queries.push(ordinalDigits);
   // I provider usano spesso il titolo della serie senza il sottotitolo della stagione.
   const colonBase = normalized.split(':')[0].trim();
@@ -160,7 +185,9 @@ export function buildTitleFallbackQueries(normalized: string, season?: number | 
   if (words.length > 3) queries.push(words.slice(0, 3).join(' '));
   const plus = normalized.replace(/\s+/g, '+');
   if (plus !== normalized) queries.push(plus);
-  return queries;
+  // Deduplica: i ripieghi provati sono pochi, uno speso su una query già vista
+  // è una variante in meno che si prova.
+  return [...new Set(queries.filter((q) => q && q !== normalized))];
 }
 
 export const TITLE_STOP_WORDS = new Set([

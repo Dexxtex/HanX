@@ -7,6 +7,7 @@ import {
   normalizeTitleForSearch,
   resolveExactMapKey,
   sameQuery,
+  stripPartNumeral,
   titleMatchScore,
   titleMatchScoreAny,
 } from '../../dist/utils/anime-title-normalization.js';
@@ -127,7 +128,6 @@ test('buildTitleFallbackQueries conserva ordine e varianti', () => {
     [
       'Lattacco dei Giganti (ITA) Parte 2',
       "L'attacco dei Giganti",
-      "L'attacco dei Giganti",
       'L\'attacco+dei+Giganti+(ITA)+Parte+2',
     ]
   );
@@ -199,8 +199,9 @@ test('buildTitleFallbackQueries converte il numero romano in cifre', () => {
   assert.deepEqual(
     buildTitleFallbackQueries('CYBERPUNK: EDGERUNNERS II'),
     // La coda a cifre viene per prima: "EDGERUNNERS 2" rientra nei 10 risultati
-    // che il sito restituisce, il titolo intero no.
-    ['EDGERUNNERS 2', 'CYBERPUNK: EDGERUNNERS 2', 'CYBERPUNK:+EDGERUNNERS+II']
+    // che il sito restituisce, il titolo intero no. Il titolo senza numerale
+    // viene dopo: se il sito ha "… 2" quella vince.
+    ['EDGERUNNERS 2', 'CYBERPUNK: EDGERUNNERS 2', 'CYBERPUNK: EDGERUNNERS', 'CYBERPUNK:+EDGERUNNERS+II']
   );
   // Nessun numero romano in coda: la lista resta quella di sempre.
   assert.deepEqual(buildTitleFallbackQueries('Death Note'), ['Death+Note']);
@@ -301,4 +302,31 @@ test('la stopword dentro un composto non rompe il match (Mission-E)', () => {
   // Opere diverse restano distinte.
   assert.equal(titleMatchScore('Mission-E', 'Mission Impossible'), 0);
   assert.equal(titleMatchScore('Code-E', 'Mission-E'), 0);
+});
+
+// MAL distingue le parti di una trilogia col numerale romano, i siti tengono una
+// scheda sola senza: la ricerca letterale con la "I" dà 0 risultati.
+// Misurato sul ledger: 7 titoli su 2.471 finiscono con un numerale romano.
+test('stripPartNumeral: solo franchise con i due punti, mai un seguito', () => {
+  assert.equal(
+    stripPartNumeral('Demon Slayer: Kimetsu no Yaiba Infinity Castle I'),
+    'Demon Slayer: Kimetsu no Yaiba Infinity Castle'
+  );
+  assert.equal(
+    stripPartNumeral('Demon Slayer: Kimetsu no Yaiba Infinity Castle III'),
+    'Demon Slayer: Kimetsu no Yaiba Infinity Castle'
+  );
+  // Senza due punti il numerale è un seguito: toglierlo cercherebbe il film prima.
+  assert.equal(stripPartNumeral('Farm House II'), null);
+  assert.equal(stripPartNumeral('Cyberpunk Edgerunners II'), null);
+  // "and I" è un pronome, non una parte.
+  assert.equal(stripPartNumeral('The Popstar Water Deer and I'), null);
+  assert.equal(stripPartNumeral('Your Name.'), null);
+});
+
+test('buildTitleFallbackQueries: la variante senza numerale è tra i primi ripieghi', () => {
+  const queries = buildTitleFallbackQueries('Demon Slayer: Kimetsu no Yaiba Infinity Castle I');
+  const at = queries.indexOf('Demon Slayer: Kimetsu no Yaiba Infinity Castle');
+  assert.ok(at >= 0, 'la variante senza numerale deve esserci');
+  assert.ok(at < 3, 'deve stare nei primi tre, che sono il budget dei film');
 });
