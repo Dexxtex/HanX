@@ -9,6 +9,7 @@ import { lookupTitle, type CatalogQueryOptions } from '../catalog/matcher.js';
 import {
   animeSlugBase as animeWorldSlugBase,
   buildTitleFallbackQueries,
+  stripPartNumeral,
   normalizeSearchTitleKey,
   normalizeTitleForSearch,
   resolveExactMapKey,
@@ -1070,9 +1071,12 @@ export class AnimeWorldProvider {
       // sui siti che indicizzano in italiano.
       const bareItRaw = titleIt ? normalizeTitleForSearch(titleIt, animeWorldTitleNormalization) : '';
       const bareItQuery = sameQuery(bareItRaw, normalized) || sameQuery(bareItRaw, itQuery) ? '' : bareItRaw;
+      // Vedi Saturn: il titolo senza numerale di parte va per primo, ma solo per
+      // i film (per le serie il numerale è la stagione).
+      const partBase = isMovie ? stripPartNumeral(normalized) || '' : '';
       const candidates = hasSubtitle
-        ? [altQuery, bareItQuery, ...buildTitleFallbackQueries(normalized, seasonNumber)]
-        : [itQuery, altQuery, ...buildTitleFallbackQueries(normalized, seasonNumber)];
+        ? [partBase, altQuery, bareItQuery, ...buildTitleFallbackQueries(normalized, seasonNumber)]
+        : [partBase, itQuery, altQuery, ...buildTitleFallbackQueries(normalized, seasonNumber)];
       for (const fallbackQuery of candidates.filter((q, i, all) => q && !sameQuery(q, normalized) && all.indexOf(q) === i).slice(0, 2)) {
         const res = await this.searchAllVersions(fallbackQuery, () => false);
         debug(2, 'AnimeWorld', `[AnimeWorld] Search fallback "${fallbackQuery}" -> ${res.length}`);

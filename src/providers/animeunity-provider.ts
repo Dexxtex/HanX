@@ -21,6 +21,7 @@ import { providerLabel } from '../utils/unifiedNames.js';
 import { lookupTitle, REVIEW_SCORE, type CatalogQueryOptions } from '../catalog/matcher.js';
 import {
   buildTitleFallbackQueries,
+  stripPartNumeral,
   matchKeys,
   normalizeTitleForSearch as normalizeAnimeTitleForSearch,
   sameQuery,
@@ -1126,9 +1127,12 @@ export class AnimeUnityProvider {
       // sui siti che indicizzano in italiano.
       const bareItRaw = titleIt ? normalizeTitleForSearch(titleIt) : '';
       const bareItQuery = sameQuery(bareItRaw, normalizedTitle) || sameQuery(bareItRaw, itQuery) ? '' : bareItRaw;
+      // Vedi Saturn: il titolo senza numerale di parte va per primo, ma solo per
+      // i film (per le serie il numerale è la stagione).
+      const partBase = isMovie ? stripPartNumeral(normalizedTitle) || '' : '';
       const candidates = hasSubtitle
-        ? [altQuery, bareItQuery, ...buildTitleFallbackQueries(normalizedTitle, seasonNumber)]
-        : [itQuery, altQuery, ...buildTitleFallbackQueries(normalizedTitle, seasonNumber)];
+        ? [partBase, altQuery, bareItQuery, ...buildTitleFallbackQueries(normalizedTitle, seasonNumber)]
+        : [partBase, itQuery, altQuery, ...buildTitleFallbackQueries(normalizedTitle, seasonNumber)];
       for (const fallbackQuery of candidates.filter((q, i, all) => q && !sameQuery(q, normalizedTitle) && all.indexOf(q) === i).slice(0, 2)) {
         queryTitles.push(fallbackQuery);
         const fallbackVersions = filterAnimeResults(await this.searchAllVersions(fallbackQuery), queryTitles, isMovie);

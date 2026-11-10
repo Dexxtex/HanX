@@ -10,6 +10,7 @@ import { buildEasyProxyHlsUrl, buildEasyProxyStreamUrl } from '../utils/easyprox
 import { lookupTitle, REVIEW_SCORE, type CatalogQueryOptions } from '../catalog/matcher.js';
 import {
   buildTitleFallbackQueries,
+  stripPartNumeral,
   matchKeys,
   normalizeTitleForSearch,
   sameQuery,
@@ -1099,8 +1100,12 @@ export class AnimeSaturnProvider {
       // e '-', e senza quelli non esistono colonTail/dashTail); la frase
       // completa (bareItQuery) è ridondante: quando combacia, combacia anche
       // la coda.
+      // "… Infinity Castle I": MAL distingue le parti col numerale, la scheda del
+      // sito non ce l'ha. Va per prima, altrimenti i tre slot dei film se li
+      // prendono i ripieghi italiani e questa variante non si prova mai.
+      const partBase = isMovie ? stripPartNumeral(normalizedTitle) || '' : '';
       const candidates = isMovie
-        ? [...buildTitleFallbackQueries(titleIt || ''), altQuery, ...buildTitleFallbackQueries(normalizedTitle, seasonNumber)]
+        ? [partBase, ...buildTitleFallbackQueries(titleIt || ''), altQuery, ...buildTitleFallbackQueries(normalizedTitle, seasonNumber)]
         : hasSubtitle
           ? [altQuery, bareItQuery, ...buildTitleFallbackQueries(normalizedTitle, seasonNumber)]
           : [itQuery, altQuery, ...buildTitleFallbackQueries(normalizedTitle, seasonNumber)];
