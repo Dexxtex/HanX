@@ -618,10 +618,16 @@ export function filterAnimeResults(
   const norm = (s: string) => normalizeApostrophes(normalizeUnicodeToAscii(s.toLowerCase().replace(/\s+/g, ' ').trim()));
   const baseRaw = norm(titles[0] || '');
   const tokensOf = (value: string) => matchKeys(value).tokens;
+  const isPartNumeral = (token: string) => /^(i{1,3}|iv|v)$/i.test(token);
   const isTruncationOf = (short: string, full: string) => {
     const s = tokensOf(short);
     const f = tokensOf(full);
-    return s.length > 0 && s.length < f.length && s.every((token, i) => token === f[i]);
+    if (!(s.length > 0 && s.length < f.length && s.every((token, i) => token === f[i]))) return false;
+    // "…Infinity Castle" è un troncamento di "…Infinity Castle I" solo se il
+    // token in più non è un numerale di parte: quello è la variante che stiamo
+    // cercando (MAL distingue le parti, il sito no), non l'opera madre.
+    const extra = f.slice(s.length);
+    return !(extra.length === 1 && isPartNumeral(extra[0]));
   };
   // Per un film il sottotitolo è parte dell'identità: un ripiego troncato
   // ("JUJUTSU KAISEN" da "Jujutsu Kaisen: Execution") serve a trovare la

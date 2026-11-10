@@ -131,3 +131,18 @@ test('se nessuno slug combacia si tiene tutto: il filtro non svuota la lista', (
 
   assert.equal(page.episodes.length, 1, 'meglio gli episodi di prima che zero');
 });
+
+// La variante senza numerale di parte deve poter matchare: MAL distingue le
+// parti di una trilogia col numerale, la scheda del sito non ce l'ha.
+// Ma "Jujutsu Kaisen" per il film "Jujutsu Kaisen: Execution" resta un
+// troncamento da scartare: il token in più è un sottotitolo, non un numerale.
+test('il numerale di parte non rende la variante un troncamento', () => {
+  const movie = (title) => ({ version: { title, url: '/anime/x', language_type: 'SUB ITA' }, language_type: 'SUB ITA' });
+  const titles = ['Demon Slayer: Kimetsu no Yaiba Infinity Castle I', 'Demon Slayer: Kimetsu no Yaiba Infinity Castle'];
+  const kept = filterAnimeResults([movie('Demon Slayer: Kimetsu no Yaiba Infinity Castle')], titles, false, true);
+  assert.equal(kept.length, 1, 'la scheda senza numerale deve passare');
+
+  const series = ['Jujutsu Kaisen: Execution', 'Jujutsu Kaisen'];
+  const dropped = filterAnimeResults([movie('Jujutsu Kaisen')], series, false, true);
+  assert.equal(dropped.length, 0, "l'opera madre non deve rispondere al posto del film");
+});
