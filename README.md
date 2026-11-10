@@ -47,6 +47,8 @@ Serve Docker con Compose v2.
        container_name: HanX
        ports:
          - "${PORT:-7000}:${PORT:-7000}"
+       environment:
+         PORT: "${PORT:-7000}"
        volumes:
          - hanx-data:/app/data
        env_file:
@@ -63,8 +65,9 @@ Serve Docker con Compose v2.
    cp env.example .env
    ```
 
-   `ANIME_MAPPING_URL` è indispensabile; senza `CATALOG_URL` e `TMDB_API_KEY`
-   l'addon funziona ma degrada.
+   `ANIME_MAPPING_URL` serve per i match multi-stagione; senza, ogni ID passa
+   dalla risoluzione live. Senza `CATALOG_URL` e `TMDB_API_KEY` l'addon funziona
+   ma degrada (senza chiave TMDB gli ID fuori indice restano senza stream).
 
 3. **Avvia:**
 
@@ -91,13 +94,14 @@ L'elenco completo, con descrizione e default, è in [`env.example`](env.example)
 
 | Variabile | A cosa serve |
 | --- | --- |
-| `ANIME_MAPPING_URL` | Traduce gli ID di Stremio in titolo e stagione. Senza, nessun ID si risolve |
+| `ANIME_MAPPING_URL` | Traduce gli ID di Stremio in titolo e stagione. Senza, ogni ID passa dalla risoluzione live (Kitsu/TMDB/TVDB): funziona, ma più lento e con match peggiori |
 | `CATALOG_URL` | Catalogo locale delle schede: senza, ogni titolo costa una ricerca di rete |
-| `TMDB_API_KEY` | Titoli italiani e metadati: senza, si perdono i match sui siti che elencano in italiano |
+| `TMDB_API_KEY` | Titoli italiani e metadati. Senza, gli ID fuori dall'indice non hanno titolo inglese e il provider risponde con zero stream |
 
 Le altre che si toccano più spesso: `PORT`, `TVDB_API_KEY`/`TVDB_PIN`,
 `EASYPROXY_URL`/`EASYPROXY_PASSWORD`, `PROXY`/`AU_PROXY`/`AS_PROXY`/`AW_PROXY`,
-`*_ENABLED` per accendere o spegnere un provider, `DEBUG_LEVEL` (`0`–`4`).
+`*_ENABLED` come interruttore: `false` spegne un provider, `true` non lo accende
+(decidono le checkbox della pagina di configurazione), `DEBUG_LEVEL` (`0`–`4`).
 
 > [!WARNING]
 > Le chiavi restano nel `.env`: non committarlo. Se esponi la pagina su Internet,
