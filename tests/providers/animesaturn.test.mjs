@@ -146,3 +146,29 @@ test('il numerale di parte non rende la variante un troncamento', () => {
   const dropped = filterAnimeResults([movie('Jujutsu Kaisen')], series, false, true);
   assert.equal(dropped.length, 0, "l'opera madre non deve rispondere al posto del film");
 });
+
+// La guardia sul troncamento valeva solo per i ripieghi: il primo filtro di un
+// film la saltava. Per un film il sottotitolo è parte dell'identità, quindi un
+// titolo italiano che è un troncamento dell'originale non deve far accettare
+// l'opera madre. Misurato sul mapping: 65 film su 1.202 hanno `titleIt` che è
+// un troncamento di `title` ("Clannad" da "Clannad The Motion Picture").
+test("film: il titolo italiano troncato non fa accettare l'opera madre", () => {
+  const entry = (title) => ({ version: { title, url: '/anime/x', language_type: 'SUB ITA' }, language_type: 'SUB ITA' });
+  const titles = ['Clannad The Motion Picture', 'Clannad'];
+
+  assert.equal(
+    filterAnimeResults([entry('Clannad')], titles, true, true).length,
+    0,
+    'film: la scheda della serie non deve rispondere per il film'
+  );
+  assert.equal(
+    filterAnimeResults([entry('Clannad')], titles, true, false).length,
+    1,
+    'serie: il comportamento resta quello di prima'
+  );
+  assert.equal(
+    filterAnimeResults([entry('Clannad The Motion Picture')], titles, true, true).length,
+    1,
+    'film: il match esatto passa'
+  );
+});

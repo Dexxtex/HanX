@@ -1080,10 +1080,13 @@ export class AnimeSaturnProvider {
     const searchTarget = seasonTitle || normalizedTitle;
     const catalogVersions = catalogSaturnVersions(seasonTitle ? [seasonTitle, normalizedTitle, itQuery, altQuery] : [normalizedTitle, itQuery, altQuery], { season: seasonNumber, isMovie, malId, episode: episodeNumber });
     const rawVersions = catalogVersions.length ? [] : await this.searchAllVersions(searchTarget);
-    let animeVersions = catalogVersions.length ? catalogVersions : filterAnimeResults(rawVersions, titles);
+    // `isMovie` va passato anche qui, non solo ai ripieghi: per un film un
+    // titolo che è un troncamento dell'originale ("Clannad" da "Clannad The
+    // Motion Picture") non deve far accettare l'opera madre al primo colpo.
+    let animeVersions = catalogVersions.length ? catalogVersions : filterAnimeResults(rawVersions, titles, true, isMovie);
     if (!animeVersions.length && altQuery) {
       titles.push(altQuery);
-      animeVersions = filterAnimeResults(rawVersions, titles);
+      animeVersions = filterAnimeResults(rawVersions, titles, true, isMovie);
       if (animeVersions.length) {
         debug(2, 'AnimeSaturn', `[AnimeSaturn] Match con titolo alternativo "${altQuery}"`);
       }
