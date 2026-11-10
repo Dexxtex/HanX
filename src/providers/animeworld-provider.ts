@@ -37,7 +37,6 @@ import {
   resolveAnimeTarget,
   resolveSeasonFallbackTitle,
   getKitsuTitle,
-  fetchKitsuAnime,
   getTvdbTitle,
   type MappingRequest,
 } from '../mapping/index.js';
@@ -185,8 +184,14 @@ function normalizeAnimeWorldPath(pathOrUrl: string | null | undefined): string |
   return match ? match[0] : null;
 }
 
-function parseAwEpisodeNumber(value: any, fallback: number): number {
-  const text = String(value || '').trim();
+/**
+ * Numero episodio da `data-episode-num`. `null` per un "0" esplicito: è una
+ * special che nessuno può chiedere (`parsePositiveInt` richiede > 0) e che,
+ * ripiegando su `index + 1`, collideva con l'episodio 1.
+ */
+export function parseAwEpisodeNumber(value: any, fallback: number): number | null {
+  const text = String(value ?? '').trim();
+  if (text !== '' && Number(text) === 0) return null;
   const direct = Number.parseInt(text, 10);
   if (Number.isInteger(direct) && direct > 0) return direct;
   const floatMatch = text.match(/(\d+(?:[.,]\d+)?)/);
@@ -398,7 +403,9 @@ async function awSearch(query: string, date?: string): Promise<AnimeWorldResult[
     let html = '';
     try {
       html = await awFetchHtml(url, { ttlMs: AW_SEARCH_TTL_MS, cacheKey: `aw-search:${url}` });
-    } catch {
+    } catch (error: any) {
+      // Un 403/timeout qui era indistinguibile da "titolo assente".
+      console.warn('[AnimeWorld] ricerca non recuperata:', error?.message || String(error));
       continue;
     }
     const $ = cheerio.load(String(html || ''));
@@ -459,7 +466,9 @@ async function awGetEpisodes(slug: string): Promise<AnimeWorldEpisode[]> {
   let html = '';
   try {
     html = await awFetchHtml(animeUrl, { ttlMs: 5 * 60 * 1000, cacheKey: `aw-play:${slug}` });
-  } catch {
+  } catch (error: any) {
+    // Lista episodi vuota = zero stream, e il chiamante non vedeva l'errore.
+    console.warn('[AnimeWorld] pagina play non recuperata:', slug, error?.message || String(error));
     return [];
   }
   const raw = String(html || '');
@@ -471,6 +480,7 @@ async function awGetEpisodes(slug: string): Promise<AnimeWorldEpisode[]> {
     const token = String(attrs['data-id'] || '').trim();
     if (!token) continue;
     const num = parseAwEpisodeNumber(attrs['data-episode-num'], index + 1);
+    if (num === null) continue;
     episodes.push({ id: token, number: num, name: attrs['data-comment'] || undefined });
   }
   return episodes;
@@ -497,7 +507,7 @@ function findEpisodeUrlTokenInHtml(html: string, episodeNumber: number | null | 
     if (!firstToken) firstToken = token;
     const num = parseAwEpisodeNumber(attrs['data-episode-num'], i + 1);
     if (episodeNumber == null) return token;
-    if (Number(num) === Number(episodeNumber)) return token;
+    if (num !== null && Number(num) === Number(episodeNumber)) return token;
   }
   return episodeNumber == null ? firstToken : null;
 }
@@ -914,8 +924,8 @@ export class AnimeWorldProvider {
       label: 'AnimeWorld',
       tmdbApiKey: this.config.tmdbApiKey,
       allowEmptyTitle: ALLOW_EMPTY_TITLE,
-      handleTitleRequest: (title, season, episode, isMovie, titleAlt, titleIt, titleItSeason, malId) =>
-        this.handleTitleRequest(title, season, episode, isMovie, titleAlt, titleIt, titleItSeason, malId),
+      handleTitleRequest: (title, season, episode, isMovie, titleAlt, titleIt, titleItSeason, malId, kitsuStartDate) =>
+        this.handleTitleRequest(title, season, episode, isMovie, titleAlt, titleIt, titleItSeason, malId, kitsuStartDate),
       handleUnmappedSeries: (request, episodeNumber) => this.handleUnmappedSeries(request, episodeNumber),
     };
   }
@@ -984,7 +994,7 @@ export class AnimeWorldProvider {
     }
   }
 
-  async handleTitleRequest(title: string, seasonNumber: number | null, episodeNumber: number | null, isMovie = false, titleAlt?: string | null, titleIt?: string | null, titleItSeason?: number | null, malId?: number | null): Promise<{ streams: StreamForStremio[] }> {
+  async handleTitleRequest(title: string, seasonNumber: number | null, episodeNumber: number | null, isMovie = false, titleAlt?: string | null, titleIt?: string | null, titleItSeason?: number | null, malId?: number | null, kitsuStartDate?: string | null): Promise<{ streams: StreamForStremio[] }> {
     debug(1, 'AnimeWorld', 'title request', { title, titleAlt, titleIt, titleItSeason, season: seasonNumber, episode: episodeNumber, isMovie });
     const universalTitle = applyUniversalAnimeTitleNormalization(title);
     if (universalTitle !== title) {
@@ -1085,7 +1095,7 @@ export class AnimeWorldProvider {
     debug(3, 'AnimeWorld', '[AnimeWorld] Language type counts:', debugLangCounts);
 
     if (!versions.length) {
-      const fallbackDate = (this as any)._lastKitsuStartDate as string | undefined;
+      const fallbackDate = kitsuStartDate || undefined;
       if (fallbackDate) {
         try {
           const fb = await this.fallbackFilterYearSearch(normalized, fallbackDate, isMovie, episodeNumber, seasonNumber);
@@ -1131,7 +1141,7 @@ export class AnimeWorldProvider {
           }
           if (!filtered.length) {
             debug(3, 'AnimeWorld', '[AnimeWorld] Strict filter produced 0 results, NOT restoring broad matches (no full title match).');
-            const fallbackDate = (this as any)._lastKitsuStartDate as string | undefined;
+            const fallbackDate = kitsuStartDate || undefined;
             if (fallbackDate) {
               try {
                 debug(3, 'AnimeWorld', '[AnimeWorld] Invoking fallbackFilterYearSearch AFTER strict filter zero-match, date=', fallbackDate);
@@ -1462,7 +1472,6 @@ export function animeWorldDisplayName(name: string | undefined, slug: string, fa
   return fromSlug || String(fallback || '').trim() || slug;
 }
 
-export { normalizeSearchTitleKey, animeWorldSlugBase };
 
 function capitalize(str: string) {
   if (!str) return str;

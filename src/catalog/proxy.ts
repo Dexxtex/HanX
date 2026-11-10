@@ -22,5 +22,16 @@ export function proxyDispatcher(raw: string | null | undefined): Dispatcher | un
 
 /** Le credenziali del proxy non devono finire nei log. */
 export function redactProxy(text: string): string {
-  return String(text || '').replace(/\/\/[^/@\s]+@/g, '//***@');
+  const raw = String(text || '');
+  // Una password con `@` spezzava la vecchia regex al primo `@` e ne lasciava
+  // leggibile la coda. `new URL` prende l'ultimo `@` come separatore vero.
+  try {
+    const url = new URL(raw);
+    if (!url.username && !url.password) return raw;
+    url.username = '***';
+    url.password = '';
+    return url.toString();
+  } catch {
+    return raw.replace(/\/\/.*@/, '//***@');
+  }
 }

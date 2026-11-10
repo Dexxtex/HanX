@@ -38,7 +38,7 @@ async function fetchTmdbDetailsAny(tmdbId: string, tmdbKey: string, mediaHint?: 
   const tryEndpoints: ('movie' | 'tv')[] = mediaHint ? [mediaHint, mediaHint === 'movie' ? 'tv' : 'movie'] : ['tv', 'movie'];
   for (const kind of tryEndpoints) {
     try {
-      const url = `https://api.themoviedb.org/3/${kind}/${tmdbId}?api_key=${tmdbKey}`;
+      const url = `https://api.themoviedb.org/3/${kind}/${encodeURIComponent(tmdbId)}?api_key=${encodeURIComponent(tmdbKey)}`;
       const resp = await fetch(url, { signal: AbortSignal.timeout(10_000) });
       if (!resp.ok) continue;
       const json = (await resp.json()) as TmdbBasicResponse;
@@ -187,15 +187,7 @@ export function applyUniversalAnimeTitleNormalization(title: string): string {
   // Season specific mapping requested: "One-Punch Man Season 2" -> "One Punch Man 2" (idem Season 3)
   // Gestiamo varianti: One-Punch / One Punch / OnePunch / OnePunchMan + optional space before Man
   const seasonMatch = title.match(/^One[- ]?Punch ?Man Season (2|3)$/);
-  if (!seasonMatch) {
-    const seasonMatchCompact = title.match(/^OnePunchMan Season (2|3)$/); // es: OnePunchMan Season 2
-    if (seasonMatchCompact) {
-      const num = seasonMatchCompact[1];
-      const norm = `One Punch Man ${num}`;
-      if (title !== norm) debug(3, 'AnimeGate', `[UniversalTitle][Normalize] "${title}" -> "${norm}"`);
-      return norm;
-    }
-  } else {
+  if (seasonMatch) {
     const num = seasonMatch[1];
     const norm = `One Punch Man ${num}`;
     if (title !== norm) debug(3, 'AnimeGate', `[UniversalTitle][Normalize] "${title}" -> "${norm}"`);

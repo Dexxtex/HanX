@@ -26,9 +26,26 @@ export function minHostIntervalMs(): number {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : 1000;
 }
 
+/**
+ * Oltre questa lunghezza la coda non smaltisce più: con 1 s di intervallo 30
+ * richieste sono già 30 s di attesa, cioè il timeout del provider. Il tetto è
+ * tarato su quel numero: più basso rifiuterebbe richieste che sarebbero andate
+ * a buon fine.
+ */
+const MAX_QUEUE_PER_HOST = 30;
+const queueDepth = new Map<string, number>();
+
+/** Saturazione nostra, non un guasto del sito: non deve marcare il provider-run. */
+export class QueueFullError extends Error {}
+
 export function paceHost<T>(host: string, task: () => Promise<T>): Promise<T> {
   const interval = minHostIntervalMs();
   if (!host || interval === 0) return task();
+  const depth = queueDepth.get(host) || 0;
+  if (depth >= MAX_QUEUE_PER_HOST) {
+    return Promise.reject(new QueueFullError(`coda satura per ${host}: ${depth} richieste in attesa`));
+  }
+  queueDepth.set(host, depth + 1);
   const previous = hostTails.get(host) || Promise.resolve();
   const run = previous.then(async () => {
     const wait = (hostLastAt.get(host) || 0) + interval - Date.now();
@@ -36,9 +53,14 @@ export function paceHost<T>(host: string, task: () => Promise<T>): Promise<T> {
     hostLastAt.set(host, Date.now());
     return task();
   });
+  const settled = run.finally(() => {
+    const left = (queueDepth.get(host) || 1) - 1;
+    if (left <= 0) queueDepth.delete(host);
+    else queueDepth.set(host, left);
+  });
   // La coda non deve trascinare gli errori: la richiesta dopo parte comunque.
-  hostTails.set(host, run.catch(() => undefined));
-  return run;
+  hostTails.set(host, settled.catch(() => undefined));
+  return settled;
 }
 
 // 403 = WAF, 429 = troppe richieste: insistere prolunga il blocco. Il cooldown
@@ -68,4 +90,16 @@ export function isCoolingDown(exitKey: string, now = Date.now()): boolean {
 export function cooldownFor(exitKey: string, status: number, now = Date.now()): void {
   if (status === 403) blockedHosts.set(exitKey, now + BLOCK_403_MS);
   else if (status === 429) blockedHosts.set(exitKey, now + BLOCK_429_MS);
+}
+
+/**
+ * Cooldown ancora attivi, per `/status.json`: "siamo sotto WAF, su quale uscita
+ * e fino a quando" deve essere interrogabile, non dedotto dai log.
+ */
+export function cooldownSnapshot(now = Date.now()): { exitKey: string; untilMs: number }[] {
+  const out: { exitKey: string; untilMs: number }[] = [];
+  for (const [exitKey, until] of blockedHosts) {
+    if (until > now) out.push({ exitKey, untilMs: until });
+  }
+  return out;
 }

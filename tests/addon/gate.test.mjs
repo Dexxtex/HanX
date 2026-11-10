@@ -66,3 +66,22 @@ test('un-mapped TMDB ids share one upstream lookup and use official details', as
     __resetAnimeGateCache();
   }
 });
+
+// Il gate è ciò che filtra i titoli non-anime: senza un caso negativo, un gate
+// che risponde sempre `true` passerebbe tutta la suite.
+test('un id non mappato e non anime viene rifiutato', async () => {
+  const originalFetch = globalThis.fetch;
+  __resetAnimeGateCache();
+  globalThis.fetch = async () => ({
+    ok: true,
+    json: async () => ({ id: 1000, genres: [{ id: 35, name: 'Comedy' }], origin_country: ['US'] }),
+  });
+  try {
+    const result = await checkIsAnimeById('tmdb', '1000', 'test', 'tv');
+    assert.equal(result.isAnime, false, 'un gate che risponde sempre true non filtra niente');
+    assert.equal(result.reason, 'no-mapping-and-not-animation-jp');
+  } finally {
+    globalThis.fetch = originalFetch;
+    __resetAnimeGateCache();
+  }
+});

@@ -3,7 +3,6 @@ import path from 'node:path';
 import * as cheerio from 'cheerio';
 import { compactKey } from './text.js';
 import { htmlToText } from '../utils/html.js';
-import { writeJsonAtomic } from '../utils/fs.js';
 
 export type CatalogSite = 'saturn' | 'world' | 'unity';
 
@@ -617,10 +616,6 @@ export function buildTitleIndex(catalog: CatalogFile): TitleIndexFile {
   return { version: CATALOG_SCHEMA_VERSION, generatedAt: catalog.generatedAt, sites };
 }
 
-/** Scrive su .tmp e rinomina: un crash non lascia un file a metà. */
-// Unica implementazione in utils/fs.ts: qui resta solo il nome usato dal file.
-export { writeJsonAtomic };
-
 /** Scrive prima i due temporanei, poi rinomina: un crash non lascia la coppia a metà. */
 export function writeCatalogsAtomic(dir: string, catalog: CatalogFile, index: TitleIndexFile): void {
   fs.mkdirSync(dir, { recursive: true });
@@ -646,7 +641,10 @@ export function readCatalog(dir: string): CatalogFile {
       if (raw?.truncated?.[site]) catalog.truncated[site] = true;
     }
     return catalog;
-  } catch {
+  } catch (error: any) {
+    // Il chiamante (`sync-catalog.ts`) lo usa come `previous` del merge: un file
+    // corrotto diventava "catalogo vuoto" e la run ricostruiva da zero in silenzio.
+    console.warn('[Catalog] catalogs.json illeggibile, riparto da un catalogo vuoto:', error?.message || String(error));
     return emptyCatalog();
   }
 }

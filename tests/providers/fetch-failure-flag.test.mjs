@@ -140,24 +140,23 @@ test('AC4: un provider reale non lancia e lascia failed=true', async () => {
   assert.ok(fetchCalls >= 1, 'il provider deve aver tentato almeno una fetch');
 });
 
-test('lista vuota: guardia sul cache-set e fallimento fuori da fetchResource', () => {
-  // Un provider che fallisce fuori da fetchResource restituisce { streams: [] }:
-  // la guardia `streams.length === 0` in _providerCacheSet è ciò che impedisce
-  // di cachare quel risultato (il flag non arriva lì, perimetro dichiarato).
+test('lista vuota: TTL corto, e mai quando un provider è fallito', () => {
+  // Una lista vuota è un esito ("questo titolo non c'è"), non un guasto: si
+  // cacha con un TTL corto, altrimenti ogni play ripaga il fan-out intero.
+  // Ma un provider fallito non deve cachare né stream né vuoto: quello resta
+  // il perimetro dichiarato del flag.
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
   const source = fs.readFileSync(path.join(root, 'src', 'addon.ts'), 'utf8');
 
-  const emptyGuardAt = source.search(/if\s*\(\s*!Array\.isArray\(\s*streams\s*\)\s*\|\|\s*streams\.length\s*===\s*0\s*\)\s*return\s*;/);
-  const storeAt = source.search(/_providerStreamCache\.set\(\s*k\s*,/);
+  assert.match(source, /const PROVIDER_NEGATIVE_TTL_MS = /, 'il TTL negativo deve esistere');
+  assert.match(
+    source,
+    /const ttl = streams\.length === 0 \? PROVIDER_NEGATIVE_TTL_MS : PROVIDER_CACHE_TTL_MS/,
+    'la lista vuota deve usare il TTL corto'
+  );
+
   const callAt = source.search(/_providerCacheSet\(\s*normalizedType\s*,/);
-
-  assert.notEqual(emptyGuardAt, -1, 'una lista vuota non deve essere cachata');
-  assert.notEqual(storeAt, -1, 'la scrittura in cache deve esistere');
-  assert.ok(emptyGuardAt < storeAt, 'la guardia deve precedere la scrittura in cache');
   assert.notEqual(callAt, -1, 'il cache-set del fan-out deve esistere');
-  assert.ok(emptyGuardAt < callAt, 'la guardia deve precedere il cache-set del fan-out');
-
-  // Stesso motivo per il flag: la condizione del cache-set deve leggerlo.
   const conditionAt = source.lastIndexOf('if (', callAt);
   assert.ok(conditionAt !== -1 && conditionAt < callAt);
   assert.match(
@@ -190,7 +189,7 @@ test('AC5: addon.ts esegue l\'handler nello store e legge failed prima del cache
     'addon.ts deve importare lo store da fetch-resource'
   );
 
-  const storeAt = source.indexOf('const store = { failed: false }');
+  const storeAt = source.indexOf('const store: { failed: boolean; signal?: AbortSignal } = { failed: false, signal: controller.signal }');
   const runs = [...source.matchAll(/providerRequestStore\.run\(/g)].map((match) => match.index);
   const markAt = source.search(/if\s*\(\s*store\.failed\s*\)\s*providerFailure\s*=\s*true/);
   const cacheSetAt = source.search(/if\s*\(\s*!providerFailure\s*&&\s*_providerConfigSig/);
@@ -225,4 +224,51 @@ test('AC5: addon.ts esegue l\'handler nello store e legge failed prima del cache
     /catch\s*\(error\)\s*\{\s*providerFailure\s*=\s*true/,
     'il catch del runProvider (timeout compreso) deve impostare providerFailure'
   );
+});
+
+// Il timeout del fan-out annulla il provider-run: le fetch che non sono ancora
+// partite non devono partire. Quella già in volo no — `caches.inflight` è
+// condivisa, e annullarla farebbe fallire anche l'altro utente che la aspetta.
+test('un provider-run annullato non fa partire nuove fetch', async () => {
+  const controller = new AbortController();
+  controller.abort();
+  const store = { failed: false, signal: controller.signal };
+  fetchCalls = 0;
+  await assert.rejects(
+    providerRequestStore.run(store, () => fetchResource('http://flag-abort.test/a', createCaches(), {})),
+    /richiesta annullata/
+  );
+  assert.equal(fetchCalls, 0, 'nessuna richiesta inviata');
+});
+
+// La coda satura è una nostra saturazione, non un guasto del sito: se marcasse
+// `failed`, il risultato non verrebbe cachato e si ripagherebbe tutto al play
+// successivo (addon.ts: la scrittura in cache è protetta da !providerFailure).
+test('coda satura: il provider-run non viene marcato come fallito', async () => {
+  const saved = process.env.ANIME_HOST_MIN_INTERVAL_MS;
+  process.env.ANIME_HOST_MIN_INTERVAL_MS = '5';
+  const previous = fetchBehavior;
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  fetchBehavior = async () => { await gate; return new Response('ok', { status: 200 }); };
+  const host = 'flag-queue.test';
+  const store = { failed: false };
+  try {
+    const running = providerRequestStore.run(store, () => fetchResource(`http://${host}/0`, createCaches(), {}));
+    const queued = [];
+    for (let i = 1; i < 30; i += 1) {
+      queued.push(providerRequestStore.run(store, () => fetchResource(`http://${host}/${i}`, createCaches(), {})).catch(() => {}));
+    }
+    await assert.rejects(
+      providerRequestStore.run(store, () => fetchResource(`http://${host}/overflow`, createCaches(), {})),
+      /coda satura/
+    );
+    release();
+    await Promise.allSettled([running, ...queued]);
+    assert.equal(store.failed, false, 'la saturazione della coda non è un guasto del sito');
+  } finally {
+    fetchBehavior = previous;
+    if (saved === undefined) delete process.env.ANIME_HOST_MIN_INTERVAL_MS;
+    else process.env.ANIME_HOST_MIN_INTERVAL_MS = saved;
+  }
 });

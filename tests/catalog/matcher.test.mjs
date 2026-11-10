@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { pathToFileURL } from 'node:url';
-import { cardBase, languageOf, lookupTitle, matchTitle, seasonOf } from '../../dist/catalog/matcher.js';
+import { cardBase, languageOf, lookupTitle, seasonOf } from '../../dist/catalog/matcher.js';
 
 // Fixture: ogni test punta CATALOG_DIR a una cartella temporanea, nessuna rete.
 
@@ -26,15 +26,6 @@ const entry = (title, slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-'), ex
   title,
   key: '',
   ...extra,
-});
-
-test('match esatto: hit a punteggio 1 e forma { slug, url, score }', () => {
-  fixture({ sites: { saturn: [entry('Tutor Hitman Reborn')] } });
-  assert.deepEqual(matchTitle('saturn', ['Tutor Hitman Reborn']), {
-    slug: 'tutor-hitman-reborn',
-    url: 'https://example.test/tutor-hitman-reborn',
-    score: 1,
-  });
 });
 
 test('a) le varianti ita/sub sono schede diverse: si servono entrambe con l etichetta', () => {
@@ -60,6 +51,35 @@ test('b) seasonOf: "part 2" non è la stagione', () => {
   assert.equal(seasonOf('Hotel Inhumans 2'), 2);
   assert.equal(seasonOf('86 Eighty Six'), null);
   assert.equal(seasonOf('4354 Dr Stone 2'), 2);
+});
+
+// Misurato sul catalogo locale del 04/11: 2.207 titoli distinti prendevano una
+// stagione, 23 la prendevano sbagliata. Due pattern li coprono tutti: il numero
+// dopo "no" (Kaiju No 8) e il numero iniziale attaccato a - o . (5-toubun).
+test('b) seasonOf: il numero dentro il nome non è la stagione', () => {
+  assert.equal(seasonOf('Kaiju No 8'), null);
+  assert.equal(seasonOf('Kaiju No. 8'), null);
+  assert.equal(seasonOf('No. 6'), null);
+  assert.equal(seasonOf('Kyou no 5 no 2'), null);
+  assert.equal(seasonOf('5-toubun no Hanayome'), null);
+  assert.equal(seasonOf('3-gatsu no Lion'), null);
+  assert.equal(seasonOf('07-Ghost'), null);
+  assert.equal(seasonOf('2.43: Seiin Koukou Danshi Volley-bu'), null);
+  // ...ma la stagione dopo il nome si vede ancora.
+  assert.equal(seasonOf('Kaiju No 8 2'), 2);
+  assert.equal(seasonOf('5-toubun no Hanayome 2'), 2);
+  assert.equal(seasonOf('3-gatsu no Lion 2'), 2);
+  assert.equal(seasonOf('12-Sai. Chiccha na Mune no Tokimeki 2'), 2);
+});
+
+// `seasonOf` ora restituisce null su titoli come "2.5 Dimensional Seduction":
+// una scheda senza numero deve restare servibile anche con una stagione nota,
+// altrimenti il cambio farebbe perdere il catalogo invece di guadagnarlo.
+test('b) una scheda senza numero resta servita con stagione nota', () => {
+  fixture({ sites: { saturn: [entry('2.5 Dimensional Seduction')] } });
+  const { hits } = lookupTitle('saturn', ['2.5 Dimensional Seduction'], { season: 1 });
+  assert.equal(hits.length, 1, 'la scheda senza stagione va tenuta');
+  assert.equal(hits[0].slug, '2-5-dimensional-seduction');
 });
 
 test('b) dr stone 2 contro dr stone 3 part 2: senza stagione resta ambiguo', () => {

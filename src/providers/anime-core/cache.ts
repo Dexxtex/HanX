@@ -41,11 +41,17 @@ export function setCached<T = any>(map: Map<string, CacheEntry<T>>, key: string,
     for (const [entryKey, entry] of map) {
       if (entry.expiresAt <= now) map.delete(entryKey);
     }
-    let excess = map.size - MAX_CACHE_ENTRIES;
-    for (const entryKey of map.keys()) {
-      if (excess <= 0) break;
-      map.delete(entryKey);
-      excess -= 1;
+    // Sfratta per scadenza più vicina, non per ordine di inserimento: le
+    // ricerche a TTL 12 h si inseriscono una volta e non si riscrivono, quindi
+    // finivano per prime mentre le voci a 2 min restavano.
+    if (map.size > MAX_CACHE_ENTRIES) {
+      const byExpiry = [...map.entries()].sort((a, b) => a[1].expiresAt - b[1].expiresAt);
+      let excess = map.size - MAX_CACHE_ENTRIES;
+      for (const [entryKey] of byExpiry) {
+        if (excess <= 0) break;
+        map.delete(entryKey);
+        excess -= 1;
+      }
     }
   }
   return value;

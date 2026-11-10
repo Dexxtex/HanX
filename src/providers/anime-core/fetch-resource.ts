@@ -13,7 +13,7 @@ const fetchImpl: typeof globalThis.fetch = globalThis.fetch;
 import nodeFetch from 'node-fetch';
 import { fetch as undiciFetch, ProxyAgent } from 'undici';
 import { SocksProxyAgent } from 'socks-proxy-agent';
-import { cooldownFor, exitKeyFor, hostOf, isCoolingDown, paceHost } from './net-policy.js';
+import { cooldownFor, exitKeyFor, hostOf, isCoolingDown, paceHost, QueueFullError } from './net-policy.js';
 
 // Riesportati: i test e il barrel li prendevano da qui.
 export { minHostIntervalMs, paceHost, hostOf } from './net-policy.js';
@@ -35,7 +35,7 @@ export const DEFAULT_FETCH_TIMEOUT = Number.parseInt(
  * dentro questo store e legge `failed` per non cachare una lista parziale.
  * Unica istanza nel processo, una per provider-run.
  */
-export const providerRequestStore = new AsyncLocalStorage<{ failed: boolean }>();
+export const providerRequestStore = new AsyncLocalStorage<{ failed: boolean; signal?: AbortSignal }>();
 
 /** Marca il provider-run corrente come fallito; fuori da uno store è un no-op. */
 export function markProviderFetchFailure(): void {
@@ -113,6 +113,8 @@ export interface FetchResourceOptions {
   body?: string;
   /** Timeout in ms. Defaults to DEFAULT_FETCH_TIMEOUT. */
   timeoutMs?: number;
+  /** Annullamento esterno (provider-run in timeout): si somma al timeout. */
+  signal?: AbortSignal;
   /** Proxy Agent */
   agent?: any;
   /** Forza la piattaforma per la catena PROXY -> *_PROXY -> diretto (utile per CDN). */
@@ -256,12 +258,28 @@ export async function fetchResource(
       // Non è un 403 del sito: è il nostro cooldown, e la richiesta non è mai
       // uscita. Scriverlo come "HTTP 403" faceva sembrare un blocco WAF vivo
       // una pausa che stiamo imponendo noi.
-      throw new Error(`cooldown ${exitKey} for ${url} (nessuna richiesta inviata)`);
+      throw new Error(`cooldown ${exitKey} for ${redactUrl(url)} (nessuna richiesta inviata)`);
     }
+
+    // Cancellazione del provider-run (timeout del fan-out): senza, l'handler
+    // continuava a infilare richieste in coda per una risposta che nessuno
+    // avrebbe letto, e la coda restava occupata da lavoro morto.
+    //
+    // Si ferma solo il lavoro NUOVO, non la fetch già partita: `caches.inflight`
+    // è condivisa fra tutte le richieste dello stesso provider, quindi annullare
+    // quella promise farebbe fallire anche l'utente che la sta aspettando. Una
+    // fetch in volo è comunque limitata dal suo timeout (10 s).
+    const runSignal = providerRequestStore.getStore()?.signal;
+    if (runSignal?.aborted) throw new Error(`richiesta annullata: ${redactUrl(url)}`);
 
     // 3. Execute fetch
     const startedAt = Date.now();
     const task = paceHost(host, async () => {
+      // Riletto qui: il contesto ALS si propaga al `.then` di paceHost, quindi
+      // una richiesta accodata prima del timeout vede l'abort al suo turno.
+      if (providerRequestStore.getStore()?.signal?.aborted) {
+        throw new Error(`richiesta annullata in coda: ${redactUrl(url)}`);
+      }
       let resolvedAgent: any = undefined;
 
       // Se l'agent è stato passato esplicitamente nelle opzioni, usalo (anche null = diretto).
@@ -294,7 +312,7 @@ export async function fetchResource(
           ms: Date.now() - startedAt,
         });
         cooldownFor(exitKey, response.status);
-        throw new Error(`HTTP ${response.status} ${response.statusText} for ${url}`);
+        throw new Error(`HTTP ${response.status} ${response.statusText} for ${redactUrl(url)}`);
       }
 
       const payload = as === 'json' ? await response.json() : await response.text();
@@ -315,7 +333,9 @@ export async function fetchResource(
       caches.inflight.delete(inflightKey);
     }
   } catch (error) {
-    if (isFinalAttempt) markProviderFetchFailure();
+    // La coda satura è una nostra saturazione, non un guasto del sito: se la
+    // marcassimo, il risultato non verrebbe cachato e si ripagherebbe tutto.
+    if (isFinalAttempt && !(error instanceof QueueFullError)) markProviderFetchFailure();
     throw error;
   }
 }

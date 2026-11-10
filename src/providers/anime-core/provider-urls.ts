@@ -15,6 +15,7 @@ import { dirname } from 'node:path';
 import * as fs from 'fs';
 import * as path from 'path';
 import { getDomain } from '../../utils/domains.js';
+import { debug } from '../../utils/logger.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -71,13 +72,70 @@ function normalizeUrl(value: string | undefined): string {
   return text.replace(/\/+$/, '');
 }
 
-function toNormalizedMap(raw: any): Record<string, string> {
+/**
+ * Loopback, reti private, link-local e CGNAT: non sono siti, sono SSRF.
+ * Il JSON remoto (rifetchato ogni 10 s) diventa la base URL di ogni provider,
+ * quindi il controllo sta qui e non nel chiamante.
+ */
+function isPrivateHost(hostname: string): boolean {
+  const host = String(hostname || '').toLowerCase().replace(/^\[|\]$/g, '');
+  if (!host) return true;
+  if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || host.endsWith('.internal')) return true;
+  if (host === '::1' || host === '::') return true;
+  // `::ffff:127.0.0.1` è loopback travestito. Il parser URL lo normalizza in
+  // esadecimale (`::ffff:7f00:1`), quindi vanno gestite entrambe le forme.
+  const mapped = /^::ffff:(.+)$/i.exec(host);
+  if (mapped) {
+    const rest = mapped[1];
+    const dotted = /^(\d{1,3}(?:\.\d{1,3}){3})$/.exec(rest);
+    if (dotted) return isPrivateHost(dotted[1]);
+    const hex = /^([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i.exec(rest);
+    if (hex) {
+      const hi = Number.parseInt(hex[1], 16);
+      const lo = Number.parseInt(hex[2], 16);
+      return isPrivateHost(`${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`);
+    }
+    return true; // forma inattesa: si rifiuta
+  }
+  // Solo un letterale IPv6: un hostname come `fc2.com` inizia per "fc" ma è un
+  // sito pubblico, e la vecchia regex lo bloccava.
+  if (host.includes(':') && /^(?:fe80|fc|fd)/.test(host)) return true;
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
+  if (!m) return false;
+  const a = Number(m[1]);
+  const b = Number(m[2]);
+  if (a === 0 || a === 10 || a === 127) return true;
+  if (a === 169 && b === 254) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 192 && b === 168) return true;
+  if (a === 100 && b >= 64 && b <= 127) return true;
+  return false;
+}
+
+/** http(s) verso un host pubblico. Tutto il resto non può diventare una base URL. */
+export function isUsableBaseUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') return false;
+    return !isPrivateHost(url.hostname);
+  } catch {
+    return false;
+  }
+}
+
+function toNormalizedMap(raw: any, validate = false): Record<string, string> {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
   const out: Record<string, string> = {};
   for (const [key, value] of Object.entries(raw)) {
     const nk = normalizeKey(key);
     const nv = normalizeUrl(value as string);
     if (!nk || !nv) continue;
+    // Solo il JSON remoto è non fidato: il file locale è dell'operatore e può
+    // puntare a un mirror in LAN (è la ragione per cui esiste PROVIDER_URLS_FILE).
+    if (validate && !isUsableBaseUrl(nv)) {
+      debug(1, 'ProviderUrls', 'base URL rifiutata: schema non http(s) o host privato', { key: nk });
+      continue;
+    }
     out[nk] = nv;
   }
   return out;
@@ -134,7 +192,7 @@ async function refreshProviderUrlsFromRemoteIfNeeded(force = false): Promise<voi
       });
       if (!response || !response.ok) return;
       const payload = await response.json();
-      const parsed = toNormalizedMap(payload);
+      const parsed = toNormalizedMap(payload, true);
       if (Object.keys(parsed).length > 0) {
         lastRemoteData = parsed;
       }

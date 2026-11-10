@@ -103,10 +103,10 @@ test('GET /status.json: header, body esatto, versione del manifest e cache legat
     assert.equal(res.headers.get('access-control-allow-origin'), '*');
     assert.equal(res.headers.get('cache-control'), 'no-store');
 
-    assert.deepEqual(Object.keys(body).sort(), ['addon', 'cache', 'catalog', 'mapping']);
+    assert.deepEqual(Object.keys(body).sort(), ['addon', 'cache', 'catalog', 'cooldown', 'mapping']);
     assert.deepEqual(Object.keys(body.addon).sort(), ['uptimeMs', 'version']);
     assert.deepEqual(Object.keys(body.mapping).sort(), ['ageMs', 'generatedAt', 'movies', 'schemaVersion', 'series', 'signature', 'stale']);
-    assert.deepEqual(Object.keys(body.catalog).sort(), ['ageMs', 'entries', 'generatedAt', 'sites', 'stale']);
+    assert.deepEqual(Object.keys(body.catalog).sort(), ['ageMs', 'entries', 'generatedAt', 'lastAttemptAt', 'lastError', 'sites', 'stale']);
     assert.deepEqual(Object.keys(body.catalog.sites).sort(), ['saturn', 'unity', 'world']);
     assert.deepEqual(Object.keys(body.cache).sort(), ['disabled', 'entries', 'maxEntries', 'ttlMs']);
 
@@ -130,6 +130,15 @@ test('GET /status.json: header, body esatto, versione del manifest e cache legat
     assert.equal(again.body.mapping.signature, body.mapping.signature, 'signature stabile tra due richieste');
 
     assert.deepEqual(body.cache, { entries: 0, maxEntries: 42, ttlMs: 1234, disabled: false });
+
+    // I valori, non solo le chiavi: un catalogo assente è "rotto", non "sano e
+    // vuoto", e senza CATALOG_URL non c'è stato nessun tentativo da riportare.
+    assert.equal(body.catalog.entries, 0);
+    assert.equal(body.catalog.generatedAt, null);
+    assert.equal(body.catalog.stale, true);
+    assert.equal(body.catalog.lastAttemptAt, null);
+    assert.equal(body.catalog.lastError, null);
+    assert.deepEqual(body.cooldown, [], 'nessun cooldown all\'avvio');
 
     for (const secret of [SECRET_TMDB, SECRET_MAPPING, SECRET_PROXY]) {
       assert.ok(!text.includes(secret), `segreto nel body: ${secret}`);

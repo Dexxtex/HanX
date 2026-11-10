@@ -111,15 +111,6 @@ export function normalizeRequestedEpisode(value: any): number {
 }
 
 /**
- * Normalize a requested season number. Returns null if invalid.
- * Season 0 is valid (specials).
- */
-export function normalizeRequestedSeason(value: any): number | null {
-  const parsed = Number.parseInt(String(value || ''), 10);
-  return Number.isInteger(parsed) && parsed >= 0 ? parsed : null;
-}
-
-/**
  * Parse an episode number from a string (first sequence of 1-4 digits).
  */
 export function parseEpisodeNumber(value: any, fallbackNum: number): number {
@@ -298,6 +289,9 @@ export function normalizeEpisodesList(
 
   for (let index = 0; index < sourceEpisodes.length; index += 1) {
     const entry = sourceEpisodes[index] || {};
+    // Un "0" esplicito è una special che nessuno può chiedere (`parsePositiveInt`
+    // richiede > 0) e che, ripiegando su index+1, collideva con l'episodio 1.
+    if (entry.num != null && Number(entry.num) === 0) continue;
     const numRaw = Number.parseInt(String(entry.num ?? index + 1), 10);
     const num = Number.isFinite(numRaw) && numRaw > 0 ? numRaw : index + 1;
     const episodeId = parsePositiveInt(entry.episodeId ?? entry.id) ?? null;

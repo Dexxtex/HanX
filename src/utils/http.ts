@@ -15,6 +15,12 @@ export async function sendHtmlResponse(req: Request, res: Response, html: string
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('Vary', 'Accept-Encoding');
+    // La pagina tiene chiavi API e password nel DOM: niente frame, niente base
+    // riscritta, niente plugin. Le direttive su script/stile restano fuori
+    // perché la landing usa script inline.
+    res.setHeader('Content-Security-Policy', "frame-ancestors 'none'; base-uri 'none'; object-src 'none'");
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
 
     const acceptsGzip = /\bgzip\b/.test(String(req.headers['accept-encoding'] || ''));
     if (!acceptsGzip || Buffer.byteLength(html) < GZIP_MIN_BYTES) {

@@ -20,6 +20,7 @@ import { AnimeUnityProvider } from './providers/animeunity-provider.js';
 import { dispatchRequest } from './providers/registry.js';
 import { collectProviderStreams } from './stream.js';
 import { providerRequestStore } from './providers/anime-core/fetch-resource.js';
+import { cooldownSnapshot } from './providers/anime-core/net-policy.js';
 import { providerLabel } from './utils/unifiedNames.js';
 import { landingTemplate } from './landingPage.js';
 import { toNumericId, parseRequestId } from './mapping/request.js';
@@ -58,7 +59,7 @@ function sortStreamsByPriority(streams: { url?: string; title?: string }[]): voi
 // ================= MANIFEST BASE (restored) =================
 const baseManifest: Manifest = {
     id: "org.stremio.hanx",
-    version: "1.1.35",
+    version: "1.1.36",
     name: "HanX",
     description: "HanX addon dedicato ad AnimeUnity, AnimeSaturn e AnimeWorld",
     types: ["movie", "series", "anime"],
@@ -169,14 +170,21 @@ const PROVIDER_CACHE_DISABLED: boolean = (() => {
 // provider nuovo che dimentica il quinto argomento blocca `Promise.all` e la
 // risposta non parte mai.
 const PROVIDER_TIMEOUT_MS = 30000;
-const _providerStreamCache = new Map<string, { streams: Stream[]; ts: number }>();
+// Una risposta vuota non è un guasto: è "questo titolo non c'è". Cacharla per
+// pochi minuti evita che ogni play ripaghi il fan-out intero (3 host x 3-4 hop).
+// Corto di proposito: un titolo appena aggiunto al sito deve comparire subito.
+const PROVIDER_NEGATIVE_TTL_MS = (() => {
+    const parsed = Number.parseInt(process.env.PROVIDER_NEGATIVE_TTL_MS || '', 10);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : 90000;
+})();
+const _providerStreamCache = new Map<string, { streams: Stream[]; ts: number; ttl: number }>();
 
 function _providerCacheGet(type: string, id: string, configDigest: string): any[] | null {
     if (PROVIDER_CACHE_DISABLED) return null;
     const k = providerCacheKey(type, id, configDigest);
     const e = _providerStreamCache.get(k);
     if (!e) return null;
-    if (Date.now() - e.ts > PROVIDER_CACHE_TTL_MS) {
+    if (Date.now() - e.ts > e.ttl) {
         _providerStreamCache.delete(k);
         return null;
     }
@@ -184,7 +192,9 @@ function _providerCacheGet(type: string, id: string, configDigest: string): any[
 }
 function _providerCacheSet(type: string, id: string, configDigest: string, streams: any[]): void {
     if (PROVIDER_CACHE_DISABLED) return;
-    if (!Array.isArray(streams) || streams.length === 0) return; // never cache empty results
+    if (!Array.isArray(streams)) return;
+    const ttl = streams.length === 0 ? PROVIDER_NEGATIVE_TTL_MS : PROVIDER_CACHE_TTL_MS;
+    if (ttl <= 0) return;
     const k = providerCacheKey(type, id, configDigest);
     // Flatten cached streams to break V8 sliced-string retention of upstream
     // HTML. Without this, Stream.title/url often hold sliced-string views of
@@ -207,13 +217,14 @@ function _providerCacheSet(type: string, id: string, configDigest: string, strea
             return out;
         });
     }
-    _providerStreamCache.set(k, { streams: toStore, ts: Date.now() });
+    _providerStreamCache.delete(k);
+    _providerStreamCache.set(k, { streams: toStore, ts: Date.now(), ttl });
     debug(3, 'Addon/Cache', 'store', { type, id, streams: toStore.length });
     // Bounded LRU-ish: when over limit, drop expired first, then oldest.
     if (_providerStreamCache.size > PROVIDER_CACHE_MAX_ENTRIES) {
         const now = Date.now();
         for (const [key, val] of _providerStreamCache) {
-            if (now - val.ts > PROVIDER_CACHE_TTL_MS) _providerStreamCache.delete(key);
+            if (now - val.ts > val.ttl) _providerStreamCache.delete(key);
         }
         if (_providerStreamCache.size > PROVIDER_CACHE_MAX_ENTRIES) {
             const keys = Array.from(_providerStreamCache.keys()).slice(0, _providerStreamCache.size - PROVIDER_CACHE_MAX_ENTRIES);
@@ -247,6 +258,14 @@ export function createBuilder() {
                 if (type === 'serie') normalizedType = 'series';
                 // Use normalized type for all downstream logic
                 type = normalizedType;
+
+                // `type` è un segmento URL e finisce nella chiave della cache del
+                // fan-out: senza il confronto col manifest, ogni variante inventata
+                // crea una chiave nuova e rifà le richieste ai tre siti.
+                if (!baseManifest.types.includes(normalizedType)) {
+                    debug(2, 'Addon', 'tipo non dichiarato nel manifest', { type: normalizedType });
+                    return { streams: [] };
+                }
 
                 const requestStarted = Date.now();
                 debug(1, 'Addon', 'stream request', { type: normalizedType, id });
@@ -293,8 +312,12 @@ export function createBuilder() {
                     config.easyProxyUrl,
                     process.env.EASYPROXY_URL
                 );
-                // La password del server si usa solo se il proxy attivo è quello del server:
-                // un proxy personalizzato dell'utente usa solo la propria password (mai quella del server).
+                // La password del server si usa quando il proxy attivo è quello del server:
+                // un proxy personalizzato dell'utente usa solo la propria password.
+                // Non è un confine di sicurezza: `EASYPROXY_URL` è pubblicato in chiaro
+                // sulla landing, quindi chi legge `/` può chiedere lo stesso proxy e
+                // ottenere la password del server. Per tenerla privata va tolto il
+                // fallback, non cambiato questo confronto.
                 const isServerProxy = Boolean(
                     easyProxyUrl &&
                     process.env.EASYPROXY_URL &&
@@ -361,6 +384,9 @@ export function createBuilder() {
                     const _cachedStreams = _providerCacheGet(normalizedType, id, _providerConfigSig);
                     if (_cachedStreams) {
                         debug(2, 'Addon', 'provider cache hit', { type: normalizedType, id, streams: _cachedStreams.length });
+                        // Anche la cache hit è un esito: senza questa riga il caso
+                        // "nessuno stream" dalla cache negativa spariva dai log.
+                        console.log(`[stream] ${normalizedType}/${id} → ${_cachedStreams.length} stream in ${Date.now() - requestStarted}ms (cache)`);
                         return { streams: _cachedStreams };
                     }
                     debug(3, 'Addon', 'provider cache miss', { type: normalizedType, id });
@@ -419,8 +445,10 @@ export function createBuilder() {
                         const startedAt = Date.now();
                         debug(2, 'Provider', 'start', name);
                         // Lo store vive quanto il provider-run: fetchResource marca
-                        // `failed` quando una fetch provider-site fallisce.
-                        const store = { failed: false };
+                        // `failed` quando una fetch provider-site fallisce, e legge
+                        // `signal` per annullare le fetch rimaste in coda.
+                        const controller = new AbortController();
+                        const store: { failed: boolean; signal?: AbortSignal } = { failed: false, signal: controller.signal };
                         try {
                             let result: { streams: Stream[] } | undefined;
 
@@ -428,7 +456,12 @@ export function createBuilder() {
                                 // Provider con timeout personalizzato
                                 let timer: ReturnType<typeof setTimeout> | undefined;
                                 const timeoutPromise = new Promise<{ streams: Stream[] }>((_, reject) => {
-                                    timer = setTimeout(() => reject(new Error(`${name} timeout after ${timeoutMs}ms`)), timeoutMs);
+                                    timer = setTimeout(() => {
+                                        // Il race senza abort lasciava l'handler a girare:
+                                        // annullarlo è il punto, non un dettaglio.
+                                        controller.abort();
+                                        reject(new Error(`${name} timeout after ${timeoutMs}ms`));
+                                    }, timeoutMs);
                                 });
                                 try {
                                     result = await Promise.race([providerRequestStore.run(store, () => handler()), timeoutPromise]);
@@ -450,8 +483,13 @@ export function createBuilder() {
                             }
                         } catch (error) {
                             providerFailure = true;
-                            console.error(`🚨 ${name} error:`, error);
-                            debug(1, 'Provider', 'failed', { name, ms: Date.now() - startedAt, error: (error as any)?.message || String(error) });
+                            const message = (error as any)?.message || String(error);
+                            const ms = Date.now() - startedAt;
+                            // Un timeout è atteso e non merita uno stack: i campi sì,
+                            // sempre. Prima i campi utili stavano in un debug spento
+                            // e in produzione restava solo lo stack.
+                            if (/timeout after \d+ms/.test(message)) console.warn(`🚨 ${name} timeout (${ms}ms): ${message}`);
+                            else console.error(`🚨 ${name} error (${ms}ms): ${message}`, error);
                         }
                         return [];
                     };
@@ -509,12 +547,17 @@ export function createBuilder() {
                     // Fallback to unsorted streams if provider sorting fails
                 }
 
-                debug(1, 'Addon', 'stream response', {
-                    type: normalizedType,
-                    id,
-                    streams: allStreams.length,
-                    ms: Date.now() - requestStarted,
-                });
+                // Una riga per richiesta, sempre: senza, "non vedo stream per X"
+                // non lascia traccia né dell'arrivo né dell'esito.
+                console.log(`[stream] ${normalizedType}/${id} → ${allStreams.length} stream in ${Date.now() - requestStarted}ms`);
+                // Zero stream con un cooldown attivo non è "titolo assente": va detto,
+                // altrimenti l'operatore cerca un problema di matching che non c'è.
+                if (allStreams.length === 0) {
+                    const cooling = cooldownSnapshot();
+                    if (cooling.length) {
+                        console.warn(`[stream] nessuno stream e ${cooling.length} uscite in cooldown: ${cooling.map((c) => c.exitKey).join(', ')}`);
+                    }
+                }
                 // Cache the fan-out result for repeat plays, but never when a
                 // provider failed or timed out: a partial list would hide it for
                 // 5 minutes.
@@ -580,6 +623,9 @@ app.get('/status.json', (_req: Request, res: ExpressResponse) => {
         // Il catalogo ha la stessa soglia di "vecchio" del mapping: due pipeline,
         // una sola idea di quando un file è da rifare.
         catalog: getCatalogStatus(MAPPING_STALE_MS),
+        // Quale uscita è in pausa e fino a quando: senza, "siamo sotto WAF?"
+        // si poteva solo dedurre da righe d'errore a livello 2.
+        cooldown: cooldownSnapshot(),
         cache: {
             entries: _providerStreamCache.size,
             maxEntries: PROVIDER_CACHE_MAX_ENTRIES,

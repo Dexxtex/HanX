@@ -30,6 +30,7 @@ import {
 import {
   createCaches,
   fetchResource,
+  markProviderFetchFailure,
   getProviderUrl,
   normalizeEpisodesList,
   normalizeRequestedEpisode,
@@ -152,7 +153,7 @@ export async function auFetchResource(url: string, providerCaches: any, options:
       return result;
     } catch (error: any) {
       lastError = error;
-      console.warn(`[AnimeUnity][Proxy] fetchResource ${attempt.label} FALLITO: ${error?.message || error} <- ${url}`);
+      console.warn(`[AnimeUnity][Proxy] fetchResource ${attempt.label} FALLITO: ${error?.message || error} <- ${redactUrl(url)}`);
     }
   }
   throw lastError;
@@ -260,7 +261,15 @@ let searchCooldownUntil = 0;
 
 async function searchEndpoint(query: string, _dubbed = false): Promise<AnimeUnitySearchResult[]> {
   if (isUnityCoBase()) return searchUnityCo(query);
-  if (searchCooldownUntil > Date.now()) return [];
+  if (searchCooldownUntil > Date.now()) {
+    // Il cooldown locale azzera la ricerca per 60 s: senza questa riga il log a
+    // valle diceva "Nessun risultato trovato", cioè la causa sbagliata.
+    console.warn(`[AnimeUnity] Ricerca in pausa per 429 (${Math.ceil((searchCooldownUntil - Date.now()) / 1000)}s residui): nessuna richiesta inviata`);
+    // La ricerca non è avvenuta: non è "questo titolo non c'è", quindi il vuoto
+    // non deve finire nella cache negativa (90 s > cooldown 60 s).
+    markProviderFetchFailure();
+    return [];
+  }
 
   let payload: any;
   try {
@@ -289,6 +298,10 @@ async function searchEndpoint(query: string, _dubbed = false): Promise<AnimeUnit
       // Un blocco WAF o un timeout non sono "titolo non trovato": senza questa
       // riga il sintomo a valle era "Nessun risultato trovato per il titolo".
       console.warn(`[AnimeUnity] Ricerca fallita (${/\b403\b/.test(message) ? '403 WAF' : 'timeout'}): ${message}`);
+    } else if (/cooldown/i.test(message)) {
+      // Rifiuto del cooldown condiviso (net-policy): nessuna richiesta inviata.
+      // Per 10 minuti dopo un 403 la ricerca sembrerebbe vuota senza dirlo.
+      console.warn(`[AnimeUnity] Ricerca rifiutata dal cooldown: ${message}`);
     }
     return [];
   }
@@ -511,7 +524,11 @@ async function getStreamData(
       ttlMs: TTL.streamPage,
       cacheKey: `au-ep:${animeId}:${episodeId}`,
       timeoutMs: FETCH_TIMEOUT,
-    }).catch(() => '');
+    }).catch((error: any) => {
+      // Senza questa riga un 403/timeout diventava "nessuno stream" senza traccia.
+      console.warn('[AnimeUnity] pagina episodio non recuperata:', error?.message || String(error));
+      return '';
+    });
 
     const candidates = parseEpisodeServers(String(html || ''), episodeId)
       .filter((server) => server.type === language);
@@ -543,7 +560,10 @@ async function getUnityCoStreamData(
       ttlMs: TTL.streamPage,
       cacheKey: `au-co-ep:${animeId}:${episodeId}`,
       timeoutMs: FETCH_TIMEOUT,
-    }).catch(() => '') || '');
+    }).catch((error: any) => {
+      console.warn('[AnimeUnity] pagina episodio (.co) non recuperata:', error?.message || String(error));
+      return '';
+    }) || '');
 
     const raw = html.match(/\bembed_url="([^"]+)"/)?.[1];
     if (!raw) return empty;
@@ -742,7 +762,10 @@ export class AnimeUnityProvider {
         ttlMs: TTL.animePage,
         cacheKey: `au-anime:${normalizedPath}`,
         timeoutMs: FETCH_TIMEOUT,
-      }).catch(() => '') || '');
+      }).catch((error: any) => {
+        console.warn('[AnimeUnity] pagina scheda non recuperata:', error?.message || String(error));
+        return '';
+      }) || '');
 
       if (!html) return [];
 
@@ -1166,7 +1189,10 @@ export class AnimeUnityProvider {
             ttlMs: TTL.animePage,
             cacheKey: `au-anime:${subPath}`,
             timeoutMs: FETCH_TIMEOUT,
-          }).catch(() => '') || '');
+          }).catch((error: any) => {
+            debug(1, 'AnimeUnity', 'scheda SUB non recuperata per il blocco ITA', { error: error?.message || String(error) });
+            return '';
+          }) || '');
           const itaPath = findUnityCoItaSibling(html, subPath);
           if (itaPath) {
             const cleanName = subVersion.version.name

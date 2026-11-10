@@ -110,7 +110,9 @@ export async function getTmdbSummaryFromImdbId(
   preferredType?: 'movie' | 'tv'
 ): Promise<TmdbFindSummary | null> {
   if (!tmdbApiKey) return null;
-  const findUrl = `${TMDB_API_BASE_URL}/find/${imdbId}?api_key=${tmdbApiKey}&external_source=imdb_id`;
+  // L'id arriva dall'URL di Stremio già decodificato: senza encoding un
+  // `tt1/../../x` riscrive il path TMDB e sposta la api_key su un altro endpoint.
+  const findUrl = `${TMDB_API_BASE_URL}/find/${encodeURIComponent(imdbId)}?api_key=${encodeURIComponent(tmdbApiKey)}&external_source=imdb_id`;
   const cacheKey = `${imdbId}|${preferredType || ''}|${tmdbApiKey}`;
   const cachedResult = tmdbFindCache.get(cacheKey);
   if (cachedResult) {

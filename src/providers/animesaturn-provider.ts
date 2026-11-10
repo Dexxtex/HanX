@@ -5,7 +5,7 @@ import { normalizeBool } from '../config.js';
 import { getDomain } from '../utils/domains.js';
 import { debug, redactUrl } from '../utils/logger.js';
 import { decodeHtmlEntities } from '../utils/html.js';
-import { checkIsAnimeById, applyUniversalAnimeTitleNormalization } from '../utils/animeGate.js';
+import { applyUniversalAnimeTitleNormalization } from '../utils/animeGate.js';
 import { buildEasyProxyHlsUrl, buildEasyProxyStreamUrl } from '../utils/easyproxy.js';
 import { lookupTitle, REVIEW_SCORE, type CatalogQueryOptions } from '../catalog/matcher.js';
 import {
@@ -27,7 +27,6 @@ import {
   normalizeHostLabel,
   inferSourceTag,
   BLOCKED_DOMAINS,
-  getEnglishTitleFromAnyId,
   episodeTag,
   italianSeasonQuery,
   pickBestScored,
@@ -39,11 +38,7 @@ import {
   type TitleResolutionContext,
 } from './anime-core/index.js';
 import {
-  resolveMappingRequest,
-  resolveAnimeTarget,
   resolveSeasonFallbackTitle,
-  getKitsuTitle,
-  getTvdbTitle,
   type MappingRequest,
 } from '../mapping/index.js';
 
@@ -403,7 +398,7 @@ interface ParsedSaturnPage {
   episodes: { num: number; token: string; episodePath: string | null; watchUrl: string | null }[];
 }
 
-function parseAnimeSaturnPage(html: string, fallback: { animePath?: string | null; title?: string | null } = {}): ParsedSaturnPage {
+export function parseAnimeSaturnPage(html: string, fallback: { animePath?: string | null; title?: string | null } = {}): ParsedSaturnPage {
   const pageTitle = getFirstTagText(html, 'h1') || getMetaContent(html, 'og:title') || getFirstTagText(html, 'title') || null;
   const title = sanitizeAnimeTitle(fallback.title) || sanitizeAnimeTitle(pageTitle) || null;
   const animePath = normalizeAnimeSaturnPath(fallback.animePath || null);
@@ -424,6 +419,20 @@ function parseAnimeSaturnPage(html: string, fallback: { animePath?: string | nul
       watchUrl: null,
     });
   });
+
+  // Un anchor `/episode/` della sidebar è di un'altra opera: senza il confronto
+  // dello slug diventa l'episodio N di questa scheda. Se nessuno combacia
+  // (slug diversi fra scheda ed episodio) si tiene tutto, come prima.
+  const animeSlug = animePath ? animePath.replace(/^\/anime\//i, '') : '';
+  if (animeSlug) {
+    const sameWork = episodes.filter(
+      (entry) => String(entry.episodePath || '').replace(/^\/episode\//i, '').split('/')[0] === animeSlug
+    );
+    if (sameWork.length) {
+      episodes.length = 0;
+      episodes.push(...sameWork);
+    }
+  }
 
   if (episodes.length === 0) {
     const watchUrls = extractWatchUrlsFromHtml(html);
@@ -452,6 +461,8 @@ function normalizeEpisodesList(sourceEpisodes: any[] = []): { num: number; token
   const seen = new Set<string>();
   for (let index = 0; index < sourceEpisodes.length; index += 1) {
     const entry = sourceEpisodes[index] || {};
+    // Vedi helpers.normalizeEpisodesList: un "0" esplicito collideva con l'ep 1.
+    if (entry.num != null && Number(entry.num) === 0) continue;
     const numRaw = Number.parseInt(String(entry.num !== undefined && entry.num !== null ? entry.num : index + 1), 10);
     const num = Number.isFinite(numRaw) && numRaw > 0 ? numRaw : index + 1;
     const episodePath = normalizeEpisodePath(entry.episodePath || entry.href || entry.token || null);

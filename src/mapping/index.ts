@@ -92,13 +92,23 @@ function isRecord(value: unknown): value is Record<string, any> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+/** Solo le entry che sono oggetti: un `null` in JSON faceva lanciare buildKitsuAlt. */
+function recordsOnly(value: unknown): Record<string, any> {
+  const out: Record<string, any> = {};
+  if (!isRecord(value)) return out;
+  for (const [key, entry] of Object.entries(value)) {
+    if (isRecord(entry)) out[key] = entry;
+  }
+  return out;
+}
+
 function normalizeIndex(raw: unknown): AnimeMappingIndex {
   if (!isRecord(raw) || raw.version !== MAPPING_SCHEMA_VERSION) return EMPTY_INDEX;
   return {
     version: raw.version,
     generatedAt: typeof raw.generatedAt === 'string' ? raw.generatedAt : null,
-    series: isRecord(raw.series) ? raw.series : {},
-    movies: isRecord(raw.movies) ? raw.movies : {},
+    series: recordsOnly(raw.series),
+    movies: recordsOnly(raw.movies),
   };
 }
 
@@ -179,14 +189,21 @@ function buildKitsuAlt(index: AnimeMappingIndex): Map<string, { titleAlt: string
     raw.set(kitsuId, current);
   };
   for (const entry of Object.values(index.series)) {
-    const entryTitleIt = entry.titleIt || '';
-    for (const [seasonKey, ranges] of Object.entries(entry.seasons || {})) {
+    if (!isRecord(entry)) continue;
+    const entryTitleIt = typeof entry.titleIt === 'string' ? entry.titleIt : '';
+    const seasons = isRecord(entry.seasons) ? entry.seasons : {};
+    for (const [seasonKey, ranges] of Object.entries(seasons)) {
+      if (!Array.isArray(ranges)) continue;
       const season = Number(seasonKey);
-      for (const range of ranges) add(String(range.kitsuId || ''), Number.isFinite(season) ? season : null, range.titleAlt || '', entryTitleIt);
+      for (const range of ranges) {
+        if (!isRecord(range)) continue;
+        add(String(range.kitsuId || ''), Number.isFinite(season) ? season : null, String(range.titleAlt || ''), entryTitleIt);
+      }
     }
   }
   for (const entry of Object.values(index.movies)) {
-    add(String(entry.kitsuId || ''), null, entry.titleAlt || '', entry.titleIt || '');
+    if (!isRecord(entry)) continue;
+    add(String(entry.kitsuId || ''), null, String(entry.titleAlt || ''), String(entry.titleIt || ''));
   }
   // Stagione utile solo se la entry sta in una sola stagione: split cour con
   // numeri diversi non danno una risposta affidabile.
@@ -201,7 +218,18 @@ function buildKitsuAlt(index: AnimeMappingIndex): Map<string, { titleAlt: string
   return map;
 }
 
-function loadIndex(): AnimeMappingIndex {  const filePath = indexFilePath();
+function loadIndex(): AnimeMappingIndex {
+  try {
+    return loadIndexUncached();
+  } catch (e) {
+    // Un indice malformato non deve far cadere ogni richiesta (e `getMappingVersion`
+    // e' chiamato in modo sincrono all'avvio): zero mapping e una riga di log.
+    debug(1, 'Mapping', 'indice illeggibile, uso il vuoto', { error: (e as any)?.message || String(e) });
+    return EMPTY_INDEX;
+  }
+}
+
+function loadIndexUncached(): AnimeMappingIndex {  const filePath = indexFilePath();
   const overridesFile = overridesPath();
   const mtimeMs = statMtime(filePath);
   const overridesMtimeMs = statMtime(overridesFile);

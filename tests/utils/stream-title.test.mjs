@@ -62,3 +62,29 @@ test('unifyStreams: nessun dangling bracket con [SUB ITA] e deduplica URL identi
   assert.equal(first.title.split('\n')[0], '🎞️ Titolo ▪ S01E01');
   assert.equal(rest.length, 0);
 });
+
+// Regressione 1.1.10: prima il default era `isSub ? 'SUB' : 'ITA'`, quindi
+// "CR" (nessun marcatore sub) usciva ITA. Invertendo il default a
+// `isIta ? 'ITA' : 'SUB'` il doppiaggio Crunchyroll di AnimeWorld è diventato
+// SUB, con il bingeGroup dei SUB.
+test('unifyStreams: CR è doppiaggio ITA, non SUB', () => {
+  const [out] = unifyStreams([{
+    title: 'Solo Leveling ▪ CR ▪ S1E1',
+    url: 'https://cdn.example/s1e1.mp4',
+  }], '🌍 Anime World');
+
+  assert.equal(out.title, '🎞️ Solo Leveling ▪ S1E1\n🎧 ITA\n🛡️ Proxy (OFF)');
+  assert.equal(out.behaviorHints.bingeGroup, 'animeworld-std-ita');
+});
+
+// Il fix del CR non deve riaprire il caso che 1.1.10 ha chiuso: un titolo
+// senza marcatore resta SUB.
+test('unifyStreams: senza marcatore resta SUB', () => {
+  const [out] = unifyStreams([{
+    title: 'Solo Leveling ▪ S1E1',
+    url: 'https://cdn.example/s1e1.mp4',
+  }], '🌍 Anime World');
+
+  assert.equal(out.title, '🎞️ Solo Leveling ▪ S1E1\n🎧 SUB\n🛡️ Proxy (OFF)');
+  assert.equal(out.behaviorHints.bingeGroup, 'animeworld-std-sub');
+});

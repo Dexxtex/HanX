@@ -1,8 +1,8 @@
 import fs from 'node:fs';
 import { debug } from '../utils/logger.js';
-import { catalogFile, catalogDir } from './matcher.js';
+import { catalogFile, catalogDir, recordCatalogAttempt } from './matcher.js';
 import { writeJsonAtomic } from '../utils/fs.js';
-import { CATALOG_SCHEMA_VERSION } from './sync.js';
+import { CATALOG_SCHEMA_VERSION, CATALOG_SITES } from './sync.js';
 
 /** Controllo ogni 6 ore, download al massimo una volta al giorno. */
 export const CATALOG_REFRESH_INTERVAL_MS = 6 * 60 * 60 * 1000;
@@ -34,17 +34,26 @@ export async function refreshCatalogFromUrl(): Promise<void> {
     if (body.length > MAX_BYTES) throw new Error(`payload troppo grande (${body.length} byte)`);
     const data = JSON.parse(body);
     const sites = data?.sites || {};
-    if (!Array.isArray(sites.saturn) && !Array.isArray(sites.world) && !Array.isArray(sites.unity)) {
-      throw new Error('schema non riconosciuto');
+    // Tutti e tre, non "almeno uno": il matcher legge i tre siti e un sito
+    // non-array fa lanciare `entries.filter` a ogni lookup, cioe' il provider
+    // diventa muto invece di ricadere sulla ricerca di rete.
+    for (const site of CATALOG_SITES) {
+      const list = sites[site];
+      if (!Array.isArray(list)) throw new Error(`schema non riconosciuto: ${site} non e' un array`);
+      // Una scheda senza `title` fa costruire un indice vuoto (o lancia): un
+      // `catalogs.json` scambiato per `catalog-titles.json` si ferma qui.
+      if (!list.every((entry: any) => entry && typeof entry === 'object' && typeof entry.title === 'string')) {
+        throw new Error(`schema non riconosciuto: scheda malformata in ${site}`);
+      }
     }
     // Un file di formato vecchio verrebbe accettato e servirebbe zero hit in
-    // silenzio fino alla scadenza del TTL. "Assente" vale 1 per una release.
-    const version = Number(data?.version ?? 1);
-    if (version !== CATALOG_SCHEMA_VERSION) {
-      throw new Error(`versione di schema non supportata: ${version} (attesa ${CATALOG_SCHEMA_VERSION})`);
+    // silenzio fino alla scadenza del TTL: la versione deve esserci.
+    if (data?.version !== CATALOG_SCHEMA_VERSION) {
+      throw new Error(`versione di schema non supportata: ${data?.version} (attesa ${CATALOG_SCHEMA_VERSION})`);
     }
     fs.mkdirSync(catalogDir(), { recursive: true });
     writeJsonAtomic(target, data);
+    recordCatalogAttempt(null);
     debug(1, 'Catalog', 'catalogo aggiornato da CATALOG_URL', {
       saturn: sites.saturn?.length || 0,
       world: sites.world?.length || 0,
@@ -52,7 +61,11 @@ export async function refreshCatalogFromUrl(): Promise<void> {
       generatedAt: data.generatedAt,
     });
   } catch (err: any) {
-    debug(1, 'Catalog', 'download del catalogo fallito, resta il file locale', { error: err?.message || String(err) });
+    const message = err?.message || String(err);
+    // Non basta un debug: con CATALOG_URL giù il primo sintomo era "ogni titolo
+    // fa ricerca di rete", indistinguibile da un catalogo semplicemente vecchio.
+    recordCatalogAttempt(message);
+    console.warn('[Catalog] download del catalogo fallito, resta il file locale:', message);
   }
 }
 

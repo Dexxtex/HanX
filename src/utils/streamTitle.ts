@@ -26,24 +26,23 @@ export function unifyStreams(original: Stream[], providerLabelName: string): Str
         for (let i = 0; i < 3; i++) baseLine = baseLine.replace(/^\s*\[[^\]]+\]\s*/, '').trim();
         // Strip language markers or bullet language artifacts from base line
         baseLine = baseLine
-            .replace(/\s*[•▪]\s*\[?(?:SUB\s*ITA|SUB|ITA)\]?/ig, '')
+            .replace(/\s*[•▪]\s*\[?(?:SUB\s*ITA|SUB|ITA|CR)\]?/ig, '')
             .replace(/\s*\[(?:SUB\s*ITA|SUB|ITA)\]/ig, '')
             .replace(/\s*\b(ITA|SUB)\b/ig, '')
-            .replace(/\s*•\s*\[SUB ITA\]/ig, '')
             .replace(/\s{2,}/g, ' ') // collapse spaces
             .trim();
         // Cleanup universale aggiuntivo: rimuovi eventuali [ITA]/[SUB] residui attaccati senza spazio e lock icon per qualsiasi provider
         baseLine = baseLine
             .replace(/\[(?:SUB\s*ITA|SUB|ITA)\]/ig, '')
-            .replace(/\[ITA\]/ig, '')
-            .replace(/\[SUB\]/ig, '')
             .replace(/🔒|🔓FHD?|🔓/g, '')
             .replace(/\s{2,}/g, ' ')
             .replace(/\s+$/, '')
             .trim();
         // Language detection: verifica prima 'sub', poi 'ita'.
         const isSub = /\b(?:sub|sub[-_ ]?ita)\b|\[sub(?:[-_ ]?ita)?\]/i.test(rawTitle);
-        const isIta = !isSub && (/\bita\b|\[ita\]/i.test(rawTitle) || /\bdub\b/i.test(rawTitle));
+        // "CR" è il doppiaggio Crunchyroll di AnimeWorld: stessa semantica di
+        // languageOf in catalog/matcher.ts, che lo legge come CR ITA.
+        const isIta = !isSub && (/\b(?:ita|cr)\b|\[(?:ita|cr)\]/i.test(rawTitle) || /\bdub\b/i.test(rawTitle));
         // Proxy detection (broadened):
         //  - /proxy/ path segment
         //  - presence of api_password= (EasyProxy wrapper)

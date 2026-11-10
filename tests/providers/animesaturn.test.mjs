@@ -101,3 +101,33 @@ test('le entità numeriche con lo zero davanti vengono decodificate', () => {
   // Doppia codifica: si decodifica una volta sola, non fino a esaurimento.
   assert.equal(decodeHtmlEntities('&amp;#039;'), '&#039;');
 });
+
+const { parseAnimeSaturnPage } = await import('../../dist/providers/animesaturn-provider.js');
+
+// Nella pagina di una scheda ci sono anchor `/episode/` di altre opere
+// (sidebar, correlati). Senza il confronto dello slug ognuno diventava
+// l'episodio N di questa scheda e `pickEpisodeEntry` lo serviva al posto di
+// quello giusto.
+test('un anchor /episode/ di un altra opera non diventa un episodio di questa', () => {
+  const html = [
+    '<a href="/episode/test-anime/ep-1">Episodio 1</a>',
+    '<a href="/episode/test-anime/ep-2">Episodio 2</a>',
+    '<a href="/episode/altra-opera/ep-9">Altro</a>',
+  ].join('\n');
+
+  const page = parseAnimeSaturnPage(html, { animePath: '/anime/test-anime' });
+
+  assert.deepEqual(page.episodes.map((entry) => entry.num), [1, 2]);
+  assert.deepEqual(
+    page.episodes.map((entry) => entry.episodePath),
+    ['/episode/test-anime/ep-1', '/episode/test-anime/ep-2']
+  );
+});
+
+test('se nessuno slug combacia si tiene tutto: il filtro non svuota la lista', () => {
+  const html = '<a href="/episode/slug-diverso/ep-1">Episodio 1</a>';
+
+  const page = parseAnimeSaturnPage(html, { animePath: '/anime/test-anime' });
+
+  assert.equal(page.episodes.length, 1, 'meglio gli episodi di prima che zero');
+});

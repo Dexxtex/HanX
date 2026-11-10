@@ -17,6 +17,7 @@ export {
 // Fetch with cache + inflight dedup
 export {
   fetchResource,
+  markProviderFetchFailure,
   fetchWithTimeout,
   DEFAULT_USER_AGENT,
   DEFAULT_FETCH_TIMEOUT,
@@ -61,7 +62,6 @@ export {
   isAbortOrTimeoutError,
   parsePositiveInt,
   normalizeRequestedEpisode,
-  normalizeRequestedSeason,
   parseEpisodeNumber,
   toAbsoluteUrl,
   normalizePlayableMediaUrl,

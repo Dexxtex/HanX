@@ -18,7 +18,7 @@ import {
   resolveMappingRequest,
   type MappingRequest,
 } from '../../mapping/index.js';
-import { getKitsuTitle, getTvdbTitle } from '../../mapping/live.js';
+import { getKitsuTitle, getKitsuStartDate, getTvdbTitle } from '../../mapping/live.js';
 import { getEnglishTitleFromAnyId } from './english-title.js';
 import type { StreamForStremio } from '../../types/animeunity.js';
 
@@ -36,7 +36,9 @@ export interface TitleResolutionContext {
     titleAlt?: string | null,
     titleIt?: string | null,
     titleItSeason?: number | null,
-    malId?: number | null
+    malId?: number | null,
+    /** Solo AnimeWorld: `startDate` di Kitsu per il ripiego per anno. */
+    kitsuStartDate?: string | null
   ) => Promise<{ streams: StreamForStremio[] }>;
   /** Ripiego per le serie non mappate: solo AnimeSaturn lo implementa. */
   handleUnmappedSeries?: (
@@ -124,6 +126,10 @@ export async function resolveKitsuRequest(
   }
   // L'id Kitsu non porta stagione: la fornisce l'indice insieme al titolo italiano.
   const target = await resolveAnimeTarget(request, ctx);
+  // `fd2d4ec` perse questo dato passando a resolve-title: il ripiego per anno di
+  // AnimeWorld non partiva più. Arriva come parametro, non come stato di istanza
+  // (il provider è un singleton: era un leak fra richieste).
+  const kitsuStartDate = await getKitsuStartDate(request.id);
   return ctx.handleTitleRequest(
     title,
     null,
@@ -131,7 +137,9 @@ export async function resolveKitsuRequest(
     request.isMovie,
     target?.titleAlt,
     target?.titleIt,
-    target?.titleItSeason
+    target?.titleItSeason,
+    undefined,
+    kitsuStartDate
   );
 }
 

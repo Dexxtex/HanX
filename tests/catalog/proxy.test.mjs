@@ -18,6 +18,13 @@ test('proxy: vuoto = nessun dispatcher, http e socks5 accettati, socks4 rifiutat
 test('proxy: le credenziali sono redatte', () => {
   assert.equal(redactProxy('fetch failed verso http://user:pass@host:8000/x'), 'fetch failed verso http://***@host:8000/x');
   assert.equal(redactProxy('nessuna credenziale'), 'nessuna credenziale');
+  // Una password con `@` spezzava la vecchia regex al primo `@` e ne lasciava
+  // leggibile la coda: `socks5://user:p@ss@host` diventava `//***@ss@host`.
+  assert.equal(
+    redactProxy('socks5://user:p@ss@host:1080'),
+    'socks5://***@host:1080',
+    'la password con @ non deve lasciare la coda leggibile'
+  );
 });
 
 /** Finto proxy SOCKS5 (senza autenticazione) che apre un tunnel verso il target. */

@@ -495,17 +495,17 @@ test('getMappingStatus: indice con entry malformata non lancia (fail-open AC6)',
   process.env.ANIME_MAPPING_FILE = malformed;
   resetMappingCache();
   try {
-    // buildKitsuAlt lancia su entry null: lo status resta totale e torna come
-    // per l'indice assente, così la landing non eredita il 500.
-    assert.deepEqual(getMappingStatus(), {
-      schemaVersion: 1,
-      generatedAt: null,
-      series: 0,
-      movies: 0,
-      ageMs: null,
-      signature: 'unavailable',
-      stale: false,
-    });
+    // La entry null viene scartata e il resto dell'indice resta servibile.
+    // Prima buildKitsuAlt lanciava: lo status tornava "unavailable" (una
+    // toppa), ma getMappingVersion() — sincrono nel callback di listen — e
+    // ogni hasMappedSeries lanciavano davvero, quindi l'addon era muto.
+    const status = getMappingStatus();
+    assert.equal(status.schemaVersion, 1);
+    assert.equal(status.series, 0, 'la sola entry presente era null');
+    assert.equal(status.movies, 0);
+    assert.equal(status.generatedAt, JSON.parse(fs.readFileSync(malformed, 'utf8')).generatedAt);
+    assert.match(status.signature, /^[0-9a-f]{16}$/);
+    assert.doesNotThrow(() => getMappingVersion());
   } finally {
     if (originalFile === undefined) delete process.env.ANIME_MAPPING_FILE;
     else process.env.ANIME_MAPPING_FILE = originalFile;
@@ -895,4 +895,41 @@ test('refresh mapping interval is shared between mapping and addon', () => {
   );
   assert.ok(!prose.includes('lo ricontrolla ogni 24 ore'), 'README must not call the 24h download a check');
   assert.ok(!prose.includes('scarica ogni 6 ore'), 'README must not claim a 6h download');
+});
+
+// Un indice esterno con una entry `null` (o `seasons`/`ranges` null) faceva
+// lanciare buildKitsuAlt dentro loadIndex: nessun try/catch, quindi ogni
+// richiesta rispondeva `{streams:[]}` per tutti e tre i provider, e
+// getMappingVersion() — sincrono nel callback di listen — uccideva il processo.
+test('un indice con entry null non fa cadere le richieste', () => {
+  const broken = path.join(fixtureDir, 'anime-seasons-broken.json');
+  fs.writeFileSync(broken, JSON.stringify({
+    version: 1,
+    generatedAt: '2026-01-01T00:00:00.000Z',
+    series: {
+      'tvdb:1': null,
+      'tvdb:2': { title: 'Ok', seasons: { '1': null, '2': [null] } },
+      'tvdb:3': { title: 'Buona', seasons: { '1': [{ from: 1, kitsuId: '42', offset: 0, title: 'Buona', episodeCount: 3 }] } },
+    },
+    movies: { 'tmdb:1': null },
+  }));
+  const overridesFile = path.join(fixtureDir, 'overrides-empty-broken.json');
+  fs.writeFileSync(overridesFile, JSON.stringify({ series: {}, movies: {} }));
+  const savedFile = process.env.ANIME_MAPPING_FILE;
+  const savedOverrides = process.env.ANIME_MAPPING_OVERRIDES;
+  process.env.ANIME_MAPPING_FILE = broken;
+  process.env.ANIME_MAPPING_OVERRIDES = overridesFile;
+  resetMappingCache();
+  try {
+    const status = getMappingStatus();
+    // Le entry non-oggetto sono scartate: restano le due che sono record.
+    assert.equal(status.series, 2);
+    assert.equal(status.movies, 0);
+    assert.doesNotThrow(() => getMappingVersion());
+  } finally {
+    process.env.ANIME_MAPPING_FILE = savedFile;
+    if (savedOverrides === undefined) delete process.env.ANIME_MAPPING_OVERRIDES;
+    else process.env.ANIME_MAPPING_OVERRIDES = savedOverrides;
+    resetMappingCache();
+  }
 });

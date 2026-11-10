@@ -10,7 +10,10 @@ test('importare addon.js non avvia il server', async () => {
   const after = process._getActiveHandles().length;
 
   assert.equal(typeof mod.createBuilder, 'function', 'createBuilder deve essere esportata');
-  assert.ok(after - before < 3, `nessun handle di rete nuovo (${before} -> ${after})`);
+  // Esattamente zero: con `< 3` un `setInterval` armato all'import o un
+  // `app.listen` (un handle ciascuno) lasciavano il test verde, cioè proprio le
+  // due cose che questo file dichiara di impedire.
+  assert.equal(after - before, 0, `nessun handle di rete nuovo (${before} -> ${after})`);
 });
 
 test('createBuilder costruisce un builder senza toccare la rete', async () => {

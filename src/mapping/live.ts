@@ -158,6 +158,19 @@ export async function fetchKitsuAnime(kitsuId: string): Promise<KitsuAnimeEntry 
   });
 }
 
+/**
+ * `startDate` di Kitsu, per il ripiego per anno di AnimeWorld. Stessa cache di
+ * `getKitsuTitle`: la seconda chiamata non costa una richiesta.
+ */
+export async function getKitsuStartDate(kitsuId: string): Promise<string | null> {
+  if (!kitsuId) return null;
+  try {
+    return (await fetchKitsuAnime(kitsuId))?.startDate || null;
+  } catch {
+    return null;
+  }
+}
+
 export async function getKitsuTitle(kitsuId: string): Promise<string> {
   // Le entry mappate col solo TMDB non hanno kitsuId: nessuna chiamata a vuoto.
   if (!kitsuId) return '';

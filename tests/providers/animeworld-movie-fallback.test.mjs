@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
+// `fetch-resource` cattura `globalThis.fetch` all'import: lo stub va installato
+// PRIMA di importare il provider. Prima era assegnato dentro il test, quindi
+// non aveva effetto e quel caso parlava con i siti veri.
+let fetchBehavior = async () => { throw new Error('rete non stubata in questo test'); };
+globalThis.fetch = async (input) => fetchBehavior(input);
+
 const { AnimeWorldProvider } = await import('../../dist/providers/animeworld-provider.js');
 
 // Le card che il sito restituisce davvero cercando "Naruto Movie 3" (verificato
@@ -82,20 +88,19 @@ test('film dal catalogo: lo slug in un altra lingua non viene scartato', async (
 
   const PLAY = '<html><a data-id="tok1" data-episode-num="1" href="/play/quando-cera-marnie.W3Cwk/tok1">Ep 1</a></html>';
   const PLAYER = '<html>file: "https://cdn.example.test/marnie.mp4"</html>';
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = async (url) => {
+  const previous = fetchBehavior;
+  fetchBehavior = async (url) => {
     const href = String(url?.url || url);
     // La ricerca non deve trovare nulla: la scheda arriva solo dal catalogo.
     const body = href.includes('/filter?') ? '<html></html>' : href.includes('serverPlayer') ? PLAYER : PLAY;
     return new Response(body, { status: 200, headers: { 'content-type': 'text/html' } });
   };
   try {
-    const { AnimeWorldProvider } = await import('../../dist/providers/animeworld-provider.js');
     const p = new AnimeWorldProvider({ enabled: true, proxyUrl: '' });
     const out = await p.handleTitleRequest('When Marnie Was There', null, 1, true, 'Omoide no Marnie', "Quando c'era Marnie");
     assert.ok(out.streams.length > 0, 'la scheda del catalogo è stata scartata dal filtro slug');
   } finally {
-    globalThis.fetch = originalFetch;
+    fetchBehavior = previous;
     process.env.CATALOG_DIR = path.join(os.tmpdir(), 'hanx-test-catalog-vuoto');
   }
 });

@@ -17,6 +17,8 @@ const MAX_SEASON = 20;
 const FORMAT_ONLY = /\b(?:movie|film|ova|oav|oad|ona|special|specials|recap|pilot)\b/i;
 /** Un numero dopo questi token è la parte, non la stagione ("Dr. Stone 3 Part 2"). */
 const PART_MARKERS = new Set(['part', 'cour', 'chapter', 'volume', 'vol', 'ep', 'episode']);
+/** "Kaiju No 8", "No. 6": il numero segue "no", quindi fa parte del nome. */
+const NAME_MARKERS = new Set(['no', 'no.']);
 
 export type { CatalogLanguage };
 
@@ -117,6 +119,13 @@ export function catalogFile(): string {
   return path.join(catalogDir(), 'catalog-titles.json');
 }
 
+/** Ultimo tentativo di download del catalogo: /status.json deve dire se è fallito. */
+let lastAttempt: { at: number; error: string | null } | null = null;
+
+export function recordCatalogAttempt(error: string | null): void {
+  lastAttempt = { at: Date.now(), error };
+}
+
 /**
  * Stato del catalogo per `/status.json`, con la stessa forma del mapping.
  * Senza, la domanda "questo file è vecchio?" aveva risposta solo per una delle
@@ -124,6 +133,10 @@ export function catalogFile(): string {
  * dall'avvio) si vedeva solo come latenza.
  */
 export function getCatalogStatus(staleMs: number) {
+  const attempt = {
+    lastAttemptAt: lastAttempt?.at ?? null,
+    lastError: lastAttempt?.error ?? null,
+  };
   try {
     const file = catalogFile();
     const { mtimeMs } = fs.statSync(file);
@@ -140,9 +153,10 @@ export function getCatalogStatus(staleMs: number) {
       sites: counts,
       ageMs: Math.max(0, Date.now() - mtimeMs),
       stale: Date.now() - mtimeMs > staleMs,
+      ...attempt,
     };
   } catch {
-    return { generatedAt: null, entries: 0, sites: { saturn: 0, world: 0, unity: 0 }, ageMs: null, stale: true };
+    return { generatedAt: null, entries: 0, sites: { saturn: 0, world: 0, unity: 0 }, ageMs: null, stale: true, ...attempt };
   }
 }
 
@@ -233,7 +247,13 @@ export function languageOf(title: string): CatalogLanguage {
  * parte ("Dr. Stone 3 Part 2" è stagione 3, non 2) e non sia l'id di Unity.
  */
 export function seasonOf(title: string): number | null {
-  const words = String(title || '')
+  const raw = String(title || '');
+  // "5-toubun", "3-gatsu", "2.43": il numero iniziale fa parte del titolo. Va
+  // letto prima del replace, che renderebbe il trattino indistinguibile.
+  const leadingIsName = /^\d{1,2}\s*[-.]/.test(raw);
+  // "2.5 Dimensional Seduction": il decimale è un numero solo, non due.
+  const leadingDecimal = /^\d{1,2}\.\d/.test(raw);
+  const words = raw
     .toLowerCase()
     .replace(/^\d{1,6}\s+(?=[a-z])/, '')
     .replace(/[-_.]/g, ' ')
@@ -243,6 +263,9 @@ export function seasonOf(title: string): number | null {
     const match = /^(\d{1,2})(?:st|nd|rd|th)?$/.exec(words[index]);
     if (!match) continue;
     if (PART_MARKERS.has(words[index - 1] || '')) continue;
+    if (NAME_MARKERS.has(words[index - 1] || '')) continue;
+    if (index === 0 && leadingIsName) continue;
+    if (index === 1 && leadingDecimal) continue;
     const season = Number(match[1]);
     if (season > 0 && season <= MAX_SEASON) return season;
   }
@@ -413,8 +436,19 @@ export function lookupTitle(site: CatalogSite, queries: string[], options?: Cata
     wantedEpisode !== null &&
     hits.length === 0 &&
     all.some((item) => item.score >= REVIEW_SCORE && !fitsEpisode(item.entry, wantedEpisode));
-  // Una riga sola per lookup da rivedere (ambiguo, fascia 0,5-0,8 o scartato per episodio).
-  if (tie || band === 'review' || droppedByEpisode) {
+  // Anche lo scarto per stagione va visto: senza, un `seasonOf` che legge male il
+  // titolo ("Kaiju No 8" -> 8) faceva tornare il provider sulla rete in silenzio.
+  const droppedBySeason =
+    wantedSeason !== null &&
+    !isFilm &&
+    hits.length === 0 &&
+    all.some((item) => {
+      if (item.score < REVIEW_SCORE) return false;
+      const season = seasonOf(item.entry.title);
+      return season !== null && season !== wantedSeason;
+    });
+  // Una riga sola per lookup da rivedere (ambiguo, fascia 0,5-0,8 o scartato per episodio/stagione).
+  if (tie || band === 'review' || droppedByEpisode || droppedBySeason) {
     debug(
       2,
       'Catalog',
@@ -428,16 +462,23 @@ export function lookupTitle(site: CatalogSite, queries: string[], options?: Cata
         served: hits.length > 0,
         tie,
         ...(wantedEpisode !== null ? { ep: wantedEpisode } : {}),
-        ...(droppedByEpisode ? { reason: 'episode', dropped: selected.map((item) => item.entry.slug) } : {}),
+        ...(droppedByEpisode || droppedBySeason
+          ? {
+              reason: droppedByEpisode ? 'episode' : 'season',
+              // Da `all`, non da `selected`: `selected` è già filtrato, quindi
+              // l'elenco usciva vuoto proprio nel caso che deve spiegare.
+              dropped: all
+                .filter((item) => {
+                  if (item.score < REVIEW_SCORE) return false;
+                  if (droppedByEpisode) return wantedEpisode !== null && !fitsEpisode(item.entry, wantedEpisode);
+                  const season = seasonOf(item.entry.title);
+                  return season !== null && season !== wantedSeason;
+                })
+                .map((item) => item.entry.slug),
+            }
+          : {}),
       })
     );
   }
   return { hits, generatedAt };
-}
-
-/** Match più stretto, per chi vuole solo la scheda migliore. */
-export function matchTitle(site: CatalogSite, queries: string[], options?: CatalogQueryOptions): Omit<CatalogHit, 'title' | 'type' | 'language'> | null {
-  const { hits } = lookupTitle(site, queries, options);
-  if (!hits.length) return null;
-  return { slug: hits[0].slug, url: hits[0].url, score: hits[0].score };
 }
