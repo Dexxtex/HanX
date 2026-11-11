@@ -18,7 +18,6 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { parseSaturnAnimeSitemap, parseCardDetails } from '../../dist/catalog/sync.js';
-import { compactKey } from '../../dist/catalog/text.js';
 
 const REPO = process.env.GITHUB_REPO || 'Dexxtex/HanX';
 const RAW = `https://raw.githubusercontent.com/${REPO}`;
@@ -67,7 +66,6 @@ async function get(url, maxBytes = 0) {
 }
 
 const catalogs = JSON.parse(fs.readFileSync(path.join('data', 'catalogs.json'), 'utf8'));
-const titles = JSON.parse(fs.readFileSync(path.join('data', 'catalog-titles.json'), 'utf8'));
 const stored = new Map((catalogs.sites.saturn || []).map((e) => [e.slug, e]));
 
 // 1. La sitemap: slug, url e lastmod di tutte le schede (1 richiesta).
@@ -160,34 +158,21 @@ catalogs.sites.saturn = entries;
 const withMal = entries.filter((e) => e.malId).length;
 console.log(`schede: ${entries.length} (lette ${read}, di cui intere ${full}) | con malId ${withMal} | rimosse ${removed}`);
 
-// 5. `catalog-titles.json` e' la stessa cosa in forma ridotta: si ricostruisce
-// dal catalogo, cosi' non restano due verita'.
-titles.sites.saturn = entries.map((e) => ({
-  slug: e.slug,
-  url: e.url,
-  title: e.titleSite,
-  key: compactKey(e.titleSite),
-  ...(e.titles?.length ? { aliases: e.titles } : {}),
-  ...(e.type ? { type: e.type } : {}),
-  ...(e.malId ? { malId: e.malId } : {}),
-  ...(e.language ? { language: e.language } : {}),
-  ...(e.episodes ? { episodes: e.episodes } : {}),
-  ...(e.ep ? { ep: e.ep } : {}),
-}));
-
 fs.mkdirSync(OUT, { recursive: true });
 fs.writeFileSync(path.join(OUT, 'catalogs.json'), JSON.stringify(catalogs));
-fs.writeFileSync(path.join(OUT, 'catalog-titles.json'), JSON.stringify(titles));
 console.log(`scritto in ${OUT}/`);
 
 if (publish) {
   const work = fs.mkdtempSync(path.join(os.tmpdir(), 'delta-saturn-'));
-  for (const file of ['catalogs.json', 'catalog-titles.json']) fs.copyFileSync(path.join(OUT, file), path.join(work, file));
+  for (const file of ['catalogs.json']) fs.copyFileSync(path.join(OUT, file), path.join(work, file));
   const marker = await fetch(`${RAW}/data/last-sync.txt`, { signal: AbortSignal.timeout(30000) });
   if (marker.ok) fs.writeFileSync(path.join(work, 'last-sync.txt'), await marker.text());
   const git = (...args) => execFileSync('git', args, { cwd: work, stdio: 'pipe' });
   git('init', '-q', '-b', 'data');
-  const files = ['catalogs.json', 'catalog-titles.json'];
+  // Si pubblica solo il catalogo completo: l'indice (`catalog-titles.json`) lo
+  // costruisce l'addon all'avvio, e tenerlo sul branch era un secondo file da
+  // 5,6 MB per notte.
+  const files = ['catalogs.json'];
   if (fs.existsSync(path.join(work, 'last-sync.txt'))) files.push('last-sync.txt');
   git('add', ...files);
   git('-c', 'user.name=github-actions[bot]', '-c', 'user.email=41898282+github-actions[bot]@users.noreply.github.com',

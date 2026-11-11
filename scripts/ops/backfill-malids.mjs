@@ -47,7 +47,7 @@ if (process.argv.includes('--publish-only')) {
   process.exit(0);
 }
 
-const [index, ledger, catalogs, titles] = await Promise.all([
+const [index, ledger, catalogs] = await Promise.all([
   load(`${RAW}/mapping/anime-seasons.json`, 'data/anime-seasons.json'),
   load(`${RAW}/mapping/jikan-progress.json`, 'data/jikan-progress.json'),
   // `CATALOG_FILE` serve quando il catalogo arriva da un'altra macchina (il
@@ -55,7 +55,6 @@ const [index, ledger, catalogs, titles] = await Promise.all([
   process.env.CATALOG_FILE
     ? JSON.parse(fs.readFileSync(process.env.CATALOG_FILE, 'utf8'))
     : load(`${RAW}/data/catalogs.json`, 'data/catalogs.json'),
-  load(`${RAW}/data/catalog-titles.json`, 'data/catalog-titles.json'),
 ]);
 
 // kitsuId -> malId, dai record del ledger.
@@ -144,22 +143,6 @@ for (const list of Object.values(catalogs.sites || {})) {
 for (const [site, list] of Object.entries(catalogs.sites || {})) {
   fill(`catalogo ${site}`, list, (e) => [e.titleSite, ...(Array.isArray(e.titles) ? e.titles : [])], byCatalogTitle, false);
 }
-// `catalog-titles.json` è lo stesso catalogo in forma ridotta: prima si copia
-// per slug quello che il file completo ha già risolto, poi si prova il resto.
-const malBySlug = new Map();
-for (const list of Object.values(catalogs.sites || {})) {
-  for (const entry of list) if (entry.malId) malBySlug.set(entry.slug, entry.malId);
-}
-for (const list of Object.values(titles.sites || {})) {
-  for (const entry of list) {
-    const malId = malBySlug.get(entry.slug);
-    if (!entry.malId && malId) entry.malId = malId;
-  }
-}
-for (const [site, list] of Object.entries(titles.sites || {})) {
-  fill(`titles   ${site}`, list, (e) => [e.title, ...(Array.isArray(e.aliases) ? e.aliases : [])]);
-}
-
 // Autocontrollo: ogni malId che ho scritto io esiste nel ledger. (Non si
 // controllano quelli già presenti: arrivano dalle schede dei siti e il ledger
 // non li conosce tutti.)
@@ -173,11 +156,13 @@ for (const [label, s] of Object.entries(stats)) {
 
 fs.mkdirSync(OUT, { recursive: true });
 fs.writeFileSync(path.join(OUT, 'catalogs.json'), JSON.stringify(catalogs));
-fs.writeFileSync(path.join(OUT, 'catalog-titles.json'), JSON.stringify(titles));
 console.log(`scritto in ${OUT}/`);
 
 async function publishFiles() {
-  const files = ['catalogs.json', 'catalog-titles.json'];
+  // Si pubblica solo il catalogo completo: l'indice (`catalog-titles.json`) lo
+  // costruisce l'addon all'avvio, e tenerlo sul branch era un secondo file da
+  // 5,6 MB per notte.
+  const files = ['catalogs.json'];
   const work = fs.mkdtempSync(path.join(os.tmpdir(), 'data-backfill-'));
   for (const file of files) fs.copyFileSync(path.join(OUT, file), path.join(work, file));
   // Il marcatore del sync vive sullo stesso branch: senza, la run notturna

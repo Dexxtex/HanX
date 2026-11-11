@@ -3,6 +3,7 @@ import path from 'node:path';
 import * as cheerio from 'cheerio';
 import { compactKey } from './text.js';
 import { htmlToText } from '../utils/html.js';
+import { CATALOG_SCHEMA_VERSION } from './title-index.js';
 
 export type CatalogSite = 'saturn' | 'world' | 'unity';
 
@@ -76,6 +77,8 @@ export function pendingEnrichment(
 }
 
 export interface CatalogFile {
+  /** Forma del file: l'addon rifiuta un catalogo con una versione che non conosce. */
+  version?: number;
   generatedAt: string | null;
   sites: Record<CatalogSite, CatalogEntry[]>;
   /** Il tetto di pagine ha tagliato il catalogo: non è completo. */
@@ -100,9 +103,6 @@ export interface TitleIndexEntry {
   ep?: [number, number | string][];
 }
 
-/** Cambiare quando cambia la forma di `TitleIndexEntry`: un file vecchio va scartato, non servito a metà. */
-export const CATALOG_SCHEMA_VERSION = 1;
-
 export interface TitleIndexFile {
   version?: number;
   generatedAt: string | null;
@@ -110,7 +110,7 @@ export interface TitleIndexFile {
 }
 
 export function emptyCatalog(): CatalogFile {
-  return { generatedAt: null, sites: { saturn: [], world: [], unity: [] }, truncated: {} };
+  return { version: CATALOG_SCHEMA_VERSION, generatedAt: null, sites: { saturn: [], world: [], unity: [] }, truncated: {} };
 }
 
 /** Il token finale alfabetico/numerico di Saturn e World è casuale: non fa parte dello slug. */
@@ -610,24 +610,9 @@ export function diffEntries(previous: CatalogEntry[], next: CatalogEntry[]): { a
   return { added, removed };
 }
 
-export function buildTitleIndex(catalog: CatalogFile): TitleIndexFile {
-  const sites = {} as Record<CatalogSite, TitleIndexEntry[]>;
-  for (const site of CATALOG_SITES) {
-    sites[site] = (catalog.sites[site] || []).map((entry) => ({
-      slug: entry.slug,
-      url: entry.url,
-      title: entry.titleSite,
-      key: compactKey(entry.titleSite),
-      ...(entry.titles?.length ? { aliases: entry.titles } : {}),
-      ...(entry.type ? { type: entry.type } : {}),
-      ...(entry.malId ? { malId: entry.malId } : {}),
-      ...(entry.language ? { language: entry.language } : {}),
-      ...(entry.episodes ? { episodes: entry.episodes } : {}),
-      ...(entry.ep ? { ep: entry.ep } : {}),
-    }));
-  }
-  return { version: CATALOG_SCHEMA_VERSION, generatedAt: catalog.generatedAt, sites };
-}
+// L'indice vive in `title-index.ts`: lo costruisce anche l'addon, che non deve
+// importare cheerio. Qui resta il re-export per chi lo usa dal crawler.
+export { buildTitleIndex, CATALOG_SCHEMA_VERSION } from './title-index.js';
 
 /** Scrive prima i due temporanei, poi rinomina: un crash non lascia la coppia a metà. */
 export function writeCatalogsAtomic(dir: string, catalog: CatalogFile, index: TitleIndexFile): void {
