@@ -505,6 +505,13 @@ export function applyWorldUpdates(bySlug: Map<string, CatalogEntry>, cards: Cata
   for (const card of cards) {
     const old = bySlug.get(card.slug);
     if (old && (card.episodes || 0) <= (old.episodes || 0)) continue;
+    // `/updated` porta solo l'ultimo episodio: la lista si unisce a quella di
+    // ieri invece di sostituirla, altrimenti si perdono tutti i precedenti.
+    if (old?.ep?.length) {
+      const merged = new Map(old.ep.map(([num, token]) => [Number(num), token] as [number, number | string]));
+      for (const [num, token] of card.ep || []) merged.set(Number(num), token);
+      card.ep = [...merged.entries()].sort((a, b) => a[0] - b[0]);
+    }
     bySlug.set(card.slug, card);
     fresh += 1;
   }
@@ -535,6 +542,9 @@ export function parseWorldFilterPage(html: string, withEpisodes = false): Catalo
     // `Ep N` c'è solo su /updated (su /filter il badge è la lingua): è l'ultimo
     // episodio uscito, cioè il segnale che il delta di World confronta.
     const episode = withEpisodes ? Number($item.find('.ep').first().text().match(/(\d+)/)?.[1]) || 0 : 0;
+    // L'href della card e' /play/<slug>.<token>/<epToken>: il token dell'episodio
+    // e' gratis, ed e' la coppia che il provider usa per saltare la pagina.
+    const episodeToken = episode ? href.match(/^\/play\/[^/?#]+\/([^/?#]+)/)?.[1] || '' : '';
     out.push({
       site: 'world',
       slug,
@@ -542,6 +552,7 @@ export function parseWorldFilterPage(html: string, withEpisodes = false): Catalo
       titleSite: title,
       ...(jtitle && compactKey(jtitle) !== compactKey(title) ? { titles: [jtitle] } : {}),
       ...(episode ? { episodes: episode } : {}),
+      ...(episode && episodeToken ? { ep: [[episode, episodeToken]] as [number, string][] } : {}),
     });
   });
   return out;

@@ -14,6 +14,7 @@ import {
   isEnrichmentFinal,
   parseCardDetails,
   pendingEnrichment,
+  type CardDetails,
   type CatalogEntry,
   type CatalogFile,
 } from './sync.js';
@@ -30,6 +31,11 @@ const EPISODE_SITES: ReadonlySet<string> = new Set(['unity']);
 export interface EnrichOptions {
   /** HTML della scheda. Lancia sull'errore: `isBlocked` decide se fermarsi. */
   readPage: (entry: CatalogEntry) => Promise<string>;
+  /**
+   * Solo per i siti in `EPISODE_SITES`: gli id episodio da un endpoint dedicato.
+   * Unity li dà in 3,8 KB contro i ~95 KB della scheda, e senza il tetto di 120.
+   */
+  readEpisodes?: (entry: CatalogEntry) => Promise<[number, number | string][] | null>;
   /** true solo per 403/429: il WAF si prolunga se si insiste. */
   isBlocked: (err: unknown) => boolean;
   /** Schede per sito da leggere in una run. */
@@ -72,8 +78,13 @@ export async function enrichMalIds(catalog: CatalogFile, options: EnrichOptions)
     ENRICH_SITES.map((site) => [site, pendingEnrichment(catalog.sites[site], today)])
   ) as Record<(typeof ENRICH_SITES)[number], CatalogEntry[]>;
   const pending = ENRICH_SITES.reduce((sum, site) => sum + pendingBySite[site].length, 0);
-  let read = 0;
-  for (const site of ENRICH_SITES) {
+
+  /**
+   * Un sito per volta, ma i tre siti in parallelo: sono host diversi e il pacing
+   * del sync è per host, quindi in fila due siti restavano fermi mentre il terzo
+   * lavorava. Ogni host vede la stessa tariffa, e la run dura il sito più lungo.
+   */
+  async function enrichSite(site: (typeof ENRICH_SITES)[number]): Promise<number> {
     const entries = catalog.sites[site];
     // Prima le schede mai lette (le nuove comprese), poi le più vecchie: quelle
     // lette da poco non si rileggono.
@@ -84,7 +95,14 @@ export async function enrichMalIds(catalog: CatalogFile, options: EnrichOptions)
       if (requests >= siteQuota || now() > options.deadline) break;
       requests += 1;
       try {
-        found.push({ entry, details: parseCardDetails(await options.readPage(entry), site) });
+        let details: CardDetails;
+        if (options.readEpisodes && EPISODE_SITES.has(site)) {
+          const ep = await options.readEpisodes(entry);
+          details = { malId: null, anilistId: null, ...(ep?.length ? { ep } : {}) };
+        } else {
+          details = parseCardDetails(await options.readPage(entry), site);
+        }
+        found.push({ entry, details });
       } catch (err) {
         // Un blocco ferma il sito; una scheda rotta si salta e la run continua.
         if (options.isBlocked(err)) {
@@ -96,7 +114,6 @@ export async function enrichMalIds(catalog: CatalogFile, options: EnrichOptions)
     }
     // Solo gli id che AniList conferma: una pagina con il link MAL sbagliato non
     // deve entrare nel ramo esatto del matcher.
-    read += found.length;
     // Unity non passa da AniList: il suo malId viene dall'API del sito e qui si
     // leggono solo gli id episodio. Una mappa vuota lascia `malId` invariato.
     const { confirmed, answered } = EPISODE_SITES.has(site)
@@ -140,8 +157,11 @@ export async function enrichMalIds(catalog: CatalogFile, options: EnrichOptions)
           `(${withMalId}/${entries.length} con malId)`
       );
     }
-    if (now() > options.deadline) break;
+    return found.length;
   }
+
+  const reads = await Promise.all(ENRICH_SITES.map((site) => enrichSite(site)));
+  const read = reads.reduce((sum, count) => sum + count, 0);
   // Un sito senza backfill non si legge: senza questa riga nei log sembrerebbe
   // un sito dimenticato. Oggi nessun sito è fuori dalla lista, ma la riga resta
   // per il giorno in cui uno esce.

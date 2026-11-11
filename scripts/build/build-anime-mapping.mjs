@@ -1277,8 +1277,12 @@ async function main() {
 
   // titleIt per i film: il resolver legge la voce della chiave richiesta
   // (imdb:ttXXX da Stremio), ma il titolo italiano finiva solo sulla chiave
-  // che l'ha creato. Si propaga alle voci sorelle (stesso kitsuId) e le opere
-  // scoperte chiedono TMDB: il tetto limita le richieste per run.
+  // che l'ha creato. Si propaga alle voci sorelle (stesso kitsuId).
+  //
+  // Niente richieste a TMDB: su 2.602 gruppi il titolo italiano coincide con
+  // quello già presente in 2.599 casi, quindi il passo chiedeva 600 titoli a
+  // ogni run per non riempire niente (e ripartiva sempre dalla testa, senza
+  // cursore). La propagazione resta perché è gratis.
   if (titleItCap > 0) {
     const groups = new Map();
     for (const [key, entry] of Object.entries(index.movies)) {
@@ -1286,7 +1290,6 @@ async function main() {
       if (!groups.has(gk)) groups.set(gk, []);
       groups.get(gk).push([key, entry]);
     }
-    let itAsked = 0;
     let itTouched = 0;
     // 1. Propagazione gratis: il titolo italiano già su una chiave vale per
     //    l'opera intera.
@@ -1295,19 +1298,7 @@ async function main() {
       if (!have) continue;
       for (const [, e] of entries) if (!e.titleIt) { e.titleIt = have[1].titleIt; itTouched += 1; }
     }
-    // 2. Le opere senza titolo italiano chiedono TMDB, fino al tetto.
-    for (const entries of groups.values()) {
-      if (itAsked >= titleItCap) break;
-      if (entries.some(([, e]) => e.titleIt)) continue;
-      const tmdbEntry = entries.find(([k]) => k.startsWith('tmdb:'));
-      if (!tmdbEntry) continue;
-      const titleIt = await getTmdbItalianTitle('movie', tmdbEntry[0].slice('tmdb:'.length));
-      itAsked += 1;
-      if (!titleIt || samePlainTitle(titleIt, tmdbEntry[1].title)) continue;
-      for (const [, e] of entries) e.titleIt = titleIt;
-      itTouched += 1;
-    }
-    console.log(`  titleIt film: ${itTouched} voci riempite (${itAsked} richieste TMDB, tetto ${titleItCap})`);
+    console.log(`  titleIt film: ${itTouched} voci propagate (0 richieste TMDB)`);
   }
 
   persist();

@@ -769,6 +769,19 @@ const animeWorldTitleNormalization: TitleNormalizationOptions = {
 const AW_SUB_PAT = /(?:^|[\-_.])sub(?:[-_]?ita)?(?:$|[\-_.])/i; // sub, subita, sub-ita
 const AW_ITA_PAT = /(?:^|[\-_.])(cr[-_]?ita|ita[-_]?cr|ita)(?:$|[\-_.])/i; // ita, cr-ita, crita, ita-cr
 
+/**
+ * Le coppie `[numero, token]` del catalogo bastano? No quando l'episodio
+ * richiesto è uscito dopo l'ultimo giro: lì serve rileggere la pagina.
+ */
+export function needsEpisodePageRefresh(
+  episodes: { number: number }[],
+  episodeNumber: number | null | undefined,
+  isMovie: boolean
+): boolean {
+  if (isMovie || episodeNumber === null || episodeNumber === undefined) return false;
+  return !episodes.some((entry) => Number(entry.number) === Number(episodeNumber));
+}
+
 export class AnimeWorldProvider {
   constructor(private config: AnimeWorldConfig) {}
 
@@ -1232,9 +1245,16 @@ export class AnimeWorldProvider {
         // Con le coppie [numero, token] dal catalogo la pagina /play non serve:
         // lista episodi e token sono già lì, e ogni hop costa un secondo di pacing.
         const catalogEp = (v.ep || []).filter(([num]) => Number.isFinite(Number(num)));
-        const episodes: AnimeWorldEpisode[] = catalogEp.length
+        let fromCatalog = catalogEp.length > 0;
+        let episodes: AnimeWorldEpisode[] = fromCatalog
           ? catalogEp.map(([num, token]) => ({ id: String(token), number: Number(num) }))
           : await invokePython(['get_episodes', '--anime-slug', v.slug]);
+        // Un episodio uscito dopo l'ultimo giro del catalogo non è nelle coppie:
+        // senza questo ripiego lo stream sparirebbe invece di costare una pagina.
+        if (fromCatalog && needsEpisodePageRefresh(episodes, episodeNumber, isMovie)) {
+          episodes = await invokePython(['get_episodes', '--anime-slug', v.slug]);
+          fromCatalog = false;
+        }
         if (!episodes || !episodes.length) return null;
         let target: AnimeWorldEpisode | undefined;
         if (isMovie) {
@@ -1249,7 +1269,7 @@ export class AnimeWorldProvider {
           target = episodes[0];
         }
         if (!target) return null;
-        return { v, target, ms: Date.now() - t0, fromCatalog: catalogEp.length > 0 };
+        return { v, target, ms: Date.now() - t0, fromCatalog };
       } catch (e) {
         console.error('[AnimeWorld] get_episodes error', v.slug, e);
         return null;

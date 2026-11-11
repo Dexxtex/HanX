@@ -185,6 +185,16 @@ export function selectHighestHlsVariant(manifest: string, manifestUrl: string): 
  * per scegliere la variante, e scaricarla legherebbe il token all'IP dell'addon
  * prima che lo usi il client (o EasyProxy).
  */
+/**
+ * Risoluzione dal nome del file MP4 di vixcloud (`.../1080p.mp4`). Nella pagina
+ * embed `canPlayFHD` e' sempre `true` (dice cosa puo' il player, non cosa c'e'
+ * nel file), quindi in modalita' proxy e' l'unico dato vero sulla qualita'.
+ */
+export function mp4HeightFromUrl(url: string | null | undefined): number | null {
+  const match = String(url || '').match(/\/(\d{3,4})p\.mp4(?:[?#]|$)/i);
+  return match ? Number(match[1]) : null;
+}
+
 export function hlsHeightFromUrl(url: string): number | null {
   try {
     const parsed = new URL(url);

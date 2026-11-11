@@ -1,0 +1,163 @@
+// Riempie `ep` (coppie [numero, id]) nelle schede del catalogo che non ce
+// l'hanno. Il provider usa quelle coppie per saltare la pagina della serie:
+// ogni hop è un secondo di pacing, quindi è il guadagno più diretto che resta.
+//
+//   node scripts/ops/backfill-episodes.mjs                  # unity + world
+//   node scripts/ops/backfill-episodes.mjs --site unity --limit 500
+//   node scripts/ops/backfill-episodes.mjs --publish        # e pusha sul branch data
+//
+// Un sito alla volta, una richiesta alla volta, 1 s di intervallo, stop sul
+// primo 403/429: è lo stesso budget dei probe, e i siti sono protetti da
+// Cloudflare.
+import fs from 'node:fs';
+import path from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { parseCardDetails } from '../../dist/catalog/sync.js';
+
+const REPO = process.env.GITHUB_REPO || 'Dexxtex/HanX';
+const RAW = `https://raw.githubusercontent.com/${REPO}`;
+const OUT = path.join('data', 'backfill');
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36';
+const GAP_MS = 1000;
+const TIMEOUT_MS = 15_000;
+const SAVE_EVERY = 100;
+/** `info_api` accetta al massimo 120 episodi per chiamata. */
+const UNITY_CHUNK = 120;
+/** Oltre questo si smette di chiedere: nessuna serie ha 1200 episodi veri. */
+const UNITY_MAX_CHUNKS = 10;
+
+const arg = (name, fallback = null) => {
+  const i = process.argv.indexOf(name);
+  return i >= 0 ? process.argv[i + 1] : fallback;
+};
+const sites = arg('--site') ? [arg('--site')] : ['unity', 'world'];
+const limit = Number(arg('--limit')) || Infinity;
+const publish = process.argv.includes('--publish');
+const local = process.argv.includes('--local');
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Errore del WAF: si smette, insistere prolunga il blocco. */
+class Blocked extends Error {}
+
+let lastRequestAt = 0;
+async function get(url, headers = {}) {
+  const wait = GAP_MS - (Date.now() - lastRequestAt);
+  if (wait > 0) await sleep(wait);
+  lastRequestAt = Date.now();
+  const res = await fetch(url, {
+    headers: { 'User-Agent': UA, ...headers },
+    signal: AbortSignal.timeout(TIMEOUT_MS),
+  });
+  if (res.status === 403 || res.status === 429) throw new Blocked(`${res.status} ${url}`);
+  if (!res.ok) throw new Error(`${res.status} ${url}`);
+  return res;
+}
+
+async function loadCatalog() {
+  if (local && fs.existsSync(path.join('data', 'catalogs.json'))) {
+    return JSON.parse(fs.readFileSync(path.join('data', 'catalogs.json'), 'utf8'));
+  }
+  if (process.env.CATALOG_FILE) {
+    return JSON.parse(fs.readFileSync(process.env.CATALOG_FILE, 'utf8'));
+  }
+  const res = await fetch(`${RAW}/data/catalogs.json`, { signal: AbortSignal.timeout(60_000) });
+  if (!res.ok) throw new Error(`${res.status} catalogo dal branch data`);
+  return res.json();
+}
+
+/** `4354-ippon-again` -> 4354. */
+const unityId = (slug) => Number(String(slug || '').split('-')[0]) || 0;
+
+/** Tutti gli episodi di una scheda Unity in blocchi da 120 (3,8 KB l'uno). */
+async function unityEpisodes(entry) {
+  const animeId = unityId(entry.slug);
+  if (!animeId) return null;
+  const total = Number(entry.episodes) || 0;
+  const chunks = Math.min(UNITY_MAX_CHUNKS, Math.max(1, Math.ceil(total / UNITY_CHUNK)));
+  const pairs = [];
+  const seen = new Set();
+  for (let chunk = 0; chunk < chunks; chunk += 1) {
+    const start = chunk * UNITY_CHUNK + 1;
+    const res = await get(
+      `https://www.animeunity.co/info_api/${animeId}/1?start_range=${start}&end_range=${start + UNITY_CHUNK - 1}`,
+      { Referer: 'https://www.animeunity.co/', 'X-Requested-With': 'XMLHttpRequest', Accept: 'application/json, */*' }
+    );
+    const payload = await res.json().catch(() => null);
+    const episodes = Array.isArray(payload?.episodes) ? payload.episodes : [];
+    if (!episodes.length) break;
+    for (const item of episodes) {
+      const id = Number(item?.id);
+      const num = Number(String(item?.number ?? '').match(/(\d{1,4})/)?.[1]);
+      if (!Number.isFinite(id) || id <= 0 || !Number.isFinite(num) || num <= 0 || seen.has(num)) continue;
+      seen.add(num);
+      pairs.push([num, id]);
+    }
+  }
+  return pairs.length ? pairs.sort((a, b) => a[0] - b[0]) : null;
+}
+
+/** La pagina serie di World porta le coppie [numero, token] nelle anchor. */
+async function worldEpisodes(entry) {
+  const res = await get(entry.url);
+  const html = await res.text();
+  return parseCardDetails(html, 'world').ep || null;
+}
+
+const FETCHERS = { unity: unityEpisodes, world: worldEpisodes };
+
+function save(catalog) {
+  fs.mkdirSync(OUT, { recursive: true });
+  const file = path.join(OUT, 'catalogs.json');
+  fs.writeFileSync(`${file}.tmp`, `${JSON.stringify(catalog)}\n`);
+  fs.renameSync(`${file}.tmp`, file);
+}
+
+const catalog = await loadCatalog();
+const startedAt = Date.now();
+let done = 0;
+let filled = 0;
+let blocked = null;
+
+for (const site of sites) {
+  const entries = catalog.sites?.[site] || [];
+  // `ep: []` è la marca di "già controllata, non ha episodi": senza, ogni run
+  // riproverebbe le stesse serie annunciate.
+  const pending = entries.filter((entry) => entry.ep === undefined && entry.slug && entry.url);
+  console.log(`[ep] ${site}: ${pending.length} schede senza ep (su ${entries.length})`);
+  for (const entry of pending) {
+    if (done >= limit) break;
+    try {
+      const ep = await FETCHERS[site](entry);
+      entry.ep = ep?.length ? ep : [];
+      if (entry.ep.length) filled += 1;
+      done += 1;
+    } catch (error) {
+      if (error instanceof Blocked) {
+        blocked = error.message;
+        break;
+      }
+      done += 1;
+      console.warn(`[ep] ${site} ${entry.slug}: ${error.message}`);
+    }
+    if (done % SAVE_EVERY === 0) {
+      save(catalog);
+      const rate = done / ((Date.now() - startedAt) / 1000);
+      console.log(`[ep] ${done} lette, ${filled} riempite, ${rate.toFixed(2)}/s`);
+    }
+  }
+  if (blocked) break;
+}
+
+save(catalog);
+const elapsed = ((Date.now() - startedAt) / 1000).toFixed(0);
+console.log(`[ep] ${done} schede lette, ${filled} riempite in ${elapsed}s -> ${path.join(OUT, 'catalogs.json')}`);
+if (blocked) {
+  console.error(`[ep] BLOCCATO (${blocked}): stop immediato, il file salvato è valido`);
+  process.exit(1);
+}
+if (publish) {
+  // La pubblicazione è la stessa del backfill dei malId: un solo pezzo di git
+  // plumbing, già usato, invece di un secondo che può divergere.
+  execFileSync('node', ['scripts/ops/backfill-malids.mjs', '--publish-only'], { stdio: 'inherit' });
+}

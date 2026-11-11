@@ -816,41 +816,60 @@ export class AnimeSaturnProvider {
     requestedEpisode: number,
     seasonNumber: number | null,
     mediaType = 'tv',
-    originalEpisode: number | null = null
+    originalEpisode: number | null = null,
+    /** Dal catalogo: titolo già noto, quindi la scheda (un hop) non serve. */
+    knownTitle?: string
   ): Promise<StreamForStremio[]> {
     const normalizedPath = normalizeAnimeSaturnPath(animePath);
     if (!normalizedPath) return [];
     const animeUrl = buildSaturnUrl(normalizedPath);
     if (!animeUrl) return [];
-    
-    let parsedPage: ParsedSaturnPage;
-    try {
-      const html = await fetchResource(animeUrl, asCaches, {
-        ttlMs: 15 * 60 * 1000,
-        cacheKey: `anime:${normalizedPath}`,
-        timeoutMs: AS_FETCH_TIMEOUT,
-        headers: buildSaturnHeaders(),
-      });
-      parsedPage = parseAnimeSaturnPage(html, { animePath: normalizedPath });
-    } catch (error: any) {
-      console.error('[AnimeSaturn] anime page request failed:', error.message);
-      return [];
-    }
 
     const normalizedEpisode = normalizeRequestedEpisode(requestedEpisode);
     const normalizedOriginalEpisode = normalizeRequestedEpisode(
       originalEpisode === null || originalEpisode === undefined ? normalizedEpisode : originalEpisode
     );
 
-    const episodes = normalizeEpisodesList(parsedPage.episodes);
-    const selected = pickEpisodeEntry(episodes, normalizedEpisode, mediaType);
+    let baseTitle: string;
+    let sourceTag: string | null;
+    let selected: { num: number; token: string; episodePath: string | null; watchUrl: string | null };
 
-    if (!selected) return [];
+    if (knownTitle) {
+      // La scheda elenca gli episodi, ma la pagina episodio è derivabile dallo
+      // slug: `/anime/<slug>/ep-<n>`. Con il titolo dal catalogo la scheda è un
+      // hop in meno per host, cioè ~1 s di pacing.
+      baseTitle = sanitizeAnimeTitle(knownTitle) || 'Unknown Title';
+      sourceTag = inferSourceTag(knownTitle, normalizedPath);
+      selected = {
+        num: normalizedEpisode,
+        token: `ep-${normalizedEpisode}`,
+        episodePath: `${normalizedPath.replace(/^\/anime\//i, '/episode/')}/ep-${normalizedEpisode}`,
+        watchUrl: null,
+      };
+    } else {
+      let parsedPage: ParsedSaturnPage;
+      try {
+        const html = await fetchResource(animeUrl, asCaches, {
+          ttlMs: 15 * 60 * 1000,
+          cacheKey: `anime:${normalizedPath}`,
+          timeoutMs: AS_FETCH_TIMEOUT,
+          headers: buildSaturnHeaders(),
+        });
+        parsedPage = parseAnimeSaturnPage(html, { animePath: normalizedPath });
+      } catch (error: any) {
+        console.error('[AnimeSaturn] anime page request failed:', error.message);
+        return [];
+      }
+      baseTitle = sanitizeAnimeTitle(parsedPage.title) || 'Unknown Title';
+      sourceTag = parsedPage.sourceTag;
+      const picked = pickEpisodeEntry(normalizeEpisodesList(parsedPage.episodes), normalizedEpisode, mediaType);
+      if (!picked) return [];
+      selected = picked;
+    }
 
-    const baseTitle = sanitizeAnimeTitle(parsedPage.title) || 'Unknown Title';
     const resolvedEpisode = parsePositiveInt(selected.num) || normalizedEpisode;
 
-    if (String(parsedPage.sourceTag || '').toUpperCase() === 'ITA' && resolvedEpisode !== normalizedOriginalEpisode) {
+    if (String(sourceTag || '').toUpperCase() === 'ITA' && resolvedEpisode !== normalizedOriginalEpisode) {
       debug(3, 'AnimeSaturn', `[AnimeSaturn] Skipping ITA episode ${resolvedEpisode} (requested ${normalizedOriginalEpisode}).`);
       return [];
     }
@@ -909,7 +928,7 @@ export class AnimeSaturnProvider {
           if (!finalMediaUrl) continue;
           const host = normalizeHostLabel(finalMediaUrl);
 
-          const langLabel = parsedPage.sourceTag === 'ITA' ? 'ITA' : 'SUB';
+          const langLabel = sourceTag === 'ITA' ? 'ITA' : 'SUB';
           let streamTitle = `${capitalize(baseTitle)} ▪ ${langLabel}`;
           const epTag = episodeTag(seasonNumber, mediaType !== 'movie' ? requestedEpisode : null);
           if (epTag) streamTitle += ` ▪ ${epTag}`;
@@ -945,7 +964,7 @@ export class AnimeSaturnProvider {
         seenMedia.add(mediaUrl);
         const hostLabel = normalizeHostLabel(finalMediaUrl);
 
-        const langLabel = parsedPage.sourceTag === 'ITA' ? 'ITA' : 'SUB';
+        const langLabel = sourceTag === 'ITA' ? 'ITA' : 'SUB';
         let streamTitle = `${capitalize(baseTitle)} ▪ ${langLabel}`;
         const epTag = episodeTag(seasonNumber, mediaType !== 'movie' ? requestedEpisode : null);
         if (epTag) streamTitle += ` ▪ ${epTag}`;
@@ -1145,7 +1164,9 @@ export class AnimeSaturnProvider {
         episodeNumber ?? 1,
         seasonNumber,
         isMovie ? 'movie' : 'tv',
-        episodeNumber ?? 1
+        episodeNumber ?? 1,
+        // Dal catalogo: il titolo c'è già, la scheda è solo un hop in più.
+        catalogVersions.length ? version.title : undefined
       );
       for (const st of perPath) {
         const key = String(st.url || '').trim();

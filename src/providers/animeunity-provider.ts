@@ -9,6 +9,7 @@ import {
   parseSearchResultsHtml,
   parseVixcloudHls,
   hlsHeightFromUrl,
+  mp4HeightFromUrl,
   vixsrcEmbedUrl,
   selectHighestHlsVariantInfo,
 } from './animeunity-parsers.js';
@@ -508,11 +509,14 @@ async function resolveEmbedMedia(
     console.warn('[AnimeUnity] embed media failed:', error?.message || error);
   }
 
-  // Solo quando il manifest non è stato scaricato: `h=1` è il marcatore che
-  // parseVixcloudHls mette se il player dichiara canPlayFHD, e in proxy
-  // EasyProxy prende comunque la variante più alta. In diretto resta `height`.
-  const fhd = !needVariant && Boolean(hlsUrl && /[?&]h=1(?:&|$)/.test(hlsUrl));
-  return { hls_url: hlsUrl, mp4_url: mp4Url, height: hlsHeight, fhd };
+  // In proxy il manifest non si scarica, ma `canPlayFHD` è sempre true: il badge
+  // verrebbe FHD anche su un 360p. La risoluzione del file MP4 è l'unico dato
+  // vero disponibile senza la playlist, e coincide con la rendition massima.
+  const height = hlsHeight || (needVariant ? null : mp4HeightFromUrl(mp4Url));
+  // `h=1` resta il ripiego solo se la risoluzione è ignota: con `height` noto
+  // deciderebbe `qualityTag`, e `h=1` direbbe FHD su un 360p.
+  const fhd = !height && !needVariant && Boolean(hlsUrl && /[?&]h=1(?:&|$)/.test(hlsUrl));
+  return { hls_url: hlsUrl, mp4_url: mp4Url, height, fhd };
 }
 
 async function getStreamData(

@@ -3,9 +3,10 @@
  * Catalogo locale AnimeSaturn / AnimeWorld / AnimeUnity.
  *
  * Budget di rete (dichiarato prima delle richieste, regole in AGENTS.md):
- * - una richiesta alla volta, 3 s tra la fine di una e l'inizio della successiva
- *   (`CATALOG_INTERVAL_MS`, pavimento 1 s: è la tariffa misurata sicura, e qui
- *   è globale, quindi ogni host vede una richiesta ogni 3 s);
+ * - una richiesta alla volta **per host**, 3 s tra la fine di una e l'inizio
+ *   della successiva (`CATALOG_INTERVAL_MS`, pavimento 1 s: è la tariffa
+ *   misurata sicura). Lo slot è per host: i tre siti possono procedere insieme
+ *   e ognuno vede comunque una richiesta ogni 3 s;
  * - timeout 15 s, User-Agent esplicito, 2 retry con backoff solo su 5xx/rete;
  * - 403 ferma tutto subito; 429 fa **una** attesa di 60 s e un retry, poi ferma
  *   tutto (regola di AGENTS.md: un rate-limit transitorio non è un WAF);
@@ -78,7 +79,21 @@ class BlockedError extends Error {}
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const cookies = new Map<string, string>();
-let nextSlot = 0;
+/**
+ * Uno slot per host, non uno globale: Saturn, World e Unity sono host diversi e
+ * con lo slot unico due siti restavano fermi mentre il terzo lavorava. Il rate
+ * che ogni sito vede non cambia (uno ogni INTERVAL_MS), cambia solo che i tre
+ * possono procedere insieme.
+ */
+const nextSlotByHost = new Map<string, number>();
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
+}
 
 function cookieHeader(): string {
   return [...cookies].map(([name, value]) => `${name}=${value}`).join('; ');
@@ -117,8 +132,9 @@ async function readCapped(response: Response, maxBytes: number): Promise<string>
 
 /** Una richiesta alla volta, con lo slot successivo calcolato dalla fine della precedente. */
 async function request(url: string, init: RequestInit = {}, maxBytes = 0): Promise<{ body: string; headers: Headers }> {
+  const host = hostOf(url);
   for (let attempt = 0; ; attempt += 1) {
-    const wait = nextSlot - Date.now();
+    const wait = (nextSlotByHost.get(host) ?? 0) - Date.now();
     if (wait > 0) await sleep(wait);
     let response: Response;
     try {
@@ -135,7 +151,7 @@ async function request(url: string, init: RequestInit = {}, maxBytes = 0): Promi
     } finally {
       // Slot consumato all'arrivo degli header: copre anche i rami d'errore,
       // che altrimenti farebbero ripartire il retry prima dell'intervallo.
-      nextSlot = Date.now() + INTERVAL_MS;
+      nextSlotByHost.set(host, Date.now() + INTERVAL_MS);
     }
     rememberCookies(response.headers);
     if (response.status === 403) {
@@ -160,7 +176,7 @@ async function request(url: string, init: RequestInit = {}, maxBytes = 0): Promi
     const body = maxBytes ? await readCapped(response, maxBytes) : await response.text();
     // Ricalcolato a fine corpo: prima restava fissato agli header, quindi il gap
     // reale era header→header e la pagina lenta accorciava il pacing.
-    nextSlot = Date.now() + INTERVAL_MS;
+    nextSlotByHost.set(host, Date.now() + INTERVAL_MS);
     return { body, headers: response.headers };
   }
 }
@@ -429,6 +445,35 @@ const CRAWL_ROTATION: CatalogSite[] = ['saturn', 'world', 'unity'];
 function enrichMalIds(catalog: CatalogFile, startedAt: number) {
   return enrichMalIdsImpl(catalog, {
     readPage: async (entry) => (await request(entry.url)).body,
+    // Unity: gli id episodio da `info_api` (3,8 KB) invece della scheda (~95 KB),
+    // che si ferma comunque a 120 episodi. Gli altri campi di Unity arrivano da
+    // `get-animes` e sono già nel catalogo.
+    readEpisodes: async (entry) => {
+      const animeId = Number(String(entry.slug || '').split('-')[0]);
+      if (!animeId) return null;
+      const total = Number(entry.episodes) || 0;
+      const chunks = Math.min(10, Math.max(1, Math.ceil(total / 120)));
+      const pairs: [number, number][] = [];
+      const seen = new Set<number>();
+      for (let chunk = 0; chunk < chunks; chunk += 1) {
+        const start = chunk * 120 + 1;
+        const response = await request(
+          `${BASES.unity}/info_api/${animeId}/1?start_range=${start}&end_range=${start + 119}`,
+          { headers: { 'x-requested-with': 'XMLHttpRequest', referer: `${BASES.unity}/` } }
+        );
+        const payload = JSON.parse(response.body) as { episodes?: { id?: number; number?: string }[] };
+        const episodes = Array.isArray(payload?.episodes) ? payload.episodes : [];
+        if (!episodes.length) break;
+        for (const item of episodes) {
+          const id = Number(item?.id);
+          const num = Number(String(item?.number ?? '').match(/(\d{1,4})/)?.[1]);
+          if (!Number.isFinite(id) || id <= 0 || !Number.isFinite(num) || num <= 0 || seen.has(num)) continue;
+          seen.add(num);
+          pairs.push([num, id]);
+        }
+      }
+      return pairs.length ? pairs.sort((a, b) => a[0] - b[0]) : null;
+    },
     isBlocked: (err) => err instanceof BlockedError,
     // Il budget totale non cambia: meta' a Unity (id episodio), il resto diviso
     // tra saturn e world. Con 600 richieste a 3 s sono ~30 min, dentro la
