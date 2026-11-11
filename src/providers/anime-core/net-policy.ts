@@ -22,16 +22,16 @@ const hostLastAt = new Map<string, number>();
  * e tre i siti senza perdere una richiesta: Saturn 12 req/s (50/50), World 12
  * (200/200), Unity 8 (300/300; a 12 l'8,5% di 503, a 16 il 20-28%).
  *
- * Default 125 ms = 8 req/s, che è il caso comune (una istanza). Il tetto è per
- * host, non per istanza: chi ne ha quattro sullo stesso IP deve scendere a 0.5
- * dalla variabile, perché 4 × 8 = 32 sarebbe il triplo del misurato.
+ * Default 500 ms = 2 req/s, il profilo prudente: il tetto è per host, non per
+ * istanza, quindi quattro container sullo stesso IP a 2 req/s fanno gli 8
+ * misurati. Chi ha una sola istanza scende a 0.125 dalla variabile.
  *
  * `ANIME_HOST_MIN_INTERVAL_SEC` può solo **rallentare** (fino a 5 s): sotto il
  * pavimento la protezione che è costata il 403 del 25/10 sparisce, e quel blocco
  * arrivò su `/api/search`, la rotta vietata da robots.txt, non sulle pagine.
  */
 const MIN_HOST_INTERVAL_FLOOR_MS = 125;
-const MIN_HOST_INTERVAL_DEFAULT_MS = 125;
+const MIN_HOST_INTERVAL_DEFAULT_MS = 500;
 const MIN_HOST_INTERVAL_CEILING_MS = 5_000;
 
 /** Secondi dall'ambiente, millisecondi dentro. Fuori range = pavimento. */
