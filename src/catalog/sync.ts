@@ -495,7 +495,23 @@ export function parseWorldMaxPage(html: string): number | null {
 }
 
 /** Una pagina di /filter: una scheda per .film-list .item, titolo in a.name o alt della locandina. */
-export function parseWorldFilterPage(html: string): CatalogEntry[] {
+/**
+ * Applica una pagina di `/updated` alla mappa del catalogo: una scheda il cui
+ * `Ep N` non è più alto di quello che il catalogo già ha non è cambiata.
+ * Ritorna quante schede sono cambiate.
+ */
+export function applyWorldUpdates(bySlug: Map<string, CatalogEntry>, cards: CatalogEntry[]): number {
+  let fresh = 0;
+  for (const card of cards) {
+    const old = bySlug.get(card.slug);
+    if (old && (card.episodes || 0) <= (old.episodes || 0)) continue;
+    bySlug.set(card.slug, card);
+    fresh += 1;
+  }
+  return fresh;
+}
+
+export function parseWorldFilterPage(html: string, withEpisodes = false): CatalogEntry[] {
   const $ = cheerio.load(String(html || ''));
   const out: CatalogEntry[] = [];
   const seen = new Set<string>();
@@ -516,12 +532,16 @@ export function parseWorldFilterPage(html: string): CatalogEntry[] {
     // data-jtitle è il titolo canonico del sito, spesso inglese o romaji: alias
     // gratis (44% delle card) senza chiedere le schede una per una.
     const jtitle = String($name.attr('data-jtitle') || '').replace(/\s+/g, ' ').trim();
+    // `Ep N` c'è solo su /updated (su /filter il badge è la lingua): è l'ultimo
+    // episodio uscito, cioè il segnale che il delta di World confronta.
+    const episode = withEpisodes ? Number($item.find('.ep').first().text().match(/(\d+)/)?.[1]) || 0 : 0;
     out.push({
       site: 'world',
       slug,
       url: `https://www.animeworld.ac/play/${path}`,
       titleSite: title,
       ...(jtitle && compactKey(jtitle) !== compactKey(title) ? { titles: [jtitle] } : {}),
+      ...(episode ? { episodes: episode } : {}),
     });
   });
   return out;

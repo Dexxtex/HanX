@@ -7,7 +7,6 @@ import {
   parseEpisodesFromAnimeHtml,
   parseEpisodeServers,
   parseSearchResultsHtml,
-  parseUnityCoEpisodes,
   parseVixcloudHls,
   hlsHeightFromUrl,
   vixsrcEmbedUrl,
@@ -167,6 +166,8 @@ interface AnimeUnitySearchResult {
   name_eng?: string; // Titolo inglese (opzionale)
   episodes_count: number;
   type?: string; // Solo .co: TV / Movie / Special
+  /** Solo .co: `dub` del sito. Senza, una scheda ITA si etichetta SUB. */
+  language?: 'ITA';
   /** Dal catalogo: coppie [numero, id] degli episodi, evita la pagina scheda. */
   ep?: [number, number | string][];
 }
@@ -341,6 +342,7 @@ async function searchUnityCo(query: string): Promise<AnimeUnitySearchResult[]> {
         name_eng: record.title_eng ? String(record.title_eng) : undefined,
         episodes_count: Number(record.episodes_count) || 0,
         type: record.type ? String(record.type) : undefined,
+        ...(Number(record.dub) === 1 ? { language: 'ITA' as const } : {}),
       }))
       .filter((record) => record.name);
   } catch (error: any) {
@@ -349,16 +351,21 @@ async function searchUnityCo(query: string): Promise<AnimeUnitySearchResult[]> {
   }
 }
 
-/** Le serie lunghe hanno solo 120 episodi nella pagina: il resto arriva da /info_api. */
-async function fetchUnityCoEpisodeWindow(animeId: number, episode: number): Promise<AnimeUnityPageEpisode[]> {
+/**
+ * Gli episodi di una scheda .co in una richiesta da ~3,8 KB: la scheda HTML ne
+ * costa ~90. Il server rifiuta i range oltre 120 episodi e risponde vuoto oltre
+ * la fine, quindi si chiede sempre un blocco intero che contiene l'episodio.
+ */
+async function fetchUnityCoEpisodes(animeId: number, episode: number | null): Promise<AnimeUnityPageEpisode[]> {
+  const start = episode && episode > 120 ? Math.max(1, episode - 60) : 1;
   try {
     const payload = await auFetchResource(
-      `${getUnityBaseUrl()}/info_api/${animeId}/${episode}?start_range=${Math.max(1, episode - 30)}&end_range=${episode + 30}`,
+      `${getUnityBaseUrl()}/info_api/${animeId}/${episode || 1}?start_range=${start}&end_range=${start + 119}`,
       caches,
       {
         as: 'json',
         ttlMs: TTL.animePage,
-        cacheKey: `au-co-episodes:${animeId}:${episode}`,
+        cacheKey: `au-co-episodes:${animeId}:${start}`,
         timeoutMs: FETCH_TIMEOUT,
         headers: {
           'X-Requested-With': 'XMLHttpRequest',
@@ -556,19 +563,21 @@ async function getUnityCoStreamData(
   const empty: AnimeUnityStreamData = { episode_page: episodePage, embed_url: null, hls_url: null, mp4_url: null, height: null };
 
   try {
-    const html = String(await auFetchResource(episodePage, caches, {
+    // /embed-url/<episodeId> risponde in 103 byte col solo URL del player: la
+    // pagina episodio ne costa ~90 KB per lo stesso dato.
+    const raw = String(await auFetchResource(`${getUnityBaseUrl()}/embed-url/${episodeId}`, caches, {
       ttlMs: TTL.streamPage,
-      cacheKey: `au-co-ep:${animeId}:${episodeId}`,
+      cacheKey: `au-co-embed:${episodeId}`,
       timeoutMs: FETCH_TIMEOUT,
+      headers: { Referer: episodePage },
     }).catch((error: any) => {
-      console.warn('[AnimeUnity] pagina episodio (.co) non recuperata:', error?.message || String(error));
+      console.warn('[AnimeUnity] embed-url (.co) non recuperato:', error?.message || String(error));
       return '';
-    }) || '');
+    }) || '').trim();
 
-    const raw = html.match(/\bembed_url="([^"]+)"/)?.[1];
-    if (!raw) return empty;
+    if (!/^https?:\/\//i.test(raw)) return empty;
 
-    const embedUrl = decodeHtmlAttribute(raw);
+    const embedUrl = raw;
     const media = await resolveEmbedMedia(embedUrl, episodePage, needVariant);
     return { ...empty, embed_url: embedUrl, ...media };
   } catch (error: any) {
@@ -758,37 +767,35 @@ export class AnimeUnityProvider {
     let html = '';
 
     if (!selected?.episodeId) {
-      html = String(await auFetchResource(animeUrl, caches, {
-        ttlMs: TTL.animePage,
-        cacheKey: `au-anime:${normalizedPath}`,
-        timeoutMs: FETCH_TIMEOUT,
-      }).catch((error: any) => {
-        console.warn('[AnimeUnity] pagina scheda non recuperata:', error?.message || String(error));
-        return '';
-      }) || '');
+      // .co: gli episodi arrivano da /info_api (3,8 KB) e la scheda (~90 KB) serve
+      // solo per il titolo, che il chiamante di solito ha già.
+      if (!isUnityCoBase() || !titleOverride) {
+        html = String(await auFetchResource(animeUrl, caches, {
+          ttlMs: TTL.animePage,
+          cacheKey: `au-anime:${normalizedPath}`,
+          timeoutMs: FETCH_TIMEOUT,
+        }).catch((error: any) => {
+          console.warn('[AnimeUnity] pagina scheda non recuperata:', error?.message || String(error));
+          return '';
+        }) || '');
 
-      if (!html) return [];
+        if (!html) return [];
 
-      // Il DOM serve solo a leggere il titolo, e il titolo arriva quasi sempre
-      // dal chiamante: costruirlo comunque costa ~46 ms su una pagina da 500 KB.
-      if (!titleOverride) {
-        const $ = cheerio.load(String(html));
-        const pageTitle =
-          $('meta[property="og:title"]').attr('content') ||
-          $('title').first().text().trim() ||
-          null;
-        displayTitle = sanitizeAnimeTitle(pageTitle) || 'Unknown Title';
+        // Il DOM serve solo a leggere il titolo, e il titolo arriva quasi sempre
+        // dal chiamante: costruirlo comunque costa ~46 ms su una pagina da 500 KB.
+        if (!titleOverride) {
+          const $ = cheerio.load(String(html));
+          const pageTitle =
+            $('meta[property="og:title"]').attr('content') ||
+            $('title').first().text().trim() ||
+            null;
+          displayTitle = sanitizeAnimeTitle(pageTitle) || 'Unknown Title';
+        }
       }
 
-      // .co mette solo i primi 120 episodi nella pagina: per le serie lunghe
-      // chiediamo la finestra che contiene l'episodio richiesto a /info_api.
-      let pageEpisodes = isUnityCoBase()
-        ? parseUnityCoEpisodes(String(html))
+      const pageEpisodes = isUnityCoBase()
+        ? await fetchUnityCoEpisodes(animeId, requestedEpisode)
         : parseEpisodesFromAnimeHtml(String(html));
-      if (isUnityCoBase() && requestedEpisode
-        && !pageEpisodes.some((entry) => parseEpisodeNumber(entry.number, 0) === requestedEpisode)) {
-        pageEpisodes = [...pageEpisodes, ...(await fetchUnityCoEpisodeWindow(animeId, requestedEpisode))];
-      }
 
       const normalizedEpisodes = normalizeEpisodesList(
         pageEpisodes.map((entry, index) => ({

@@ -38,6 +38,7 @@ import {
   parseWorldMaxPage,
   parseUnityRecords,
   parseWorldFilterPage,
+  applyWorldUpdates,
   readCatalog,
   writeCatalogsAtomic,
   type CatalogEntry,
@@ -301,7 +302,34 @@ async function crawlSaturn(maxPages: number, deadline: number, previous: Catalog
   return { entries: [...bySlug.values()], capped: parts.length > maxPages || truncatedByCap };
 }
 
-async function crawlWorld(maxPages: number, deadline: number): Promise<CrawlResult> {
+/**
+ * `/updated` è ordinato per ultimo aggiornamento decrescente e porta `Ep N`:
+ * una scheda il cui episodio non è più alto di quello che il catalogo già ha
+ * non è cambiata. Si scende finché una pagina intera non porta niente di nuovo.
+ * `maxPages` qui è un tetto di sicurezza: 20 pagine sono 800 card, ~100 s.
+ */
+const WORLD_UPDATED_MAX_PAGES = 20;
+
+async function crawlWorldDelta(deadline: number, previous: CatalogEntry[]): Promise<CrawlResult> {
+  const bySlug = new Map(previous.map((entry) => [entry.slug, entry]));
+  let pages = 0;
+  let changed = 0;
+  for (let page = 1; page <= WORLD_UPDATED_MAX_PAGES && Date.now() < deadline; page += 1) {
+    const cards = parseWorldFilterPage((await request(`${BASES.world}/updated?page=${page}`)).body, true);
+    if (!cards.length) break;
+    pages += 1;
+    const fresh = applyWorldUpdates(bySlug, cards);
+    changed += fresh;
+    // Una pagina senza niente di nuovo: sotto c'è solo roba più vecchia.
+    if (!fresh) break;
+  }
+  console.log(`[catalog] world: /updated ${pages} pagine, ${changed} schede cambiate`);
+  return { entries: [...bySlug.values()], capped: false };
+}
+
+async function crawlWorld(maxPages: number, deadline: number, previous: CatalogEntry[] = []): Promise<CrawlResult> {
+  // Senza catalogo di ieri il delta non ha una spina dorsale: si cammina /filter.
+  if (previous.length) return crawlWorldDelta(deadline, previous);
   const entries: CatalogEntry[] = [];
   const seen = new Set<string>();
   let declared: number | null = null;
@@ -329,7 +357,7 @@ function csrfFrom(html: string): { xsrf: string; token: string } {
   return { xsrf, token };
 }
 
-async function crawlUnity(maxPages: number, deadline: number): Promise<CrawlResult> {
+async function crawlUnity(maxPages: number, deadline: number, previous: CatalogEntry[] = []): Promise<CrawlResult> {
   // Il GET serve al token CSRF (Laravel) e fa da canary: i dati arrivano dal POST.
   const page = await request(`${BASES.unity}/archivio`);
   const { xsrf, token } = csrfFrom(page.body);
@@ -356,6 +384,14 @@ async function crawlUnity(maxPages: number, deadline: number): Promise<CrawlResu
     });
     const parsed = parseUnityRecords(JSON.parse(response.body));
     if (parsed.total) total = parsed.total;
+    // `tot` è il numero di schede del sito: se è uguale a quante ne ha il
+    // catalogo, la lista è la stessa e i 242 chunk restanti non possono portare
+    // niente di nuovo. Cambia anche quando una scheda viene tolta, quindi non
+    // si può restare indietro in silenzio.
+    if (chunk === 0 && previous.length === total) {
+      console.log(`[catalog] unity: tot ${total} invariato, nessun chunk da rileggere`);
+      return { entries: previous, capped: false };
+    }
     if (!parsed.entries.length) break;
     for (const entry of parsed.entries) {
       if (seen.has(entry.slug)) continue;
