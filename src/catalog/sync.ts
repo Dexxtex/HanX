@@ -31,6 +31,11 @@ export interface CatalogEntry {
   language?: CatalogLanguage;
   /** Data di inizio dichiarata dal sito (`YYYY-MM-DD`), per disambiguare remake omonimi. */
   startDate?: string;
+  /**
+   * Solo Saturn: ultima modifica dichiarata dalla sitemap (`YYYY-MM-DD`). E' il
+   * perno del delta: si rileggono solo le schede la cui data e' cambiata.
+   */
+  lastmod?: string;
   /** Episodi dichiarati: dice se l'episodio richiesto può stare in questa scheda. */
   episodes?: number;
   /**
@@ -110,7 +115,11 @@ export function emptyCatalog(): CatalogFile {
 
 /** Il token finale alfabetico/numerico di Saturn e World è casuale: non fa parte dello slug. */
 const URL_TOKEN = /-[A-Za-z0-9]{5}$/;
-const WORLD_URL_TOKEN = /\.[A-Za-z0-9]{5}$/;
+// Il token dopo lo slug va da 5 a 8 caratteri (misurato sulla sitemap: 3.379 da
+// 5, 485 da 6, 32 da 7, 2 da 8). Con `{5}` restava attaccato allo slug su 541
+// schede, e se il sito rigenera il token lo slug cambia: il carry-over perde
+// l'arricchimento di quelle schede.
+const WORLD_URL_TOKEN = /\.[A-Za-z0-9]{5,8}$/;
 
 function slugTitle(slug: string): string {
   return slug
@@ -132,12 +141,15 @@ export function parseSaturnSitemapIndex(xml: string): string[] {
 export function parseSaturnAnimeSitemap(xml: string, site: CatalogSite = 'saturn'): CatalogEntry[] {
   const $ = cheerio.load(String(xml || ''), { xmlMode: true });
   const out: CatalogEntry[] = [];
-  $('url > loc').each((_, el) => {
-    const url = $(el).text().trim();
+  $('url').each((_, el) => {
+    const $url = $(el);
+    const url = $url.find('> loc').text().trim();
     const match = url.match(/\/anime\/([^/?#]+)\/?$/);
     if (!match) return;
     const slug = match[1];
-    out.push({ site, slug, url, titleSite: slugTitle(slug) });
+    // La data serve al delta: senza, ogni notte si rileggono tutte le schede.
+    const lastmod = $url.find('> lastmod').text().trim().slice(0, 10);
+    out.push({ site, slug, url, titleSite: slugTitle(slug), ...(lastmod ? { lastmod } : {}) });
   });
   return out;
 }
@@ -186,6 +198,7 @@ export function carryOverProgress(previous: CatalogEntry[], entries: CatalogEntr
     field('episodes', old.episodes);
     field('ep', old.ep);
     field('startDate', old.startDate);
+    field('lastmod', old.lastmod);
     field('year', old.year);
     // I titoli si sommano: gli alias presi dalla scheda e quelli di ieri sono
     // tutti veri, e un titolo diverso già presente non si sovrascrive.

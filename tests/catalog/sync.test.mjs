@@ -39,7 +39,7 @@ const SATURN_INDEX = `<?xml version="1.0" encoding="UTF-8"?>
 
 const SATURN_ANIME = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-  <url><loc>https://www.animesaturn.net/anime/tutor-hitman-reborn-tuTL8</loc></url>
+  <url><loc>https://www.animesaturn.net/anime/tutor-hitman-reborn-tuTL8</loc><lastmod>2026-11-10T00:18:44+00:00</lastmod><changefreq>daily</changefreq></url>
   <url><loc>https://www.animesaturn.net/anime/tutor-hitman-reborn-ita-V4SCx</loc></url>
   <url><loc>https://www.animesaturn.net/episode/tutor-hitman-reborn-tuTL8/ep-1</loc></url>
 </urlset>`;
@@ -56,6 +56,10 @@ const WORLD_PAGE = `<div class="film-list">
   <div class="item"><div class="inner">
     <a href="/play/absolute-duo.yMPjX" class="poster"><img alt="Absolute Duo" /></a>
     <a href="/play/absolute-duo.yMPjX" class="name">Absolute Duo</a>
+  </div></div>
+  <div class="item"><div class="inner">
+    <a href="/play/sword-art-online-2.cdkvda" class="poster"><img alt="Sword Art Online II" /></a>
+    <a href="/play/sword-art-online-2.cdkvda" class="name">Sword Art Online II</a>
   </div></div>
   <div class="item"><div class="inner"><a href="/news/1">non una scheda</a></div></div>
 </div>`;
@@ -110,7 +114,11 @@ test('saturn: scheda dallo slug, gli episodi restano fuori', () => {
     slug: 'tutor-hitman-reborn-tuTL8',
     url: 'https://www.animesaturn.net/anime/tutor-hitman-reborn-tuTL8',
     titleSite: 'Tutor Hitman Reborn',
+    // il delta del crawl si regge su questa data
+    lastmod: '2026-11-10',
   });
+  // senza <lastmod> il campo non compare: il delta deve saperlo distinguere
+  assert.equal(entries[1].lastmod, undefined);
 });
 
 test('world: il sito dichiara quante pagine ha (paginationMaxPage)', () => {
@@ -265,7 +273,7 @@ test('saturn: data ed episodi si leggono anche da soli, e una data storta non pa
 
 test('world: una scheda per slug, titolo da a.name, link non-anime scartati', () => {
   const entries = parseWorldFilterPage(WORLD_PAGE);
-  assert.equal(entries.length, 2);
+  assert.equal(entries.length, 3);
   assert.deepEqual(entries, [
     {
       site: 'world',
@@ -280,6 +288,13 @@ test('world: una scheda per slug, titolo da a.name, link non-anime scartati', ()
       slug: 'absolute-duo',
       url: 'https://www.animeworld.ac/play/absolute-duo.yMPjX',
       titleSite: 'Absolute Duo',
+    },
+    {
+      // token di 6 caratteri: prima restava attaccato allo slug
+      site: 'world',
+      slug: 'sword-art-online-2',
+      url: 'https://www.animeworld.ac/play/sword-art-online-2.cdkvda',
+      titleSite: 'Sword Art Online II',
     },
   ]);
 });

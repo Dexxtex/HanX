@@ -1,0 +1,393 @@
+name: Catalog
+
+# Un solo workflow per tenere aggiornato il catalogo:
+#
+#   sync     crawl dei tre siti (un sito per notte, a rotazione) -> branch `data`
+#   enrich   id esterni, titoli, anno, episodi delle schede nuove -> branch `data`
+#   mapping  indice dei titoli per il resolver -> branch `mapping`
+#
+# Prima erano tre workflow separati (`sync-catalog`, `catalog-enrichment`,
+# `anime-mapping`) con due gruppi di concorrenza: sync e arricchimento
+# scrivevano lo stesso branch `data` e si contendevano lo stesso gruppo, il
+# mapping scriveva `mapping`. Uno solo rende la sequenza esplicita (`needs`) e
+# toglie la possibilita' di farli partire insieme per sbaglio.
+#
+# Il crawl NON vive sul branch del codice: il catalogo viene pubblicato sul
+# branch orfano `data` con un solo commit (force-push, niente storia), cosi' i
+# 4-7 MB di JSON non gonfiano il repository. L'indice del mapping vive sul
+# branch orfano `mapping`, stesso motivo.
+
+on:
+  schedule:
+    # Due finestre per stagione, mai al minuto 0: il cron di GitHub in picco
+    # ritarda o scarta le run in silenzio, e la seconda finestra e' la copia di
+    # riserva. Il guard "gia' sincronizzato oggi" impedisce il doppio crawl e
+    # salta anche arricchimento e mapping della seconda finestra.
+    - cron: '37 19 * * *' # 20:37 CET
+    - cron: '37 18 * * *' # 20:37 CEST
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: 'Mapping: entry nuove da convertire in questa run'
+        default: '100'
+      retry:
+        description: 'Mapping: esiti da riaprire (es. no-tmdb). Vuoto = nessuno'
+        default: ''
+      titleit-cap:
+        description: 'Mapping: richieste TMDB per il titolo italiano dei film (0 = off)'
+        default: '600'
+
+# I due branch li scrivono i job: serve contents: write.
+permissions:
+  contents: write
+
+# Un solo scrittore per branch: due run sovrapposte si sovrascriverebbero.
+concurrency:
+  group: catalog
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    # I secret dell'environment `CATALOG` (CATALOG_PROXY) arrivano solo se il job
+    # lo dichiara. L'environment non ha regole di protezione: il cron gira da solo.
+    environment: CATALOG
+    # Timeout con margine per il crawl dei provider e il backfill malId.
+    timeout-minutes: 60
+    outputs:
+      # Serve a enrich e mapping: la seconda finestra della notte non deve
+      # rifare tutto quello che ha gia' fatto la prima.
+      should_run: ${{ steps.fresh.outputs.should_run }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 12.15.0
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # Il catalogo di ieri vive sul branch `data`, non nel workspace: senza
+      # questo ripristino la guardia 70% non avrebbe termine di confronto e un
+      # sito bloccato pubblicherebbe una lista vuota al posto dei suoi dati.
+      - name: Ripristina il catalogo pubblicato
+        run: |
+          mkdir -p data
+          if git fetch -q --depth=1 origin data 2>/dev/null; then
+            git show FETCH_HEAD:catalogs.json > data/catalogs.json 2>/dev/null || true
+            git show FETCH_HEAD:catalog-titles.json > data/catalog-titles.json 2>/dev/null || true
+            git show FETCH_HEAD:last-sync.txt > data/last-sync.txt 2>/dev/null || rm -f data/last-sync.txt
+            [ -s data/last-sync.txt ] || rm -f data/last-sync.txt
+            echo "Ripristinate $(node -e "const d=require('./data/catalogs.json');console.log(Object.values(d.sites).reduce((n,l)=>n+l.length,0))") schede dal branch data."
+          else
+            echo "Branch data assente: primo sync, il catalogo parte vuoto."
+          fi
+
+      # Due finestre per stagione: se la prima ha già sincronizzato stasera, questa è
+      # la copia di riserva e non deve rifare il crawl.
+      - name: Guard già sincronizzato oggi
+        id: fresh
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "Esecuzione manuale (workflow_dispatch): guard disattivato."
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          now=$(date +%s)
+          last=""
+          if [ -s data/last-sync.txt ]; then
+            last=$(tr -d '[:space:]' < data/last-sync.txt)
+          fi
+          # Compatibilità con formato legacy YYYY-MM-DD
+          today=$(TZ=Europe/Rome date +%F)
+          if [ "$last" = "$today" ]; then
+            echo "Catalogo già sincronizzato oggi ($last): nessun crawl."
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          last_epoch=""
+          if [ -n "$last" ]; then
+            if [[ "$last" =~ ^[0-9]+$ ]]; then
+              last_epoch="$last"
+            else
+              last_epoch=$(date -d "$last" +%s 2>/dev/null || true)
+            fi
+          fi
+          if [ -n "$last_epoch" ] && [ $(( now - last_epoch )) -lt 57600 ]; then
+            echo "Catalogo già sincronizzato ($last): nessun crawl."
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Se un sito risponde 403/429 o scende sotto il 70% delle schede, il suo
+      # catalogo resta quello di ieri; gli altri si aggiornano lo stesso e lo
+      # script esce 1, così il job è rosso (GitHub manda la notifica).
+      # CATALOG_PROXY è un IP residenziale: i runner escono da datacenter e il
+      # WAF di AnimeUnity risponde 403. Va in un secret (contiene credenziali),
+      # serve una sessione sticky (stesso IP per tutta la run) e non è un fix
+      # del blocco. Vuoto = nessun proxy.
+      - name: Sync catalogo
+        id: sync
+        if: steps.fresh.outputs.should_run == 'true'
+        env:
+          CATALOG_PROXY: ${{ secrets.CATALOG_PROXY }}
+          # Un sito per notte: il crawl scende a 10-15' e il resto va al
+          # backfill. 650 schede a 3,3 s sono ~36', dentro la deadline di 52'.
+          CATALOG_MALID_MAX_REQUESTS: 650
+          CATALOG_MALID_DEADLINE_MIN: 52
+          # Tappo del crawl: oltre 34' si ferma anche a metà sito.
+          CATALOG_CRAWL_DEADLINE_MIN: 34
+        run: pnpm run sync-catalog
+
+      # `always()`: anche con il sync rosso i siti riusciti vanno pubblicati.
+      - name: Pubblica il catalogo
+        if: always() && steps.fresh.outputs.should_run == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO_URL: https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+        run: |
+          set -euo pipefail
+          if [ ! -f data/catalog-titles.json ] || [ ! -f data/catalogs.json ]; then
+            echo "Nessun catalogo scritto: niente da pubblicare."
+            exit 1
+          fi
+          work=$(mktemp -d)
+          cp data/catalogs.json data/catalog-titles.json "$work"/
+          # Il marcatore si aggiorna solo a sync completato con successo: se fallisce,
+          # si preserva il marcatore precedente così la finestra di riserva può ritentare.
+          if [ "${{ steps.sync.outcome }}" = "success" ]; then
+            date -u +%Y-%m-%dT%H:%M:%SZ > "$work/last-sync.txt"
+          elif [ -s data/last-sync.txt ]; then
+            cp data/last-sync.txt "$work"/
+          fi
+          cd "$work"
+          git init -q -b data
+          git add catalogs.json catalog-titles.json
+          if [ -s last-sync.txt ]; then
+            git add last-sync.txt
+          fi
+          git -c user.name='github-actions[bot]' \
+              -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+              commit -qm "chore(catalog): sync $(TZ=Europe/Rome date +%F)"
+          git remote add origin "$REPO_URL"
+          # generatedAt cambia ogni sera: senza escluderlo si pubblicherebbe
+          # una versione nuova anche quando le schede sono identiche.
+          changed=true
+          if git fetch -q --depth=1 origin data 2>/dev/null; then
+            changed=false
+            for file in catalogs.json catalog-titles.json; do
+              if git show "FETCH_HEAD:$file" 2>/dev/null | jq 'del(.generatedAt)' > old.json; then
+                if ! jq 'del(.generatedAt)' "$file" | diff -q - old.json > /dev/null; then
+                  changed=true
+                fi
+              else
+                changed=true
+              fi
+            done
+            # Il marcatore deve aggiornarsi anche quando il catalogo è identico,
+            # altrimenti la finestra di riserva rifarebbe il crawl.
+            last=$(git show FETCH_HEAD:last-sync.txt 2>/dev/null || true)
+            current_marker=""
+            if [ -s last-sync.txt ]; then
+              current_marker=$(tr -d '[:space:]' < last-sync.txt)
+            fi
+            if [ -n "$current_marker" ] && [ "$(tr -d '[:space:]' <<< "$last")" != "$current_marker" ]; then
+              changed=true
+            fi
+          fi
+          if [ "$changed" = false ]; then
+            echo "Solo generatedAt: il catalogo è identico a quello pubblicato."
+            exit 0
+          fi
+          git push -q -f origin data
+          echo "Pubblicato su data: $(jq '.sites' catalogs.json | jq -c 'map_values(length)')"
+
+  enrich:
+    # Gira anche se il crawl è rosso: il catalogo di ieri è comunque sul branch
+    # e le schede nuove vanno arricchite lo stesso.
+    needs: sync
+    if: always() && needs.sync.outputs.should_run == 'true'
+    runs-on: ubuntu-latest
+    # Stessa rete del sync: i secret dell'environment `CATALOG` (CATALOG_PROXY)
+    # arrivano solo se il job lo dichiara, e servono lo stesso IP residenziale.
+    environment: CATALOG
+    timeout-minutes: 40
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 12.15.0
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # Il catalogo vive sul branch `data`: senza ripristino non ci sarebbe
+      # niente da arricchire. Il ripristino rilegge quello che ha appena
+      # pubblicato il job `sync`.
+      - name: Ripristina il catalogo pubblicato
+        id: restore
+        run: |
+          mkdir -p data
+          if git fetch -q --depth=1 origin data 2>/dev/null; then
+            git show FETCH_HEAD:catalogs.json > data/catalogs.json
+            git show FETCH_HEAD:catalog-titles.json > data/catalog-titles.json
+            # Il marcatore del sync si ripristina e si ripubblica per evitare
+            # che l'arricchimento lo cancelli con il force-push.
+            git show FETCH_HEAD:last-sync.txt > data/last-sync.txt 2>/dev/null || rm -f data/last-sync.txt
+            [ -s data/last-sync.txt ] || rm -f data/last-sync.txt
+            echo "Ripristinate $(node -e "const d=require('./data/catalogs.json');console.log(Object.values(d.sites).reduce((n,l)=>n+l.length,0))") schede dal branch data."
+          else
+            echo "Branch data assente: salto l'arricchimento, la run resta verde." >&2
+            echo "restored=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Le schede lette da meno di 30 giorni non si rileggono: quando il backlog
+      # è finito questa fase costa quasi nulla e prende solo le schede nuove.
+      - name: Arricchisci il catalogo
+        if: steps.restore.outputs.restored != 'false'
+        env:
+          CATALOG_PROXY: ${{ secrets.CATALOG_PROXY }}
+          CATALOG_MALID_MAX_REQUESTS: 600
+          CATALOG_MALID_DEADLINE_MIN: 32
+        run: pnpm run enrich-catalog
+
+      # Pubblica solo se il contenuto è cambiato: `generatedAt` non conta.
+      - name: Pubblica le schede arricchite
+        if: always() && hashFiles('data/catalogs.json') != ''
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO_URL: https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+        run: |
+          set -euo pipefail
+          if [ ! -f data/catalog-titles.json ] || [ ! -f data/catalogs.json ]; then
+            echo "Nessun catalogo scritto: niente da pubblicare."
+            exit 1
+          fi
+          work=$(mktemp -d)
+          cp data/catalogs.json data/catalog-titles.json "$work"/
+          if [ -s data/last-sync.txt ]; then
+            cp data/last-sync.txt "$work"/
+          fi
+          cd "$work"
+          git init -q -b data
+          git add catalogs.json catalog-titles.json
+          if [ -s last-sync.txt ]; then
+            git add last-sync.txt
+          fi
+          git -c user.name='github-actions[bot]' \
+              -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+              commit -qm "chore(catalog): arricchimento $(TZ=Europe/Rome date +%F' '%H:%M)"
+          git remote add origin "$REPO_URL"
+          changed=true
+          if git fetch -q --depth=1 origin data 2>/dev/null; then
+            changed=false
+            for file in catalogs.json catalog-titles.json; do
+              if git show "FETCH_HEAD:$file" 2>/dev/null | jq 'del(.generatedAt)' > old.json; then
+                if ! jq 'del(.generatedAt)' "$file" | diff -q - old.json > /dev/null; then
+                  changed=true
+                fi
+              else
+                changed=true
+              fi
+            done
+          fi
+          if [ "$changed" = false ]; then
+            echo "Nessuna scheda nuova: il catalogo è identico a quello pubblicato."
+            exit 0
+          fi
+          git push -q -f origin data
+          echo "Pubblicato su data: $(jq '[.sites[][] | .malId | select(. != null)] | length' catalogs.json) schede con malId"
+
+  mapping:
+    # L'indice non dipende dal catalogo (legge Tenrai e il proprio cursore), ma
+    # gira dopo: cosi' la seconda finestra della notte non lo rifa'.
+    needs: enrich
+    if: always() && needs.sync.outputs.should_run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      JIKAN_API_BASE: https://api.tenrai.org/v1
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GITHUB_REPO: ${{ github.repository }}
+      GITHUB_MAPPING_BRANCH: mapping
+      TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
+      TVDB_API_KEY: ${{ secrets.TVDB_API_KEY }}
+      TVDB_PIN: ${{ secrets.TVDB_PIN }}
+      ANIME_MAPPING_FILE: data/anime-seasons.json
+      ANIME_MAPPING_STATE: data/jikan-progress.json
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 26
+
+      # Il cursore vive sul branch, non nel repo: al primo giro non esiste
+      # e la build parte da zero (o dall'indice già pubblicato dal server).
+      # La vecchia release "mapping" resta come fallback finché il branch non c'è.
+      # Se il branch esiste ma non si riesce a leggerlo, la run si ferma: meglio
+      # nessun aggiornamento che pubblicare un indice parziale al suo posto.
+      - name: Ripristina indice e cursore
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p data
+          branch_status=0
+          git ls-remote --exit-code --heads origin "$GITHUB_MAPPING_BRANCH" >/dev/null 2>&1 \
+            || branch_status=$?
+          if [ "$branch_status" -eq 0 ]; then
+            git fetch --depth=1 origin \
+              "refs/heads/$GITHUB_MAPPING_BRANCH:refs/remotes/origin/$GITHUB_MAPPING_BRANCH"
+            for file in anime-seasons.json jikan-progress.json; do
+              git cat-file -e "origin/$GITHUB_MAPPING_BRANCH:$file"
+              git show "origin/$GITHUB_MAPPING_BRANCH:$file" > "data/$file"
+            done
+          elif [ "$branch_status" -eq 2 ]; then
+            echo "branch $GITHUB_MAPPING_BRANCH assente: provo la vecchia release"
+            gh release download mapping --pattern 'anime-seasons.json' --dir data --clobber \
+              || echo "nessun indice pubblicato: prima build"
+            gh release download mapping --pattern 'jikan-progress.json' --dir data --clobber \
+              || echo "nessun cursore pubblicato: riparte dal catalogo"
+          else
+            echo "git ls-remote fallito (exit $branch_status): non pubblico un indice parziale" >&2
+            exit 1
+          fi
+
+      - name: Converti e pubblica
+        run: >-
+          node scripts/build/build-anime-mapping.mjs
+          --limit=${{ inputs.limit || 100 }}
+          --titleit-cap=${{ inputs.titleit-cap || 600 }}
+          --publish
+          ${{ inputs.retry && format('--retry={0} --retry-limit={1}', inputs.retry, inputs.limit || 100) || '' }}
+
+      # La release conteneva solo gli asset: ora vivono sul branch.
+      - name: Ritira la vecchia release mapping
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if git ls-remote --exit-code --heads origin "$GITHUB_MAPPING_BRANCH" >/dev/null 2>&1; then
+            gh release delete mapping --yes --cleanup-tag || true
+          fi

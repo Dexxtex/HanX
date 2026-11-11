@@ -3,7 +3,9 @@
  * Catalogo locale AnimeSaturn / AnimeWorld / AnimeUnity.
  *
  * Budget di rete (dichiarato prima delle richieste, regole in AGENTS.md):
- * - una richiesta alla volta, 3 s tra la fine di una e l'inizio della successiva;
+ * - una richiesta alla volta, 3 s tra la fine di una e l'inizio della successiva
+ *   (`CATALOG_INTERVAL_MS`, pavimento 1 s: è la tariffa misurata sicura, e qui
+ *   è globale, quindi ogni host vede una richiesta ogni 3 s);
  * - timeout 15 s, User-Agent esplicito, 2 retry con backoff solo su 5xx/rete;
  * - 403 ferma tutto subito; 429 fa **una** attesa di 60 s e un retry, poi ferma
  *   tutto (regola di AGENTS.md: un rate-limit transitorio non è un WAF);
@@ -26,6 +28,8 @@ import {
   diffEntries,
   emptyCatalog,
   mergeSite,
+  applyCardDetails,
+  parseCardDetails,
   parseSaturnAnimeSitemap,
   parseSaturnFilterPage,
   parseSaturnSitemapIndex,
@@ -44,7 +48,7 @@ import {
 const DATA_DIR = path.resolve(fileURLToPath(new URL('../../data', import.meta.url)));
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36';
 const TIMEOUT_MS = Number(process.env.CATALOG_TIMEOUT_MS) || 15_000;
-const INTERVAL_MS = Math.max(3_000, Number(process.env.CATALOG_INTERVAL_MS) || 3_000);
+const INTERVAL_MS = Math.max(1_000, Number(process.env.CATALOG_INTERVAL_MS) || 3_000);
 const RETRIES = 2;
 const BACKOFF_MS = [1_500, 4_000];
 
@@ -87,8 +91,31 @@ function rememberCookies(headers: Headers): void {
   }
 }
 
+/**
+ * Legge il corpo fermandosi a `maxBytes`. Serve alle schede di Saturn: gli id
+ * stanno in `div.ag-links`, che finisce fra 28.618 e 29.520 byte su 10 schede
+ * da 82 KB a 650 KB — il resto e' la lista episodi.
+ */
+async function readCapped(response: Response, maxBytes: number): Promise<string> {
+  const reader = response.body?.getReader();
+  if (!reader) return response.text();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    size += value.length;
+    if (size >= maxBytes) {
+      await reader.cancel().catch(() => {});
+      break;
+    }
+  }
+  return Buffer.concat(chunks).toString('utf8');
+}
+
 /** Una richiesta alla volta, con lo slot successivo calcolato dalla fine della precedente. */
-async function request(url: string, init: RequestInit = {}): Promise<{ body: string; headers: Headers }> {
+async function request(url: string, init: RequestInit = {}, maxBytes = 0): Promise<{ body: string; headers: Headers }> {
   for (let attempt = 0; ; attempt += 1) {
     const wait = nextSlot - Date.now();
     if (wait > 0) await sleep(wait);
@@ -129,7 +156,7 @@ async function request(url: string, init: RequestInit = {}): Promise<{ body: str
       continue;
     }
     if (!response.ok) throw new Error(`${response.status} su ${url}`);
-    const body = await response.text();
+    const body = maxBytes ? await readCapped(response, maxBytes) : await response.text();
     // Ricalcolato a fine corpo: prima restava fissato agli header, quindi il gap
     // reale era header→header e la pagina lenta accorciava il pacing.
     nextSlot = Date.now() + INTERVAL_MS;
@@ -143,14 +170,27 @@ interface CrawlResult {
   capped: boolean;
 }
 
+/** Il titolo vero della scheda: lo slug non lo contiene. */
+function jsonLdTitle(html: string): string {
+  const raw = html.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/)?.[1];
+  if (!raw) return '';
+  try {
+    return String(JSON.parse(raw).name || '').trim();
+  } catch {
+    return '';
+  }
+}
+
 /**
  * Tetto del walk di /filter, su tutte le partizioni di tipo insieme. Il walk
  * arriva in fondo quando una partizione risponde con una pagina vuota: il
  * budget è solo un freno, non un piano.
  */
 const SATURN_WALK_BUDGET = 260;
+/** Oltre questo l'abort ha tagliato prima di `div.ag-links`: si rilegge intera. */
+const SATURN_CARD_BYTES = 32 * 1024;
 
-async function crawlSaturn(maxPages: number, deadline: number): Promise<CrawlResult> {
+async function crawlSaturn(maxPages: number, deadline: number, previous: CatalogEntry[] = []): Promise<CrawlResult> {
   const index = await request(`${BASES.saturn}/sitemap.xml`);
   const parts = parseSaturnSitemapIndex(index.body);
   if (!parts.length) throw new Error('sitemap index senza parti /sitemap-anime-*.xml');
@@ -161,6 +201,56 @@ async function crawlSaturn(maxPages: number, deadline: number): Promise<CrawlRes
     for (const entry of parseSaturnAnimeSitemap((await request(part)).body)) bySlug.set(entry.slug, entry);
   }
   const spine = bySlug.size;
+
+  // DELTA: la sitemap dichiara `<lastmod>` per scheda. Se il catalogo di ieri ha
+  // la stessa data, la scheda non e' cambiata e si tiene quella (zero richieste).
+  // Cambiate e nuove si leggono qui, con l'abort a 32 KB; quelle gia' arricchite
+  // non hanno `enrichedAt`, quindi l'arricchimento le riprende e conferma gli id.
+  // Senza catalogo di ieri (primo giro) o senza date si fa il crawl pieno.
+  const prevBySlug = new Map(previous.map((entry) => [entry.slug, entry]));
+  const delta = previous.length > 0 && [...bySlug.values()].some((entry) => entry.lastmod);
+  if (delta) {
+    const toRead: CatalogEntry[] = [];
+    for (const item of bySlug.values()) {
+      const old = prevBySlug.get(item.slug);
+      // `===` anche quando la data manca da entrambe le parti: le 7 schede senza
+      // `<lastmod>` nella sitemap non vanno rilette ogni notte.
+      if (old && old.lastmod === item.lastmod) {
+        bySlug.set(item.slug, old);
+        continue;
+      }
+      toRead.push(item);
+    }
+    let read = 0;
+    let full = 0;
+    for (const item of toRead) {
+      if (Date.now() >= deadline) break;
+      const old = prevBySlug.get(item.slug);
+      let body = (await request(item.url, {}, SATURN_CARD_BYTES)).body;
+      if (!body.includes('myanimelist.net/anime/')) {
+        body = (await request(item.url)).body;
+        full += 1;
+      }
+      const details = parseCardDetails(body, 'saturn');
+      const entry: CatalogEntry = {
+        ...(old || {}),
+        site: 'saturn',
+        slug: item.slug,
+        url: item.url,
+        titleSite: jsonLdTitle(body) || old?.titleSite || item.titleSite,
+        ...(item.lastmod ? { lastmod: item.lastmod } : {}),
+      };
+      // `malId` non si scrive senza la conferma di AniList: la fa l'arricchimento.
+      applyCardDetails(entry, details, new Map());
+      bySlug.set(item.slug, entry);
+      read += 1;
+    }
+    console.log(
+      `[catalog] saturn: ${bySlug.size} schede, ${bySlug.size - read} invariate (lastmod), ` +
+        `${read} rilette (${full} intere), ${toRead.length - read} oltre la deadline`
+    );
+    return { entries: [...bySlug.values()], capped: parts.length > maxPages || read < toRead.length };
+  }
   // Una partizione di tipo per giro: le pagine in totale restano ~206, e il tipo
   // arriva dal filtro invece di essere dedotto. Titolo e data sono in ogni card.
   let budget = SATURN_WALK_BUDGET;
@@ -315,7 +405,7 @@ function enrichMalIds(catalog: CatalogFile, startedAt: number) {
   });
 }
 
-const CRAWLERS: Record<CatalogSite, (maxPages: number, deadline: number) => Promise<CrawlResult>> = {
+const CRAWLERS: Record<CatalogSite, (maxPages: number, deadline: number, previous: CatalogEntry[]) => Promise<CrawlResult>> = {
   saturn: crawlSaturn,
   world: crawlWorld,
   unity: crawlUnity,
@@ -420,7 +510,7 @@ async function main(): Promise<number> {
     const siteStart = Date.now();
     let result: CrawlResult;
     try {
-      result = await CRAWLERS[site](options.maxPages[site], crawlDeadline);
+      result = await CRAWLERS[site](options.maxPages[site], crawlDeadline, previous.sites[site] || []);
     } catch (err: any) {
       // Un sito bloccato non ferma gli altri (host diversi): il suo catalogo
       // resta quello di ieri, gli altri si aggiornano e il job esce rosso.
