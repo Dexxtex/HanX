@@ -17,31 +17,27 @@ const hostTails = new Map<string, Promise<unknown>>();
 const hostLastAt = new Map<string, number>();
 
 /**
- * Pavimento: 125 ms = 8 richieste al secondo per host. È il massimo misurato
- * (11/11/2026, rampa con stop al primo 429 sulle pagine HTML) che passa su tutti
- * e tre i siti senza perdere una richiesta: Saturn 12 req/s (50/50), World 12
- * (200/200), Unity 8 (300/300; a 12 l'8,5% di 503, a 16 il 20-28%).
+ * Richieste al secondo per host. Il numero è la velocità: più alto = più veloce.
  *
- * Default 500 ms = 2 req/s, il profilo prudente: il tetto è per host, non per
- * istanza, quindi quattro container sullo stesso IP a 2 req/s fanno gli 8
- * misurati. Chi ha una sola istanza scende a 0.125 dalla variabile.
+ * Default 2, tetto 8 — l'8 è il massimo misurato (11/11/2026, rampa con stop al
+ * primo 429 sulle pagine HTML): Saturn 12 req/s (50/50), World 12 (200/200),
+ * Unity 8 (300/300; a 12 l'8,5% di 503, a 16 il 20-28%). Sopra 8 non si sale:
+ * Unity è il collo di bottiglia e comincia a rifiutare.
  *
- * `ANIME_HOST_MIN_INTERVAL_SEC` può solo **rallentare** (fino a 5 s): sotto il
- * pavimento la protezione che è costata il 403 del 25/10 sparisce, e quel blocco
- * arrivò su `/api/search`, la rotta vietata da robots.txt, non sulle pagine.
+ * Il tetto è **per host, non per istanza**: quattro container sullo stesso IP a 2
+ * req/s fanno gli 8 misurati. Chi ha una sola istanza può salire a 8.
  */
-const MIN_HOST_INTERVAL_FLOOR_MS = 125;
-const MIN_HOST_INTERVAL_DEFAULT_MS = 500;
-const MIN_HOST_INTERVAL_CEILING_MS = 5_000;
+const MIN_HOST_RPS_FLOOR = 1;
+const MIN_HOST_RPS_DEFAULT = 2;
+const MIN_HOST_RPS_CEILING = 8;
 
-/** Secondi dall'ambiente, millisecondi dentro. Fuori range = pavimento. */
-function readIntervalMs(): number {
-  const raw = String(process.env.ANIME_HOST_MIN_INTERVAL_SEC ?? '').trim();
-  if (!raw) return MIN_HOST_INTERVAL_DEFAULT_MS;
-  const seconds = Number(raw);
-  if (!Number.isFinite(seconds) || seconds <= 0) return MIN_HOST_INTERVAL_DEFAULT_MS;
-  const ms = Math.round(seconds * 1_000);
-  return Math.min(MIN_HOST_INTERVAL_CEILING_MS, Math.max(MIN_HOST_INTERVAL_FLOOR_MS, ms));
+/** Richieste al secondo dall'ambiente, intervallo in millisecondi dentro. */
+function readRps(): number {
+  const raw = String(process.env.ANIME_HOST_MAX_RPS ?? '').trim();
+  if (!raw) return MIN_HOST_RPS_DEFAULT;
+  const rps = Number(raw);
+  if (!Number.isFinite(rps) || rps <= 0) return MIN_HOST_RPS_DEFAULT;
+  return Math.min(MIN_HOST_RPS_CEILING, Math.max(MIN_HOST_RPS_FLOOR, rps));
 }
 
 /** Solo per i test: senza, ogni richiesta pagherebbe il pacing. */
@@ -51,7 +47,8 @@ export function setMinHostIntervalMs(ms: number | null): void {
 }
 
 export function minHostIntervalMs(): number {
-  return testOverride ?? readIntervalMs();
+  if (testOverride !== null) return testOverride;
+  return Math.round(1_000 / readRps());
 }
 
 /**
