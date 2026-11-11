@@ -1,43 +1,15 @@
 /**
  * anime-core/provider-urls.ts
- * Dynamic provider URL resolution: env override, then local JSON file, then
- * config/domains.json.
- * Ported 1:1 from easystreams-main provider_urls.js.
+ * Base URL dei tre provider: **solo** `config/domains.json`.
  *
- * Reload strategy:
- * - Local JSON file checked every 1.5 s (stat mtime)
- * - Remote JSON refreshed every 10 s, usato solo per le chiavi assenti nel file
- *   locale: non sovrascrive mai l'override locale.
+ * Prima c'erano quattro livelli per la stessa informazione: env `*_BASE_URL`,
+ * `config/provider_urls.json`, un JSON remoto di terzi rifetchato ogni 10 s, e
+ * `domains.json`. Il workflow `update-domains` ne aggiornava due, e un override
+ * poteva vincere su un dominio appena corretto. Resta il file dei domini: se un
+ * sito cambia host, lo aggiorna quel workflow.
  */
 
-import { fileURLToPath } from 'node:url';
-import { dirname } from 'node:path';
-import * as fs from 'fs';
-import * as path from 'path';
 import { getDomain } from '../../utils/domains.js';
-import { debug } from '../../utils/logger.js';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
-// ─── Configuration ──────────────────────────────────────────
-
-const PROVIDER_URLS_FILE: string = process.env.PROVIDER_URLS_FILE
-  ? path.resolve(process.env.PROVIDER_URLS_FILE)
-  : path.resolve(__dirname, '..', '..', '..', 'config', 'provider_urls.json');
-
-const RELOAD_INTERVAL_MS = Number.parseInt(process.env.PROVIDER_URLS_RELOAD_MS || '1500', 10) || 1500;
-
-const DEFAULT_PROVIDER_URLS_URL =
-  'https://raw.githubusercontent.com/realbestia1/easystreams/refs/heads/main/provider_urls.json';
-const PROVIDER_URLS_URL = String(process.env.PROVIDER_URLS_URL || DEFAULT_PROVIDER_URLS_URL).trim();
-
-const REMOTE_RELOAD_INTERVAL_MS =
-  Number.parseInt(process.env.PROVIDER_URLS_REMOTE_RELOAD_MS || '10000', 10) || 10000;
-const REMOTE_FETCH_TIMEOUT_MS =
-  Number.parseInt(process.env.PROVIDER_URLS_REMOTE_TIMEOUT_MS || '5000', 10) || 5000;
-
-// ─── Alias map (same as easystreams) ────────────────────────
 
 const ALIASES: Record<string, string[]> = {
   animeunity: ['animeunuty', 'anime_unity'],
@@ -51,31 +23,14 @@ const DOMAIN_KEY_MAP: Record<string, string> = {
   animesaturn: 'animesaturn',
 };
 
-// ─── Internal state ─────────────────────────────────────────
-
-let lastCheckAt = 0;
-let lastMtimeMs = -1;
-let lastData: Record<string, string> = {};
-let lastRemoteData: Record<string, string> = {};
-let lastRemoteCheckAt = 0;
-let remoteInFlight: Promise<void> | null = null;
-
-// ─── Helpers ────────────────────────────────────────────────
-
 function normalizeKey(key: string): string {
   return String(key || '').trim().toLowerCase();
 }
 
-function normalizeUrl(value: string | undefined): string {
-  const text = String(value || '').trim();
-  if (!text) return '';
-  return text.replace(/\/+$/, '');
-}
-
 /**
  * Loopback, reti private, link-local e CGNAT: non sono siti, sono SSRF.
- * Il JSON remoto (rifetchato ogni 10 s) diventa la base URL di ogni provider,
- * quindi il controllo sta qui e non nel chiamante.
+ * Il file dei domini è versionato, ma un dominio sbagliato non deve poter
+ * puntare il provider a `127.0.0.1`.
  */
 function isPrivateHost(hostname: string): boolean {
   const host = String(hostname || '').toLowerCase().replace(/^\[|\]$/g, '');
@@ -123,141 +78,19 @@ export function isUsableBaseUrl(value: string): boolean {
   }
 }
 
-function toNormalizedMap(raw: any, validate = false): Record<string, string> {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
-  const out: Record<string, string> = {};
-  for (const [key, value] of Object.entries(raw)) {
-    const nk = normalizeKey(key);
-    const nv = normalizeUrl(value as string);
-    if (!nk || !nv) continue;
-    // Solo il JSON remoto è non fidato: il file locale è dell'operatore e può
-    // puntare a un mirror in LAN (è la ragione per cui esiste PROVIDER_URLS_FILE).
-    if (validate && !isUsableBaseUrl(nv)) {
-      debug(1, 'ProviderUrls', 'base URL rifiutata: schema non http(s) o host privato', { key: nk });
-      continue;
-    }
-    out[nk] = nv;
-  }
-  return out;
-}
-
-// ─── Local file reload ──────────────────────────────────────
-
-function reloadProviderUrlsIfNeeded(force = false): void {
-  const now = Date.now();
-  if (!force && now - lastCheckAt < RELOAD_INTERVAL_MS) return;
-  lastCheckAt = now;
-
-  let stat: fs.Stats;
-  try {
-    stat = fs.statSync(PROVIDER_URLS_FILE);
-  } catch {
-    if (lastMtimeMs !== -1) {
-      lastMtimeMs = -1;
-      lastData = {};
-    }
-    return;
-  }
-
-  if (!force && stat.mtimeMs === lastMtimeMs) return;
-
-  try {
-    const raw = fs.readFileSync(PROVIDER_URLS_FILE, 'utf8');
-    const parsed = JSON.parse(raw);
-    lastData = toNormalizedMap(parsed);
-    lastMtimeMs = stat.mtimeMs;
-  } catch {
-    lastData = {};
-    lastMtimeMs = stat.mtimeMs;
-  }
-}
-
-// ─── Remote refresh ─────────────────────────────────────────
-
-async function refreshProviderUrlsFromRemoteIfNeeded(force = false): Promise<void> {
-  if (!PROVIDER_URLS_URL) return;
-  if (remoteInFlight) return;
-
-  const now = Date.now();
-  if (!force && now - lastRemoteCheckAt < REMOTE_RELOAD_INTERVAL_MS) return;
-  lastRemoteCheckAt = now;
-
-  remoteInFlight = (async () => {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), REMOTE_FETCH_TIMEOUT_MS);
-    try {
-      const response = await fetch(PROVIDER_URLS_URL, {
-        signal: controller.signal,
-        headers: { accept: 'application/json' },
-      });
-      if (!response || !response.ok) return;
-      const payload = await response.json();
-      const parsed = toNormalizedMap(payload, true);
-      if (Object.keys(parsed).length > 0) {
-        lastRemoteData = parsed;
-      }
-    } catch {
-      // Ignore remote refresh errors — keep last known values.
-    } finally {
-      clearTimeout(timeoutId);
-      remoteInFlight = null;
-    }
-  })();
-}
-
-// ─── Public API ─────────────────────────────────────────────
-
-function findFromJson(providerKey: string): string {
-  reloadProviderUrlsIfNeeded(false);
-
+/** Base URL del provider, da `config/domains.json`. Stringa vuota = non risolto. */
+export function getProviderUrl(providerKey: string): string {
   const key = normalizeKey(providerKey);
-  const candidates = [key, ...(ALIASES[key] || [])].map(normalizeKey);
-  for (const candidate of candidates) {
-    const value = normalizeUrl(lastData[candidate]);
-    if (value) return value;
-  }
-  // Solo se il file locale non copre la chiave: il remoto è un fallback e non
-  // deve sovrascrivere un override locale.
-  for (const candidate of candidates) {
-    const value = normalizeUrl(lastRemoteData[candidate]);
-    if (value) return value;
-  }
-  refreshProviderUrlsFromRemoteIfNeeded(false);
-  return '';
-}
-
-function findFromEnv(envKeys: string[] = []): string {
-  for (const envKey of envKeys) {
-    const value = normalizeUrl(process.env[envKey]);
-    if (value) return value;
-  }
-  return '';
-}
-
-function findFromDomains(providerKey: string): string {
-  const key = normalizeKey(providerKey);
-  const candidates = [key, ...(ALIASES[key] || [])].map(normalizeKey);
-  for (const candidate of candidates) {
+  for (const candidate of [key, ...(ALIASES[key] || [])].map(normalizeKey)) {
     const domainKey = DOMAIN_KEY_MAP[candidate];
     if (!domainKey) continue;
-    const host = String(getDomain(domainKey) || '').trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '');
+    const host = String(getDomain(domainKey) || '')
+      .trim()
+      .replace(/^https?:\/\//i, '')
+      .replace(/\/+$/, '');
     if (!host) continue;
-    return `https://${host}`;
+    const url = `https://${host}`;
+    return isUsableBaseUrl(url) ? url : '';
   }
-  return '';
-}
-
-/**
- * Resolve a provider URL.
- * Precedenza: env esplicito -> file JSON locale -> config/domains.json.
- */
-export function getProviderUrl(providerKey: string, envKeys: string[] = []): string {
-  const safeEnvKeys = Array.isArray(envKeys) ? envKeys : [];
-  const fromEnv = findFromEnv(safeEnvKeys);
-  if (fromEnv) return fromEnv;
-  const fromJson = findFromJson(providerKey);
-  if (fromJson) return fromJson;
-  const fromDomains = findFromDomains(providerKey);
-  if (fromDomains) return fromDomains;
   return '';
 }

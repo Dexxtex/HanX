@@ -1,5 +1,4 @@
 import * as cheerio from 'cheerio';
-import { normalizeBool } from '../config.js';
 import { getDomain } from '../utils/domains.js';
 import { debug, redactUrl } from '../utils/logger.js';
 import { AnimeWorldConfig, AnimeWorldResult, AnimeWorldEpisode, StreamForStremio } from '../types/animeunity.js';
@@ -20,6 +19,7 @@ import {
 } from '../utils/anime-title-normalization.js';
 import {
   createCaches,
+  DEFAULT_FETCH_TIMEOUT,
   fetchResource,
   getProviderUrl,
   getEnglishTitleFromAnyId,
@@ -44,8 +44,7 @@ import {
 
 // --- Type definitions for external API responses ---
 
-const AW_FETCH_TIMEOUT = Number.parseInt(process.env.ANIMEWORLD_FETCH_TIMEOUT_MS || '10000', 10) || 10000;
-const ALLOW_EMPTY_TITLE = normalizeBool(process.env.AW_ALLOW_EMPTY_TITLE) ?? false;
+const AW_FETCH_TIMEOUT = DEFAULT_FETCH_TIMEOUT;
 const awCaches = createCaches();
 
 // ─── Cloudflare/SecurityAW2 challenge bypass ───────────────
@@ -65,9 +64,7 @@ function awCookieFor(exitLabel: string): string | null {
   return awSecurityCookies.get(exitLabel) || null;
 }
 
-const AW_USER_AGENT =
-  process.env.AW_USER_AGENT ||
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36';
+const AW_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36';
 // Le liste cambiano di rado: 12 ore evitano di rifare la stessa ricerca (e di
 // ripresentare la raffica al WAF) a ogni apertura.
 const AW_SEARCH_TTL_MS = 12 * 60 * 60 * 1000;
@@ -153,12 +150,12 @@ async function awFetchHtml(
 
 // ─── Page Context helpers (ported from easystreams) ─────────
 function getWorldBaseUrl(): string {
-  const configured = getProviderUrl('animeworld', ['ANIMEWORLD_BASE_URL', 'AW_BASE_URL']);
+  const configured = getProviderUrl('animeworld');
   let raw = configured || `https://${getDomain('animeworld') || 'animeworld.ac'}`;
   raw = raw.replace(/\/+$/, '');
   // Ensure the www. subdomain: the apex animeworld.ac issues a different
   // SecurityAW2 cookie that does NOT unlock /play/ pages, so we always force
-  // www. regardless of what provider_urls.json / domains.json contain.
+  // www. regardless of what domains.json contains.
   try {
     const u = new URL(raw);
     if (!/^www\./i.test(u.hostname)) u.hostname = `www.${u.hostname}`;
@@ -924,7 +921,6 @@ export class AnimeWorldProvider {
     return {
       label: 'AnimeWorld',
       tmdbApiKey: this.config.tmdbApiKey,
-      allowEmptyTitle: ALLOW_EMPTY_TITLE,
       handleTitleRequest: (title, season, episode, isMovie, titleAlt, titleIt, titleItSeason, malId, kitsuStartDate) =>
         this.handleTitleRequest(title, season, episode, isMovie, titleAlt, titleIt, titleItSeason, malId, kitsuStartDate),
       handleUnmappedSeries: (request, episodeNumber) => this.handleUnmappedSeries(request, episodeNumber),

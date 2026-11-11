@@ -1,7 +1,7 @@
 // Helper to decide if an external ID refers to an Anime title.
 // Strategy:
 // 1) The local mapping index is authoritative: a mapped series/movie is anime.
-// 2) Soft fallback (ANIME_GATE_TMDB_FALLBACK, default true): TMDB details with
+// 2) Soft fallback (sempre attivo): TMDB details with
 //    Animation genre and Japanese origin for un-mapped ids.
 // 3) Upstream failures are permissive (an outage is not "not anime").
 // Feature flag: ANIME_GATE_ENABLED (default true). Callers can still import and decide.
@@ -9,7 +9,6 @@
 export type ExternalIdType = 'imdb' | 'tmdb' | 'tvdb';
 import { hasMappedEntry, hasMappedSeries } from '../mapping/index.js';
 import { debug } from './logger.js';
-import { normalizeBool } from '../config.js';
 
 export interface AnimeGateResult {
   isAnime: boolean;
@@ -148,11 +147,9 @@ async function resolveAnimeGate(
     debug(2, 'AnimeGate', 'anime (unknown)', { type, id, reason: 'no-tmdb-id' });
     return { isAnime: true, hasMal: false, hasKitsu: false, reason: 'no-tmdb-id' };
   }
-  // Un-mapped: only official TMDB details decide.
-  const allowTmdbFallback = (normalizeBool(process.env.ANIME_GATE_TMDB_FALLBACK) ?? true);
-  if (!allowTmdbFallback) {
-    return { isAnime: false, hasMal: false, hasKitsu: false, reason: 'no-mapping-and-fallback-disabled' };
-  }
+  // Un-mapped: only official TMDB details decide. Il fallback non e' una
+  // variabile: senza, un id fuori dall'indice non avrebbe nessun modo di
+  // passare il gate.
   // Il verdetto positivo arriva già da `/find`: una seconda richiesta servirebbe
   // solo a confermarlo. Il "non anime" invece si verifica sui dettagli pieni.
   if (fromFind?.isAnime) {

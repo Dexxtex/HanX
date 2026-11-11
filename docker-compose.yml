@@ -7,15 +7,60 @@ services:
     # `.env` o dalla shell, `env_file` no.
     ports:
       - "${PORT:-7000}:${PORT:-7000}"
-    environment:
-      PORT: "${PORT:-7000}"
     volumes:
       - hanx-data:/app/data
-    # Tutte le variabili stanno in .env (obbligatorie e opzionali, vedi
-    # env.example)
-    env_file:
-      - .env
     restart: unless-stopped
+    # Ogni variabile ha qui il suo default: il `.env` (o la shell) la sovrascrive.
+    # `env_file` non serve, e se ci fosse vincerebbe `environment`.
+    environment:
+      # --- obbligatorie ---
+      ANIME_MAPPING_URL: ${ANIME_MAPPING_URL:-https://raw.githubusercontent.com/Dexxtex/HanX/mapping/anime-seasons.json}
+      CATALOG_URL: ${CATALOG_URL:-https://raw.githubusercontent.com/Dexxtex/HanX/data/catalogs.json}
+      TMDB_API_KEY: ${TMDB_API_KEY:-}
+      PORT: ${PORT:-7000}
+
+      # --- chiavi facoltative ---
+      TVDB_API_KEY: ${TVDB_API_KEY:-}
+      TVDB_PIN: ${TVDB_PIN:-}
+
+      # --- easyproxy (HLS via proxy) ---
+      EASYPROXY_URL: ${EASYPROXY_URL:-}
+      EASYPROXY_PASSWORD: ${EASYPROXY_PASSWORD:-}
+
+      # --- proxy di rete (ricerca e scraping) ---
+      PROXY: ${PROXY:-}
+      AU_PROXY: ${AU_PROXY:-}
+      AS_PROXY: ${AS_PROXY:-}
+      AW_PROXY: ${AW_PROXY:-}
+
+      # --- provider ---
+      ANIMEUNITY_ENABLED: ${ANIMEUNITY_ENABLED:-true}
+      ANIMESATURN_ENABLED: ${ANIMESATURN_ENABLED:-true}
+      ANIMEWORLD_ENABLED: ${ANIMEWORLD_ENABLED:-true}
+      ANIMEUNITY_PREFER_MP4: ${ANIMEUNITY_PREFER_MP4:-0}
+      # Via d'uscita se il gate rifiuta un anime vero.
+      ANIME_GATE_ENABLED: ${ANIME_GATE_ENABLED:-true}
+
+      # --- cache ---
+      PROVIDER_CACHE_DISABLE: ${PROVIDER_CACHE_DISABLE:-0}
+
+      # --- tenrai (metadati) ---
+      TENRAI_API_BASE_URL: ${TENRAI_API_BASE_URL:-https://api.tenrai.org/v1}
+      TENRAI_SERVER_KEY: ${TENRAI_SERVER_KEY:-}
+      # I tempi di Tenrai sono in secondi.
+      TENRAI_REQUEST_TIMEOUT_SEC: ${TENRAI_REQUEST_TIMEOUT_SEC:-5}
+      TENRAI_CACHE_TTL_SEC: ${TENRAI_CACHE_TTL_SEC:-86400}
+      TENRAI_NEGATIVE_CACHE_TTL_SEC: ${TENRAI_NEGATIVE_CACHE_TTL_SEC:-86400}
+      TENRAI_MAX_REQUESTS_PER_SECOND: ${TENRAI_MAX_REQUESTS_PER_SECOND:-4}
+      TENRAI_MAX_REQUESTS_PER_MINUTE: ${TENRAI_MAX_REQUESTS_PER_MINUTE:-120}
+      TENRAI_MAX_PENDING_REQUESTS: ${TENRAI_MAX_PENDING_REQUESTS:-20}
+      TENRAI_MAX_QUEUE_WAIT_SEC: ${TENRAI_MAX_QUEUE_WAIT_SEC:-5}
+      TENRAI_FAILURE_BACKOFF_SEC: ${TENRAI_FAILURE_BACKOFF_SEC:-30}
+      TENRAI_MAX_BACKOFF_SEC: ${TENRAI_MAX_BACKOFF_SEC:-3600}
+      TENRAI_STALE_IF_ERROR: ${TENRAI_STALE_IF_ERROR:-true}
+
+      # --- debug ---
+      DEBUG_LEVEL: ${DEBUG_LEVEL:-0}
 
 volumes:
   hanx-data:

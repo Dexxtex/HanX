@@ -148,18 +148,13 @@ try {
 // (59 cached entries → ~120 MB leaked).
 //
 // Disable with PROVIDER_CACHE_DISABLE=1.
-const PROVIDER_CACHE_TTL_MS = (() => {
-    try {
-        const n = parseInt(process.env.PROVIDER_CACHE_TTL_MS || '300000', 10);
-        return Number.isFinite(n) && n > 0 ? n : 300000;
-    } catch { return 300000; }
-})();
-const PROVIDER_CACHE_MAX_ENTRIES = (() => {
-    try {
-        const n = parseInt(process.env.PROVIDER_CACHE_MAX_ENTRIES || '500', 10);
-        return Number.isFinite(n) && n > 10 ? n : 500;
-    } catch { return 500; }
-})();
+// 15 minuti, non 5: una voce costa ~1,1 KB (4 stream) e il fan-out a freddo
+// costa ~4 s su 3 host. La finestra copre una sessione di visione.
+const PROVIDER_CACHE_TTL_MS = 15 * 60 * 1000;
+// 5.000 voci = ~5,5 MB misurati: con 500 una serie da 100 episodi la svuota
+// gia' a meta'. Il container tiene 13 MB di mapping e 6 MB di catalogo, quindi
+// 5 MB di cache non sposta niente.
+const PROVIDER_CACHE_MAX_ENTRIES = 5000;
 const PROVIDER_CACHE_DISABLED: boolean = (() => {
     try {
         const v = (process?.env?.PROVIDER_CACHE_DISABLE || '').toString().toLowerCase();
@@ -173,10 +168,9 @@ const PROVIDER_TIMEOUT_MS = 30000;
 // Una risposta vuota non è un guasto: è "questo titolo non c'è". Cacharla per
 // pochi minuti evita che ogni play ripaghi il fan-out intero (3 host x 3-4 hop).
 // Corto di proposito: un titolo appena aggiunto al sito deve comparire subito.
-const PROVIDER_NEGATIVE_TTL_MS = (() => {
-    const parsed = Number.parseInt(process.env.PROVIDER_NEGATIVE_TTL_MS || '', 10);
-    return Number.isFinite(parsed) && parsed >= 0 ? parsed : 90000;
-})();
+// 5 minuti, non 90 s: un titolo che non c'e' costa un fan-out intero (~4 s) a
+// ogni play, e un titolo appena aggiunto al sito compare comunque entro 5'.
+const PROVIDER_NEGATIVE_TTL_MS = 5 * 60 * 1000;
 const _providerStreamCache = new Map<string, { streams: Stream[]; ts: number; ttl: number }>();
 
 function _providerCacheGet(type: string, id: string, configDigest: string): any[] | null {

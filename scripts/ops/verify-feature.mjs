@@ -80,7 +80,6 @@ function baseEnv(extra = {}) {
     ANIMEUNITY_ENABLED: 'false',
     ANIMESATURN_ENABLED: 'false',
     ANIMEWORLD_ENABLED: 'false',
-    ANIME_HOST_MIN_INTERVAL_MS: '0',
     ...SECRETS,
     ...extra,
   };

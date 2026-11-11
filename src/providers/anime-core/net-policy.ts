@@ -16,14 +16,21 @@
 const hostTails = new Map<string, Promise<unknown>>();
 const hostLastAt = new Map<string, number>();
 
-/** Letto a ogni chiamata: i test lo azzerano senza toccare il resto. */
+/**
+ * Un secondo, costante. Era `ANIME_HOST_MIN_INTERVAL_MS`: una variabile che
+ * poteva solo peggiorare o togliere la protezione che e' costata un 403. Se un
+ * sito comincia a rispondere 429 si cambia qui, con una misura a supporto.
+ */
+const MIN_HOST_INTERVAL_MS = 1000;
+
+/** Solo per i test: senza, ogni richiesta pagherebbe un secondo di pacing. */
+let testOverride: number | null = null;
+export function setMinHostIntervalMs(ms: number | null): void {
+  testOverride = ms;
+}
+
 export function minHostIntervalMs(): number {
-  const raw = process.env.ANIME_HOST_MIN_INTERVAL_MS;
-  // Solo il letterale `0` spegne il pacing. Una variabile vuota o con un typo
-  // non deve poter togliere la protezione che è costata un 403.
-  if (raw === undefined || !raw.trim()) return 1000;
-  const parsed = Number.parseInt(raw, 10);
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 1000;
+  return testOverride ?? MIN_HOST_INTERVAL_MS;
 }
 
 /**

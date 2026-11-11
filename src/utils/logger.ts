@@ -6,8 +6,7 @@
  * 3 = details: candidates, filters, episode alignment
  * 4 = trace: HTTP/proxy traffic and raw candidate dumps
  *
- * Set DEBUG_LEVEL=0..4. DEBUG_LOG is still accepted for compatibility
- * (true/on/yes = 2, false/off/no = 0, a number = that level).
+ * Set DEBUG_LEVEL=0..4 (true/on/yes = 2, false/off/no = 0).
  */
 
 export type DebugLevel = 1 | 2 | 3 | 4;
@@ -24,9 +23,7 @@ function parseLevel(value: string | undefined): number | null {
 
 /** Pure parser so tests can validate every supported env form. */
 export function resolveDebugLevel(env: NodeJS.ProcessEnv = process.env): number {
-  const explicit = parseLevel(env.DEBUG_LEVEL);
-  if (explicit !== null) return explicit;
-  return parseLevel(env.DEBUG_LOG) ?? 0;
+  return parseLevel(env.DEBUG_LEVEL) ?? 0;
 }
 
 export const DEBUG_LEVEL = resolveDebugLevel();

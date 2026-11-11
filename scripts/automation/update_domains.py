@@ -4,7 +4,6 @@ Anime domain updater — AGGIORNA SOLO DOMINI ANIME.
 
 Aggiorna:
 - config/domains.json
-- config/provider_urls.json
 
 Legge i domini dal pastebin e dai siti ufficiali dei link (animesaturn.me,
 animeworlditalia.com), ma applica solo indirizzi realmente raggiungibili.
@@ -24,7 +23,6 @@ OFFICIAL_SOURCES = {
     'animeworld': 'https://www.animeworlditalia.com/',
 }
 DOMAINS_FILE = Path('config/domains.json')
-PROVIDER_URLS_FILE = Path('config/provider_urls.json')
 BACKUP_FILE = Path('config/domains.jsonbk')
 
 KEY_ORDER = ['animesaturn', 'animeunity', 'animeworld']
@@ -148,15 +146,6 @@ def choose_host(key: str, candidates):
     return None
 
 
-def build_provider_urls(domains, existing):
-    updated = dict(existing)
-    for key in KEY_ORDER:
-        host = normalize_host(domains.get(key, ''))
-        if host:
-            updated[key] = f'https://www.{host}'
-    return updated
-
-
 def load_json(path: Path):
     if not path.exists():
         return {}
@@ -178,7 +167,6 @@ def main():
 
     domains_exists = DOMAINS_FILE.exists()
     current = load_json(DOMAINS_FILE) or dict(DEFAULT_DOMAINS)
-    provider_urls = load_json(PROVIDER_URLS_FILE)
     paste_hosts = extract_hosts(paste_txt)
     official_hosts = {
         key: extract_hosts(fetch(url))
@@ -201,25 +189,18 @@ def main():
     if failures:
         print('Domini non raggiungibili:', ', '.join(failures), file=sys.stderr)
 
-    new_provider_urls = build_provider_urls(updated, provider_urls)
     domains_dirty = not domains_exists or bool(changed)
-    provider_urls_dirty = new_provider_urls != provider_urls
 
-    if not domains_dirty and not provider_urls_dirty:
+    if not domains_dirty:
         print('No anime domain changes detected.')
         return 0
 
     if domains_exists:
         write_json(BACKUP_FILE, current)
-    if domains_dirty:
-        write_json(DOMAINS_FILE, updated)
-    if provider_urls_dirty:
-        write_json(PROVIDER_URLS_FILE, new_provider_urls)
+    write_json(DOMAINS_FILE, updated)
 
     if changed:
         print('Updated anime domains:', json.dumps(changed, indent=2, ensure_ascii=False))
-    if provider_urls_dirty:
-        print('Updated provider URLs.')
     return 1
 
 

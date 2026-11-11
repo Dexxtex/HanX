@@ -57,8 +57,7 @@ function cachedTmdbTitle(tmdbId: string, tmdbKey: string): Promise<string> {
 export async function getEnglishTitleFromAnyId(
   id: string,
   type: TitleIdType,
-  tmdbApiKey?: string,
-  allowEmptyTitle = false
+  tmdbApiKey?: string
 ): Promise<string> {
   const tmdbKey = tmdbApiKey || process.env.TMDB_API_KEY || '';
   let malId: string | null = null;
@@ -112,11 +111,7 @@ export async function getEnglishTitleFromAnyId(
       if (tmdbTitle) return tmdbTitle;
     } catch { }
   }
-  // Opt-in documentato in env.example (solo AnimeWorld): meglio un titolo
-  // placeholder che zero stream.
-  if (allowEmptyTitle) {
-    console.warn('[UniversalTitle] Fallback placeholder title for id', id);
-    return 'Anime';
-  }
+  // Niente titolo placeholder: cercare "Anime" sul sito restituisce risultati a
+  // caso, e uno stream sbagliato e' peggio di nessuno stream.
   throw new Error('Impossibile ottenere titolo inglese da nessuna fonte per ' + id);
 }

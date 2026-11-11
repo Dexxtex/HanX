@@ -38,32 +38,18 @@
 
 Serve Docker con Compose v2.
 
-1. **Salva questo file come `compose.yaml`:**
-
-   ```yaml
-   services:
-     hanx:
-       image: lextutor/hanx:latest
-       container_name: HanX
-       ports:
-         - "${PORT:-7000}:${PORT:-7000}"
-       environment:
-         PORT: "${PORT:-7000}"
-       volumes:
-         - hanx-data:/app/data
-       env_file:
-         - .env
-       restart: unless-stopped
-
-   volumes:
-     hanx-data:
-   ```
-
-2. **Crea il `.env` e compila le variabili indicate:**
+1. **Scarica `docker-compose.yml` e il modello del `.env`:**
 
    ```bash
+   curl -O https://raw.githubusercontent.com/Dexxtex/HanX/main/docker-compose.yml
+   curl -o env.example https://raw.githubusercontent.com/Dexxtex/HanX/main/env.example
    cp env.example .env
    ```
+
+   Il compose elenca tutte le variabili con il loro default: il `.env` le
+   sovrascrive, e ogni default si legge dove serve.
+
+2. **Compila il `.env`.**
 
    `ANIME_MAPPING_URL` serve per i match multi-stagione; senza, ogni ID passa
    dalla risoluzione live. Senza `CATALOG_URL` e `TMDB_API_KEY` l'addon funziona

@@ -19,6 +19,7 @@ import {
 } from '../utils/anime-title-normalization.js';
 import {
   createCaches,
+  DEFAULT_FETCH_TIMEOUT,
   fetchResource,
   getProviderUrl,
   toAbsoluteUrl,
@@ -45,14 +46,12 @@ import {
 
 // --- Type definitions for external API responses ---
 
-const AS_FETCH_TIMEOUT = Number.parseInt(process.env.ANIMESATURN_FETCH_TIMEOUT_MS || '10000', 10) || 10000;
+const AS_FETCH_TIMEOUT = DEFAULT_FETCH_TIMEOUT;
 // Le liste dei siti cambiano di rado: 12 ore evitano di rifare la stessa
 // ricerca (e di ripresentare la raffica al WAF) a ogni apertura.
 const SEARCH_TTL_MS = 12 * 60 * 60 * 1000;
 const asCaches = createCaches();
-const AS_USER_AGENT =
-  process.env.AS_USER_AGENT ||
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36';
+const AS_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36';
 
 function buildSaturnHeaders(referer?: string): Record<string, string> {
   const h: Record<string, string> = {
@@ -64,7 +63,7 @@ function buildSaturnHeaders(referer?: string): Record<string, string> {
 }
 
 function getSaturnBaseUrl(): string {
-  const configured = getProviderUrl('animesaturn', ['ANIMESATURN_BASE_URL', 'AS_BASE_URL']);
+  const configured = getProviderUrl('animesaturn');
   const raw = configured || `https://${getDomain('animesaturn') || 'animesaturn.net'}`;
   try {
     const u = new URL(String(raw).replace(/\/+$/, ''));

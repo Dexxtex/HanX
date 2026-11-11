@@ -4,15 +4,17 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 const DEFAULT_BASE_URL = 'https://api.tenrai.org/v1';
-const DEFAULT_TIMEOUT_MS = 8_000;
-const DEFAULT_CACHE_TTL_MS = 60 * 60 * 1_000;
-const DEFAULT_NEGATIVE_TTL_MS = 6 * 60 * 60 * 1_000;
-const DEFAULT_MAX_RPS = 3;
-const DEFAULT_MAX_RPM = 100;
-const DEFAULT_MAX_PENDING = 100;
-const DEFAULT_MAX_QUEUE_WAIT_MS = 10_000;
-const DEFAULT_FAILURE_BACKOFF_MS = 15_000;
-const DEFAULT_MAX_BACKOFF_MS = 60 * 60 * 1_000;
+// Le variabili d'ambiente sono in **secondi** (86400000 non si legge); qui
+// dentro restano millisecondi, che e' quello che usano Date.now e setTimeout.
+const DEFAULT_TIMEOUT_SEC = 5;
+const DEFAULT_CACHE_TTL_SEC = 24 * 60 * 60;
+const DEFAULT_NEGATIVE_TTL_SEC = 24 * 60 * 60;
+const DEFAULT_MAX_RPS = 4;
+const DEFAULT_MAX_RPM = 120;
+const DEFAULT_MAX_PENDING = 20;
+const DEFAULT_MAX_QUEUE_WAIT_SEC = 5;
+const DEFAULT_FAILURE_BACKOFF_SEC = 30;
+const DEFAULT_MAX_BACKOFF_SEC = 60 * 60;
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 const RATE_WINDOW_MS = 60_000;
 
@@ -72,6 +74,11 @@ export class TenraiMetadataError extends Error {
     this.retryAfterMs = options.retryAfterMs;
     this.code = options.code;
   }
+}
+
+/** Secondi dall'ambiente, millisecondi dentro. */
+function readSeconds(value: unknown, name: string, fallbackSec: number, minSec: number, maxSec: number): number {
+  return readInteger(value, name, fallbackSec, minSec, maxSec) * 1_000;
 }
 
 function readInteger(
@@ -257,9 +264,9 @@ export class TenraiMetadataStore {
   constructor(options: TenraiMetadataStoreOptions = {}) {
     this.baseUrl = normalizeBaseUrl(options.baseUrl || process.env.TENRAI_API_BASE_URL || DEFAULT_BASE_URL);
     this.dbPath = options.dbPath || process.env.TENRAI_CACHE_DB_PATH || path.resolve('data', 'tenrai-metadata.sqlite');
-    this.timeoutMs = readInteger(options.timeoutMs ?? process.env.TENRAI_REQUEST_TIMEOUT_MS, 'TENRAI_REQUEST_TIMEOUT_MS', DEFAULT_TIMEOUT_MS, 250, 60_000);
-    this.cacheTtlMs = readInteger(options.cacheTtlMs ?? process.env.TENRAI_CACHE_TTL_MS, 'TENRAI_CACHE_TTL_MS', DEFAULT_CACHE_TTL_MS, 0, 365 * 24 * 60 * 60 * 1_000);
-    this.negativeCacheTtlMs = readInteger(options.negativeCacheTtlMs ?? process.env.TENRAI_NEGATIVE_CACHE_TTL_MS, 'TENRAI_NEGATIVE_CACHE_TTL_MS', DEFAULT_NEGATIVE_TTL_MS, 0, 7 * 24 * 60 * 60 * 1_000);
+    this.timeoutMs = options.timeoutMs ?? readSeconds(process.env.TENRAI_REQUEST_TIMEOUT_SEC, 'TENRAI_REQUEST_TIMEOUT_SEC', DEFAULT_TIMEOUT_SEC, 1, 60);
+    this.cacheTtlMs = options.cacheTtlMs ?? readSeconds(process.env.TENRAI_CACHE_TTL_SEC, 'TENRAI_CACHE_TTL_SEC', DEFAULT_CACHE_TTL_SEC, 0, 365 * 24 * 60 * 60);
+    this.negativeCacheTtlMs = options.negativeCacheTtlMs ?? readSeconds(process.env.TENRAI_NEGATIVE_CACHE_TTL_SEC, 'TENRAI_NEGATIVE_CACHE_TTL_SEC', DEFAULT_NEGATIVE_TTL_SEC, 0, 7 * 24 * 60 * 60);
     this.staleIfError = options.staleIfError ?? readBoolean(process.env.TENRAI_STALE_IF_ERROR, 'TENRAI_STALE_IF_ERROR', true);
     this.serverKey = String(options.serverKey ?? process.env.TENRAI_SERVER_KEY ?? '').trim();
     const maxRpsAllowed = this.serverKey ? 5 : 4;
@@ -267,9 +274,9 @@ export class TenraiMetadataStore {
     this.maxRequestsPerSecond = readInteger(options.maxRequestsPerSecond ?? process.env.TENRAI_MAX_REQUESTS_PER_SECOND, 'TENRAI_MAX_REQUESTS_PER_SECOND', DEFAULT_MAX_RPS, 1, maxRpsAllowed);
     this.maxRequestsPerMinute = readInteger(options.maxRequestsPerMinute ?? process.env.TENRAI_MAX_REQUESTS_PER_MINUTE, 'TENRAI_MAX_REQUESTS_PER_MINUTE', DEFAULT_MAX_RPM, 1, maxRpmAllowed);
     this.maxPendingRequests = readInteger(options.maxPendingRequests ?? process.env.TENRAI_MAX_PENDING_REQUESTS, 'TENRAI_MAX_PENDING_REQUESTS', DEFAULT_MAX_PENDING, 1, 10_000);
-    this.maxQueueWaitMs = readInteger(options.maxQueueWaitMs ?? process.env.TENRAI_MAX_QUEUE_WAIT_MS, 'TENRAI_MAX_QUEUE_WAIT_MS', DEFAULT_MAX_QUEUE_WAIT_MS, 250, 10 * 60 * 1_000);
-    this.failureBackoffMs = readInteger(options.failureBackoffMs ?? process.env.TENRAI_FAILURE_BACKOFF_MS, 'TENRAI_FAILURE_BACKOFF_MS', DEFAULT_FAILURE_BACKOFF_MS, 250, 60 * 60 * 1_000);
-    this.maxBackoffMs = readInteger(options.maxBackoffMs ?? process.env.TENRAI_MAX_BACKOFF_MS, 'TENRAI_MAX_BACKOFF_MS', DEFAULT_MAX_BACKOFF_MS, this.failureBackoffMs, 24 * 60 * 60 * 1_000);
+    this.maxQueueWaitMs = options.maxQueueWaitMs ?? readSeconds(process.env.TENRAI_MAX_QUEUE_WAIT_SEC, 'TENRAI_MAX_QUEUE_WAIT_SEC', DEFAULT_MAX_QUEUE_WAIT_SEC, 1, 10 * 60);
+    this.failureBackoffMs = options.failureBackoffMs ?? readSeconds(process.env.TENRAI_FAILURE_BACKOFF_SEC, 'TENRAI_FAILURE_BACKOFF_SEC', DEFAULT_FAILURE_BACKOFF_SEC, 1, 60 * 60);
+    this.maxBackoffMs = options.maxBackoffMs ?? readSeconds(process.env.TENRAI_MAX_BACKOFF_SEC, 'TENRAI_MAX_BACKOFF_SEC', DEFAULT_MAX_BACKOFF_SEC, this.failureBackoffMs / 1_000, 24 * 60 * 60);
     this.fetcher = options.fetcher || globalThis.fetch;
 
     if (this.serverKey && new URL(this.baseUrl).hostname !== 'api.tenrai.org') {

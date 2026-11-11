@@ -27,7 +27,6 @@ export interface TitleResolutionContext {
   label: string;
   tmdbApiKey?: string;
   /** AnimeWorld: meglio un titolo placeholder che zero stream. */
-  allowEmptyTitle?: boolean;
   handleTitleRequest: (
     title: string,
     seasonNumber: number | null,
@@ -99,7 +98,7 @@ async function resolveExternalId(
   const unmapped = ctx.handleUnmappedSeries ? await ctx.handleUnmappedSeries(request, episodeNumber) : null;
   if (unmapped) return unmapped;
 
-  const englishTitle = await getEnglishTitleFromAnyId(rawId, type, ctx.tmdbApiKey, ctx.allowEmptyTitle);
+  const englishTitle = await getEnglishTitleFromAnyId(rawId, type, ctx.tmdbApiKey);
   debug(2, ctx.label, `[${ctx.label}] Ricerca con titolo inglese: ${englishTitle}`);
   return ctx.handleTitleRequest(englishTitle, seasonNumber, episodeNumber, isMovie);
 }
@@ -150,7 +149,7 @@ export async function resolveMalRequest(
 ): Promise<{ streams: StreamForStremio[] }> {
   const request = resolveMappingRequest(malIdString);
   if (!request) return empty();
-  const englishTitle = await getEnglishTitleFromAnyId(request.id, 'mal', ctx.tmdbApiKey, ctx.allowEmptyTitle);
+  const englishTitle = await getEnglishTitleFromAnyId(request.id, 'mal', ctx.tmdbApiKey);
   debug(2, ctx.label, `[${ctx.label}] Ricerca con titolo inglese: ${englishTitle}`);
   return ctx.handleTitleRequest(
     englishTitle,

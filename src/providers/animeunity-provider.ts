@@ -30,6 +30,7 @@ import {
 } from '../utils/anime-title-normalization.js';
 import {
   createCaches,
+  DEFAULT_FETCH_TIMEOUT,
   fetchResource,
   markProviderFetchFailure,
   getProviderUrl,
@@ -67,11 +68,9 @@ import {
 
 // --- Type definitions for external API responses ---
 
-const USER_AGENT =
-  process.env.AU_USER_AGENT ||
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36';
+const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36';
 
-const FETCH_TIMEOUT = Number.parseInt(process.env.ANIMEUNITY_FETCH_TIMEOUT_MS || '10000', 10) || 10000;
+const FETCH_TIMEOUT = DEFAULT_FETCH_TIMEOUT;
 const TTL = {
   http: 5 * 60 * 1000,
   animePage: 15 * 60 * 1000,
@@ -205,7 +204,7 @@ export function unityBaseFrom(raw: string): string {
 }
 
 function getUnityBaseUrl(): string {
-  const configured = getProviderUrl('animeunity', ['ANIMEUNITY_BASE_URL', 'AU_BASE_URL']);
+  const configured = getProviderUrl('animeunity');
   return unityBaseFrom(String(configured || getDomain('animeunity') || 'animeunity.at'));
 }
 

@@ -18,17 +18,16 @@ import { cooldownFor, exitKeyFor, hostOf, isCoolingDown, paceHost, QueueFullErro
 // Riesportati: i test e il barrel li prendevano da qui.
 export { minHostIntervalMs, paceHost, hostOf } from './net-policy.js';
 
-// Override globale. Gli UA per sito (`AU_/AS_/AW_USER_AGENT`) si leggono nel
-// provider che li usa: prima erano concatenati qui, quindi `AS_USER_AGENT`
-// cambiava anche lo UA di AnimeUnity e i due restavano decorativi.
-export const DEFAULT_USER_AGENT =
-  process.env.ANIME_USER_AGENT ||
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36';
+// Un UA solo, uguale per tutti: e' quello che il sito si aspetta da un browser.
+// Gli override per sito erano decorativi (il WAF guarda il resto) e sono stati
+// tolti.
+export const DEFAULT_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36';
 
-export const DEFAULT_FETCH_TIMEOUT = Number.parseInt(
-  process.env.ANIME_FETCH_TIMEOUT_MS || '10000',
-  10
-) || 10000;
+// 10 s: e' un tetto, non una taratura. Le risposte dei siti e di TMDB stanno
+// sotto il secondo; il tetto serve a non tenere appesa una socket. Era
+// `ANIME_FETCH_TIMEOUT_MS` (e tre varianti per provider, tutte allo stesso
+// valore): una leva che poteva solo rompere, non migliorare.
+export const DEFAULT_FETCH_TIMEOUT = 10000;
 
 /**
  * Stato del provider-run in corso: `runProvider` (addon.ts) esegue l'handler

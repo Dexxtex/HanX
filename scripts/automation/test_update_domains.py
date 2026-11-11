@@ -43,35 +43,20 @@ class UpdateDomainsTests(unittest.TestCase):
                 'animeunity.at',
             )
 
-    def test_provider_urls_follow_domains(self):
-        result = u.build_provider_urls(
-            {'animesaturn': 'animesaturn.net', 'animeunity': 'animeunity.at'},
-            {'mapping_api': 'https://example.invalid'},
-        )
-        self.assertEqual(result['animesaturn'], 'https://www.animesaturn.net')
-        self.assertEqual(result['animeunity'], 'https://www.animeunity.at')
-        self.assertEqual(result['mapping_api'], 'https://example.invalid')
-
-    def test_main_updates_both_files_and_skips_dead_host(self):
+    def test_main_updates_domains_and_skips_dead_host(self):
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             domains_file = tmp_path / 'domains.json'
-            urls_file = tmp_path / 'provider_urls.json'
             backup_file = tmp_path / 'domains.jsonbk'
             domains_file.write_text(json.dumps({
                 'animesaturn': 'animesaturn.cx',
                 'animeunity': 'animeunity.so',
                 'animeworld': 'animeworld.ac',
             }), 'utf-8')
-            urls_file.write_text(json.dumps({
-                'animeunity': 'https://www.animeunity.so',
-            }), 'utf-8')
-
             def fake_probe(host):
                 return None if host == 'animeunity.so' else host
 
             with mock.patch.object(u, 'DOMAINS_FILE', domains_file), \
-                 mock.patch.object(u, 'PROVIDER_URLS_FILE', urls_file), \
                  mock.patch.object(u, 'BACKUP_FILE', backup_file), \
                  mock.patch.object(u, 'fetch', return_value=(
                      'https://www.animesaturn.net\n'
@@ -82,9 +67,7 @@ class UpdateDomainsTests(unittest.TestCase):
                 self.assertEqual(u.main(), 1)
 
             domains = json.loads(domains_file.read_text('utf-8'))
-            urls = json.loads(urls_file.read_text('utf-8'))
             self.assertEqual(domains['animeunity'], 'animeunity.co')
-            self.assertEqual(urls['animeunity'], 'https://www.animeunity.co')
 
 
 if __name__ == '__main__':
