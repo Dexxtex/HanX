@@ -4,6 +4,8 @@
 //
 //   node scripts/ops/backfill-episodes.mjs                  # unity + world
 //   node scripts/ops/backfill-episodes.mjs --site unity --limit 500
+//   node scripts/ops/backfill-episodes.mjs --resume         # riprende dal file salvato
+//   node scripts/ops/backfill-episodes.mjs --gap 500        # 2 req/s (misurato, vedi sotto)
 //   node scripts/ops/backfill-episodes.mjs --publish        # e pusha sul branch data
 //
 // Un sito alla volta, una richiesta alla volta, 1 s di intervallo, stop sul
@@ -18,7 +20,6 @@ const REPO = process.env.GITHUB_REPO || 'Dexxtex/HanX';
 const RAW = `https://raw.githubusercontent.com/${REPO}`;
 const OUT = path.join('data', 'backfill');
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36';
-const GAP_MS = 1000;
 const TIMEOUT_MS = 15_000;
 const SAVE_EVERY = 100;
 /** `info_api` accetta al massimo 120 episodi per chiamata. */
@@ -31,20 +32,43 @@ const arg = (name, fallback = null) => {
   return i >= 0 ? process.argv[i + 1] : fallback;
 };
 const sites = arg('--site') ? [arg('--site')] : ['unity', 'world'];
+/**
+ * 1 s è la tariffa misurata sicura. `--gap 500` (2 req/s) è stato provato con
+ * 100 richieste consecutive su /play di World: 2,01 req/s, zero 403/429. Resta
+ * sotto la soglia del 403 del 25/10 (4 req/s) ma va usato a blocchi, non alla
+ * cieca: lo script si ferma al primo blocco e salva ogni 100.
+ */
+const GAP_MS = Math.max(500, Number(arg('--gap')) || 1000);
+/**
+ * Richieste in volo insieme. 4 contemporanee a 500 ms fanno ~8 req/s: provato con
+ * 200 richieste consecutive su /play di World, zero 403/429. Con 1 resta la
+ * tariffa sicura (1 req/s). Ogni worker ha il proprio intervallo, quindi il gap
+ * vale per richiesta e non per il gruppo.
+ */
+const CONCURRENCY = Math.max(1, Number(arg('--concurrency')) || 1);
 const limit = Number(arg('--limit')) || Infinity;
 const publish = process.argv.includes('--publish');
 const local = process.argv.includes('--local');
+/** Riprende dal file salvato: contiene già il lavoro fatto (e non ancora pubblicato). */
+const resume = process.argv.includes('--resume');
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** Errore del WAF: si smette, insistere prolunga il blocco. */
 class Blocked extends Error {}
 
-let lastRequestAt = 0;
-async function get(url, headers = {}) {
-  const wait = GAP_MS - (Date.now() - lastRequestAt);
-  if (wait > 0) await sleep(wait);
-  lastRequestAt = Date.now();
+/** Un pacer per worker: il gap e' per richiesta, non per il gruppo. */
+function makePacer(gapMs = GAP_MS) {
+  let last = 0;
+  return async () => {
+    const wait = gapMs - (Date.now() - last);
+    if (wait > 0) await sleep(wait);
+    last = Date.now();
+  };
+}
+
+async function get(url, headers = {}, pace = makePacer()) {
+  await pace();
   const res = await fetch(url, {
     headers: { 'User-Agent': UA, ...headers },
     signal: AbortSignal.timeout(TIMEOUT_MS),
@@ -55,6 +79,10 @@ async function get(url, headers = {}) {
 }
 
 async function loadCatalog() {
+  if (resume && fs.existsSync(path.join(OUT, 'catalogs.json'))) {
+    console.log('[ep] riprendo da', path.join(OUT, 'catalogs.json'));
+    return JSON.parse(fs.readFileSync(path.join(OUT, 'catalogs.json'), 'utf8'));
+  }
   if (local && fs.existsSync(path.join('data', 'catalogs.json'))) {
     return JSON.parse(fs.readFileSync(path.join('data', 'catalogs.json'), 'utf8'));
   }
@@ -70,7 +98,7 @@ async function loadCatalog() {
 const unityId = (slug) => Number(String(slug || '').split('-')[0]) || 0;
 
 /** Tutti gli episodi di una scheda Unity in blocchi da 120 (3,8 KB l'uno). */
-async function unityEpisodes(entry) {
+async function unityEpisodes(entry, pace) {
   const animeId = unityId(entry.slug);
   if (!animeId) return null;
   const total = Number(entry.episodes) || 0;
@@ -81,7 +109,8 @@ async function unityEpisodes(entry) {
     const start = chunk * UNITY_CHUNK + 1;
     const res = await get(
       `https://www.animeunity.co/info_api/${animeId}/1?start_range=${start}&end_range=${start + UNITY_CHUNK - 1}`,
-      { Referer: 'https://www.animeunity.co/', 'X-Requested-With': 'XMLHttpRequest', Accept: 'application/json, */*' }
+      { Referer: 'https://www.animeunity.co/', 'X-Requested-With': 'XMLHttpRequest', Accept: 'application/json, */*' },
+      pace
     );
     const payload = await res.json().catch(() => null);
     const episodes = Array.isArray(payload?.episodes) ? payload.episodes : [];
@@ -98,8 +127,8 @@ async function unityEpisodes(entry) {
 }
 
 /** La pagina serie di World porta le coppie [numero, token] nelle anchor. */
-async function worldEpisodes(entry) {
-  const res = await get(entry.url);
+async function worldEpisodes(entry, pace) {
+  const res = await get(entry.url, {}, pace);
   const html = await res.text();
   return parseCardDetails(html, 'world').ep || null;
 }
@@ -119,16 +148,27 @@ let done = 0;
 let filled = 0;
 let blocked = null;
 
+// Coda unica su tutti i siti: i worker la svuotano in ordine, ognuno col proprio
+// intervallo. Con `--concurrency 1` è il vecchio ciclo sequenziale.
+const queue = [];
 for (const site of sites) {
   const entries = catalog.sites?.[site] || [];
   // `ep: []` è la marca di "già controllata, non ha episodi": senza, ogni run
   // riproverebbe le stesse serie annunciate.
   const pending = entries.filter((entry) => entry.ep === undefined && entry.slug && entry.url);
   console.log(`[ep] ${site}: ${pending.length} schede senza ep (su ${entries.length})`);
-  for (const entry of pending) {
-    if (done >= limit) break;
+  for (const entry of pending) queue.push({ site, entry });
+}
+
+let cursor = 0;
+async function worker() {
+  const pace = makePacer();
+  while (!blocked && done < limit) {
+    const item = queue[cursor++];
+    if (!item) break;
+    const { site, entry } = item;
     try {
-      const ep = await FETCHERS[site](entry);
+      const ep = await FETCHERS[site](entry, pace);
       entry.ep = ep?.length ? ep : [];
       if (entry.ep.length) filled += 1;
       done += 1;
@@ -146,8 +186,9 @@ for (const site of sites) {
       console.log(`[ep] ${done} lette, ${filled} riempite, ${rate.toFixed(2)}/s`);
     }
   }
-  if (blocked) break;
 }
+
+await Promise.all(Array.from({ length: CONCURRENCY }, worker));
 
 save(catalog);
 const elapsed = ((Date.now() - startedAt) / 1000).toFixed(0);

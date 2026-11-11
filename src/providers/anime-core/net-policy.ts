@@ -17,20 +17,36 @@ const hostTails = new Map<string, Promise<unknown>>();
 const hostLastAt = new Map<string, number>();
 
 /**
- * Un secondo, costante. Era `ANIME_HOST_MIN_INTERVAL_MS`: una variabile che
- * poteva solo peggiorare o togliere la protezione che e' costata un 403. Se un
- * sito comincia a rispondere 429 si cambia qui, con una misura a supporto.
+ * Pavimento: 125 ms = 8 richieste al secondo per host. È il massimo misurato
+ * (11/11/2026, rampa con stop al primo 429 sulle pagine HTML) che passa su tutti
+ * e tre i siti senza perdere una richiesta: Saturn 12 req/s (50/50), World 12
+ * (200/200), Unity 8 (300/300; a 12 l'8,5% di 503, a 16 il 20-28%).
+ *
+ * `ANIME_HOST_MIN_INTERVAL_SEC` può solo **rallentare** (fino a 5 s): sotto il
+ * pavimento la protezione che è costata il 403 del 25/10 sparisce, e quel blocco
+ * arrivò su `/api/search`, la rotta vietata da robots.txt, non sulle pagine.
  */
-const MIN_HOST_INTERVAL_MS = 1000;
+const MIN_HOST_INTERVAL_FLOOR_MS = 125;
+const MIN_HOST_INTERVAL_CEILING_MS = 5_000;
 
-/** Solo per i test: senza, ogni richiesta pagherebbe un secondo di pacing. */
+/** Secondi dall'ambiente, millisecondi dentro. Fuori range = pavimento. */
+function readIntervalMs(): number {
+  const raw = String(process.env.ANIME_HOST_MIN_INTERVAL_SEC ?? '').trim();
+  if (!raw) return MIN_HOST_INTERVAL_FLOOR_MS;
+  const seconds = Number(raw);
+  if (!Number.isFinite(seconds) || seconds <= 0) return MIN_HOST_INTERVAL_FLOOR_MS;
+  const ms = Math.round(seconds * 1_000);
+  return Math.min(MIN_HOST_INTERVAL_CEILING_MS, Math.max(MIN_HOST_INTERVAL_FLOOR_MS, ms));
+}
+
+/** Solo per i test: senza, ogni richiesta pagherebbe il pacing. */
 let testOverride: number | null = null;
 export function setMinHostIntervalMs(ms: number | null): void {
   testOverride = ms;
 }
 
 export function minHostIntervalMs(): number {
-  return testOverride ?? MIN_HOST_INTERVAL_MS;
+  return testOverride ?? readIntervalMs();
 }
 
 /**

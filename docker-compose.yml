@@ -40,6 +40,8 @@ services:
       ANIMEUNITY_PREFER_MP4: ${ANIMEUNITY_PREFER_MP4:-0}
       # Via d'uscita se il gate rifiuta un anime vero.
       ANIME_GATE_ENABLED: ${ANIME_GATE_ENABLED:-true}
+      # Intervallo per host in secondi: puo' solo rallentare (pavimento 0.125).
+      ANIME_HOST_MIN_INTERVAL_SEC: ${ANIME_HOST_MIN_INTERVAL_SEC:-0.125}
 
       # --- cache ---
       PROVIDER_CACHE_DISABLE: ${PROVIDER_CACHE_DISABLE:-0}
