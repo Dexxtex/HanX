@@ -34,6 +34,8 @@ server.log
 *.jsonbk
 
 # --- Test e script locali ---
+# La suite resta in locale: non e' versionata e non entra nell'immagine.
+/tests/
 test-provider*.ps1
 
 # --- IDE e sistema ---

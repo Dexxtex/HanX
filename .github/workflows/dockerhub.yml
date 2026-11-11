@@ -22,37 +22,9 @@ env:
   DOCKERHUB_IMAGE: lextutor/hanx
 
 jobs:
-  # Un'immagine può uscire solo da codice che passa la suite. Prima il tag veniva
-  # creato e la build lanciata senza che `pnpm test` fosse mai stato eseguito su
-  # quel commit: un'immagine rotta poteva essere pubblicata verde.
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v6
-        with:
-          version: 12.15.0
-
-      - name: Set up Node
-        uses: actions/setup-node@v7
-        with:
-          node-version: 26
-          cache: pnpm
-
-      - name: Install
-        run: pnpm install --frozen-lockfile
-
-      - name: Type-check scripts
-        run: pnpm run typecheck:scripts
-
-      - name: Test
-        run: pnpm test
-
+  # La suite di test non e' piu' versionata (`tests/` e' in .gitignore): il gate
+  # "immagine solo da test verdi" non puo' girare in CI. Resta locale: `pnpm test`.
   build-and-push:
-    needs: test
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
