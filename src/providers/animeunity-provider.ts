@@ -71,10 +71,15 @@ import {
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36';
 
 const FETCH_TIMEOUT = DEFAULT_FETCH_TIMEOUT;
+/**
+ * Le pagine e i link firmati durano a lungo: l'embed non ha token e il playlist
+ * che contiene scade dopo due mesi. Sei ore coprono una sessione senza rifare
+ * il fan-out; la ricerca sta a dodici come Saturn e World.
+ */
 const TTL = {
-  http: 5 * 60 * 1000,
-  animePage: 15 * 60 * 1000,
-  streamPage: 5 * 60 * 1000,
+  http: 12 * 60 * 60 * 1000,
+  animePage: 6 * 60 * 60 * 1000,
+  streamPage: 6 * 60 * 60 * 1000,
   mapping: 2 * 60 * 1000,
 };
 

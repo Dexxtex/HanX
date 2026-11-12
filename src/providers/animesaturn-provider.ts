@@ -50,6 +50,11 @@ const AS_FETCH_TIMEOUT = DEFAULT_FETCH_TIMEOUT;
 // Le liste dei siti cambiano di rado: 12 ore evitano di rifare la stessa
 // ricerca (e di ripresentare la raffica al WAF) a ogni apertura.
 const SEARCH_TTL_MS = 12 * 60 * 60 * 1000;
+/**
+ * Pagine episodio, embed e playlist: il token che contengono dura 12 ore, quindi
+ * sei lasciano metà del margine. Cinque minuti rifacevano tutto a ogni play.
+ */
+const PAGE_TTL_MS = 6 * 60 * 60 * 1000;
 const asCaches = createCaches();
 const AS_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36';
 
@@ -332,7 +337,7 @@ async function resolvePlaylistUrl(embedUrl: string): Promise<string | null> {
   try {
     const payload = await fetchResource(playlistUrl, asCaches, {
       as: 'json',
-      ttlMs: 5 * 60 * 1000,
+      ttlMs: PAGE_TTL_MS,
       cacheKey: `playlist:${embedUrl}`,
       timeoutMs: AS_FETCH_TIMEOUT,
       headers: {
@@ -371,7 +376,7 @@ async function resolveWatchUrlsForEpisodeEntry(
     if (episodeUrl) {
       try {
         const html = await fetchResource(episodeUrl, asCaches, {
-          ttlMs: 5 * 60 * 1000,
+          ttlMs: PAGE_TTL_MS,
           cacheKey: `episode-page:${episodeEntry.episodePath}`,
           timeoutMs: AS_FETCH_TIMEOUT,
           headers: buildSaturnHeaders(),
@@ -727,7 +732,7 @@ export async function selectHighestSaturnHls(mediaUrl: string, referer: string):
   if (!/\.m3u8(?:[?#]|$)/i.test(mediaUrl)) return mediaUrl;
   try {
     const manifest = String(await fetchResource(mediaUrl, asCaches, {
-      ttlMs: 5 * 60 * 1000,
+      ttlMs: PAGE_TTL_MS,
       cacheKey: `hls-master:${mediaUrl}`,
       timeoutMs: AS_FETCH_TIMEOUT,
       proxyPlatform: 'animesaturn',
@@ -850,7 +855,7 @@ export class AnimeSaturnProvider {
       let parsedPage: ParsedSaturnPage;
       try {
         const html = await fetchResource(animeUrl, asCaches, {
-          ttlMs: 15 * 60 * 1000,
+          ttlMs: PAGE_TTL_MS,
           cacheKey: `anime:${normalizedPath}`,
           timeoutMs: AS_FETCH_TIMEOUT,
           headers: buildSaturnHeaders(),
@@ -902,7 +907,7 @@ export class AnimeSaturnProvider {
       let html = '';
       try {
         html = await fetchResource(watchUrl, asCaches, {
-          ttlMs: 5 * 60 * 1000,
+          ttlMs: PAGE_TTL_MS,
           cacheKey: `watch:${watchUrl}`,
           timeoutMs: AS_FETCH_TIMEOUT,
           headers: {

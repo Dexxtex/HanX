@@ -68,6 +68,12 @@ const AW_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537
 // Le liste cambiano di rado: 12 ore evitano di rifare la stessa ricerca (e di
 // ripresentare la raffica al WAF) a ogni apertura.
 const AW_SEARCH_TTL_MS = 12 * 60 * 60 * 1000;
+/**
+ * Pagina play, API del player e pagina episodio: il link del video non ha token
+ * e non scade, quindi il tetto e' il cambio di contenuto. Due minuti rifacevano
+ * la richiesta a ogni play.
+ */
+const AW_PAGE_TTL_MS = 6 * 60 * 60 * 1000;
 
 function extractSecurityCookieFromHtml(html: string): string | null {
   const m = /SecurityAW2-os=([a-f0-9]+)/i.exec(String(html || ''));
@@ -463,7 +469,7 @@ async function awGetEpisodes(slug: string): Promise<AnimeWorldEpisode[]> {
   const animeUrl = `${getWorldBaseUrl()}/play/${slug}`;
   let html = '';
   try {
-    html = await awFetchHtml(animeUrl, { ttlMs: 5 * 60 * 1000, cacheKey: `aw-play:${slug}` });
+    html = await awFetchHtml(animeUrl, { ttlMs: AW_PAGE_TTL_MS, cacheKey: `aw-play:${slug}` });
   } catch (error: any) {
     // Lista episodi vuota = zero stream, e il chiamante non vedeva l'errore.
     console.warn('[AnimeWorld] pagina play non recuperata:', slug, error?.message || String(error));
@@ -531,7 +537,7 @@ async function awExtractEpisodeStreamFromPlayPage(
       // Stessa pagina (e stessa cache aw-play:) gia' scaricata dal probe lingua e
       // da awGetEpisodes: il fetch era duplicato solo per avere cookie/csrf, che
       // l'API serverPlayer non richiede (verificato: risponde 200 senza).
-      const playHtml = await awFetchHtml(animeUrl, { ttlMs: 5 * 60 * 1000, cacheKey: `aw-play:${slug}`, timeoutMs });
+      const playHtml = await awFetchHtml(animeUrl, { ttlMs: AW_PAGE_TTL_MS, cacheKey: `aw-play:${slug}`, timeoutMs });
       return findEpisodeUrlTokenInHtml(playHtml, episodeNumber == null ? null : Number(episodeNumber)) || '';
     } catch (err: any) {
       console.error('[AnimeWorld][Stream] play page fetch failed for', slug, err?.message);
@@ -557,7 +563,7 @@ async function awExtractEpisodeStreamFromPlayPage(
     };
 
     const playerHtml = await fetchResource(apiUrl, awCaches, {
-      ttlMs: 2 * 60 * 1000,
+      ttlMs: AW_PAGE_TTL_MS,
       cacheKey: `aw-player:${slug}:${urlToken}`,
       timeoutMs,
       headers: apiHeaders,
@@ -575,7 +581,7 @@ async function awExtractEpisodeStreamFromPlayPage(
           `${getWorldBaseUrl()}/api/episode/serverPlayerAnimeWorld?id=${encodeURIComponent(fresh)}`,
           awCaches,
           {
-            ttlMs: 2 * 60 * 1000,
+            ttlMs: AW_PAGE_TTL_MS,
             cacheKey: `aw-player:${slug}:${fresh}`,
             timeoutMs,
             headers: { ...apiHeaders, referer: `${getWorldBaseUrl()}/play/${slug}/${fresh}` },
@@ -593,7 +599,7 @@ async function awExtractEpisodeStreamFromPlayPage(
   const epUrl = `${getWorldBaseUrl()}/play/${slug}/${urlToken}`;
   let epHtml = '';
   try {
-    epHtml = await awFetchHtml(epUrl, { ttlMs: 2 * 60 * 1000, cacheKey: `aw-ep:${slug}:${urlToken}`, timeoutMs });
+    epHtml = await awFetchHtml(epUrl, { ttlMs: AW_PAGE_TTL_MS, cacheKey: `aw-ep:${slug}:${urlToken}`, timeoutMs });
   } catch (err: any) {
     console.error('[AnimeWorld][Stream] episode page fetch failed for', slug, urlToken, err?.message);
     if (isAbortOrTimeoutError(err)) throw err;
@@ -835,7 +841,7 @@ export class AnimeWorldProvider {
       const probeLang = async (slug: string): Promise<'ITA' | 'SUB ITA'> => {
         try {
           const html = await awFetchHtml(`${getWorldBaseUrl()}/play/${slug}`, {
-            ttlMs: 5 * 60 * 1000,
+            ttlMs: AW_PAGE_TTL_MS,
             // Stessa chiave di awGetEpisodes: la pagina play scaricata per il probe
             // riempie la cache e risparmia il refetch degli episodi qui sotto.
             cacheKey: `aw-play:${slug}`,
