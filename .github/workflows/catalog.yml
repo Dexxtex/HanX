@@ -149,6 +149,18 @@ jobs:
           CATALOG_CRAWL_DEADLINE_MIN: 34
         run: pnpm run sync-catalog
 
+      # Le schede nuove arrivano dal crawl senza `ep`: il provider pagherebbe la
+      # pagina serie a ogni episodio. Il backfill le riempie qui, prima del
+      # publish, così il catalogo pubblicato è già completo. 4 worker a 333 ms
+      # sono 12 req/s, il massimo misurato su Saturn e World.
+      - name: Backfill ep
+        if: always() && steps.fresh.outputs.should_run == 'true'
+        run: |
+          set -euo pipefail
+          pnpm run build
+          node scripts/ops/backfill-episodes.mjs --local --gap 333 --concurrency 4
+          cp data/backfill/catalogs.json data/catalogs.json
+
       # `always()`: anche con il sync rosso i siti riusciti vanno pubblicati.
       - name: Pubblica il catalogo
         if: always() && steps.fresh.outputs.should_run == 'true'

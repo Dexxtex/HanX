@@ -2,7 +2,7 @@
 // l'hanno. Il provider usa quelle coppie per saltare la pagina della serie:
 // ogni hop è un secondo di pacing, quindi è il guadagno più diretto che resta.
 //
-//   node scripts/ops/backfill-episodes.mjs                  # unity + world
+//   node scripts/ops/backfill-episodes.mjs                  # saturn + unity + world
 //   node scripts/ops/backfill-episodes.mjs --site unity --limit 500
 //   node scripts/ops/backfill-episodes.mjs --resume         # riprende dal file salvato
 //   node scripts/ops/backfill-episodes.mjs --gap 500        # 2 req/s (misurato, vedi sotto)
@@ -31,14 +31,14 @@ const arg = (name, fallback = null) => {
   const i = process.argv.indexOf(name);
   return i >= 0 ? process.argv[i + 1] : fallback;
 };
-const sites = arg('--site') ? [arg('--site')] : ['unity', 'world'];
+const sites = arg('--site') ? [arg('--site')] : ['saturn', 'unity', 'world'];
 /**
- * 1 s è la tariffa misurata sicura. `--gap 500` (2 req/s) è stato provato con
- * 100 richieste consecutive su /play di World: 2,01 req/s, zero 403/429. Resta
- * sotto la soglia del 403 del 25/10 (4 req/s) ma va usato a blocchi, non alla
- * cieca: lo script si ferma al primo blocco e salva ogni 100.
+ * 1 s è la tariffa prudente. Il pavimento è 83 ms (12 req/s): l'11/11 la rampa
+ * con stop al primo 429 ha misurato Saturn 12 req/s (50/50) e World 12 (200/200)
+ * sulle pagine HTML; Unity si ferma a 8. Lo script si ferma comunque al primo
+ * blocco e salva ogni 100.
  */
-const GAP_MS = Math.max(500, Number(arg('--gap')) || 1000);
+const GAP_MS = Math.max(83, Number(arg('--gap')) || 1000);
 /**
  * Richieste in volo insieme. 4 contemporanee a 500 ms fanno ~8 req/s: provato con
  * 200 richieste consecutive su /play di World, zero 403/429. Con 1 resta la
@@ -133,7 +133,26 @@ async function worldEpisodes(entry, pace) {
   return parseCardDetails(html, 'world').ep || null;
 }
 
-const FETCHERS = { unity: unityEpisodes, world: worldEpisodes };
+/**
+ * La pagina serie di Saturn porta le anchor `/episode/<slug>/ep-<n>`. Il token è
+ * derivabile da `episodes`, ma non sempre: `dies-irae` ha `ep-0` (prologo) e
+ * `numberOfEpisodes` null, quindi 1..N salterebbe un episodio.
+ */
+async function saturnEpisodes(entry, pace) {
+  const res = await get(entry.url, {}, pace);
+  const html = await res.text();
+  const pairs = [];
+  const seen = new Set();
+  for (const match of html.matchAll(/\/episode\/[^"']*?\/(ep-\d+)/g)) {
+    const num = Number(match[1].slice(3));
+    if (!Number.isFinite(num) || seen.has(num)) continue;
+    seen.add(num);
+    pairs.push([num, match[1]]);
+  }
+  return pairs.length ? pairs.sort((a, b) => a[0] - b[0]) : null;
+}
+
+const FETCHERS = { saturn: saturnEpisodes, unity: unityEpisodes, world: worldEpisodes };
 
 function save(catalog) {
   fs.mkdirSync(OUT, { recursive: true });
