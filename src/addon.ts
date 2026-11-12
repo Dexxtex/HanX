@@ -6,6 +6,9 @@ import { dirname } from 'node:path';
 import * as fs from 'fs';
 import * as path from 'path';
 import express, { Request, Response as ExpressResponse, NextFunction } from 'express';
+import { createHash } from 'node:crypto';
+import { nextSeasonFirstId } from './mapping/index.js';
+import { nextEpisodeId } from './utils/next-episode.js';
 import {
     isValidConfigObject,
     normalizeBool,
@@ -234,18 +237,70 @@ function _providerCacheSet(type: string, id: string, configDigest: string, strea
     }
 }
 
+// === PRE-CACHE DELL'EPISODIO SUCCESSIVO ===
+// Stremio manda gli eventi player con currentTime e duration: oltre la soglia
+// l'episodio sta per finire, quindi si scalda la voce di cache del successivo.
+// La soglia e' alta di proposito: chi chiude prima non deve pagare la risoluzione.
+const PRIME_AT = 0.9;
+/** Una voce per episodio: gli eventi sono ~10 per episodio, il pre-cache uno. */
+const primed = new Set<string>();
+const PRIMED_MAX = 100;
+/** Ultima config vista da una richiesta di stream: se l'evento player arriva
+ *  senza config, il pre-cache usa questa. L'addon e' di un solo utente. */
+let lastStreamConfig: any = null;
+
+function configDigest(config: any): string {
+    try {
+        return createHash('sha1').update(JSON.stringify(config || {})).digest('hex').slice(0, 8);
+    } catch { return '-'; }
+}
+
+/**
+ * Scalda la cache dell'episodio successivo. Se nello stesso id non c'e' (ultimo
+ * di stagione) prova il primo della stagione successiva: per Kitsu e' un
+ * kitsuId diverso, per MAL e' la stagione dopo nello stesso id.
+ */
+async function primeEpisode(builder: any, type: string, nextId: string, currentId: string, config: any): Promise<void> {
+    try {
+        const { streams } = await builder.get('stream', type, nextId, {}, config);
+        if (streams?.length) return;
+        const kitsu = String(currentId).match(/^kitsu:(\d+):(\d+)$/i);
+        if (!kitsu) return;
+        const seasonNext = nextSeasonFirstId(kitsu[1], Number(kitsu[2]));
+        if (!seasonNext) return;
+        const { streams: altrove } = await builder.get('stream', type, seasonNext, {}, config);
+        console.log(`[player] stagione successiva ${seasonNext}: ${altrove?.length || 0} stream`);
+    } catch (err: any) {
+        console.log(`[player] pre-cache fallito per ${nextId}: ${err?.message || err}`);
+    }
+}
+
 // Funzione per creare il builder con configurazione dinamica
 export function createBuilder() {
     const manifest = loadCustomConfig();
     const builder = new addonBuilder(manifest);
 
     // === HANDLER PLAYER (eventi di riproduzione) ===
-    // Serve a sapere quando un episodio sta per finire: la risposta non viene
-    // letta da Stremio, quindi si logga e basta.
+    // Stremio manda action=start|pause|stop con currentTime e duration: serve a
+    // sapere quando un episodio sta per finire, per scaldare il successivo.
     // `defineResourceHandler` esiste nel runtime dell'SDK (builder.js:59) ma non
     // nei suoi tipi: il cast e' l'unico modo senza un .d.ts nostro.
-    (builder as any).defineResourceHandler('player', async ({ type, id, extra }: any) => {
-        console.log(`[player] ${type}/${id} ${JSON.stringify(extra || {})}`);
+    (builder as any).defineResourceHandler('player', async ({ type, id, extra, config }: any) => {
+        const action = String(extra?.action || '');
+        const currentTime = Number(extra?.currentTime);
+        const duration = Number(extra?.duration);
+        const pct = duration > 0 ? currentTime / duration : 0;
+        const cfg = config && Object.keys(config).length ? config : lastStreamConfig;
+        console.log(`[player] ${type}/${id} ${action} ${(pct * 100).toFixed(0)}% cfg=${configDigest(cfg)}`);
+
+        if (type !== 'series' && type !== 'anime') return {};
+        if (pct < PRIME_AT) return {};
+        const next = nextEpisodeId(id);
+        if (!next || primed.has(next)) return {};
+        primed.add(next);
+        if (primed.size > PRIMED_MAX) primed.delete(primed.values().next().value as string);
+        // In sottofondo: la risposta a Stremio non aspetta la risoluzione.
+        void primeEpisode(builder, type, next, id, cfg);
         return {};
     });
 
@@ -262,6 +317,8 @@ export function createBuilder() {
         }): Promise<{
             streams: Stream[];
         }> => {
+            // Se l'evento player arriva senza config, il pre-cache usa questa.
+            lastStreamConfig = requestConfig || null;
             try {
                 // Normalize type: handle Italian endpoint names (film->movie, serie->series)
                 let normalizedType = type;

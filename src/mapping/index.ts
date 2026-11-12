@@ -26,6 +26,9 @@ import { writeAtomic } from '../utils/fs.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
+/** Un range di stagione per un kitsuId: dice in che stagione cade un episodio. */
+interface KitsuRange { seriesKey: string; season: number; from: number; epCount: number }
+
 export interface IndexSnapshot {
   filePath: string;
   mtimeMs: number;
@@ -34,6 +37,8 @@ export interface IndexSnapshot {
   index: AnimeMappingIndex;
   /** kitsuId -> titoli alternativi, per le richieste che arrivano da Kitsu. */
   kitsuAlt: Map<string, { titleAlt: string; titleIt: string; season: number | null }>;
+  /** kitsuId -> range di stagione, per sapere in che stagione cade un episodio. */
+  kitsuRanges: Map<string, KitsuRange[]>;
   signature: string;
 }
 
@@ -218,6 +223,66 @@ function buildKitsuAlt(index: AnimeMappingIndex): Map<string, { titleAlt: string
   return map;
 }
 
+/**
+ * kitsuId -> range di stagione. Un kitsuId può stare in più stagioni (TVDB mette
+ * la stessa opera in S0 "specials" e nella stagione vera), quindi si tiene
+ * l'elenco. La stagione 0 si scarta: non è una stagione, e senza questo
+ * escluderla la "prossima" da Jujutsu Kaisen 3 diventerebbe la prima.
+ */
+function buildKitsuRanges(index: AnimeMappingIndex): Map<string, KitsuRange[]> {
+  const out = new Map<string, KitsuRange[]>();
+  for (const [seriesKey, entry] of Object.entries(index.series)) {
+    if (!isRecord(entry)) continue;
+    const seasons = isRecord(entry.seasons) ? entry.seasons : {};
+    for (const [seasonKey, ranges] of Object.entries(seasons)) {
+      if (!Array.isArray(ranges)) continue;
+      const season = Number(seasonKey);
+      if (!Number.isFinite(season) || season <= 0) continue;
+      for (const range of ranges) {
+        if (!isRecord(range)) continue;
+        const kitsuId = String(range.kitsuId || '');
+        if (!kitsuId) continue;
+        const list = out.get(kitsuId) || [];
+        list.push({
+          seriesKey,
+          season,
+          from: Number(range.from) || 1,
+          epCount: Number(range.episodeCount) || 0,
+        });
+        out.set(kitsuId, list);
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Primo episodio della stagione successiva a quella dell'episodio dato.
+ * null se il kitsuId non è nel mapping, se l'episodio non cade in nessun range
+ * o se la stagione successiva non esiste.
+ */
+export function nextSeasonFirstId(kitsuId: string, episode: number): string | null {
+  // Idempotente (stat + cache hit): la funzione non deve dipendere dal fatto che
+  // qualcun altro abbia già caricato l'indice.
+  loadIndex();
+  const ranges = snapshot?.kitsuRanges.get(String(kitsuId));
+  if (!ranges?.length) return null;
+  // Il range che contiene l'episodio; se due combaciano, il più stretto (from più alto).
+  const own = ranges
+    .filter((r) => episode >= r.from && (r.epCount <= 0 || episode < r.from + r.epCount))
+    .sort((a, b) => b.from - a.from)[0];
+  if (!own) return null;
+  const series = snapshot?.index.series[own.seriesKey];
+  const seasons = isRecord(series) && isRecord(series.seasons) ? series.seasons : null;
+  const next = seasons ? seasons[String(own.season + 1)] : null;
+  if (!Array.isArray(next)) return null;
+  const first = next.find(isRecord);
+  if (!first) return null;
+  const nextKitsu = String(first.kitsuId || '');
+  if (!nextKitsu) return null;
+  return `kitsu:${nextKitsu}:${Number(first.from) || 1}`;
+}
+
 function loadIndex(): AnimeMappingIndex {
   try {
     return loadIndexUncached();
@@ -254,7 +319,7 @@ function loadIndexUncached(): AnimeMappingIndex {  const filePath = indexFilePat
     )
     .digest('hex')
     .slice(0, 16);
-  snapshot = { filePath, mtimeMs, overridesPath: overridesFile, overridesMtimeMs, index, kitsuAlt: buildKitsuAlt(index), signature };
+  snapshot = { filePath, mtimeMs, overridesPath: overridesFile, overridesMtimeMs, index, kitsuAlt: buildKitsuAlt(index), kitsuRanges: buildKitsuRanges(index), signature };
   debug(2, 'Mapping', 'index loaded', {
     series: Object.keys(index.series).length,
     movies: Object.keys(index.movies).length,
