@@ -65,9 +65,14 @@ const baseManifest: Manifest = {
     types: ["movie", "series", "anime"],
     idPrefixes: ["tt", "kitsu", "mal", "tmdb", "tvdb"],
     catalogs: [],
+    // Il tipo `Manifest` dell'SDK dichiara `resources: string[]`, ma il protocollo
+    // ammette anche `{name, types, idPrefixes}`: il cast copre il buco dei tipi.
     resources: [
-        "stream"
-    ],
+        "stream",
+        // Evento di riproduzione: Stremio lo manda a ogni addon che dichiara la
+        // risorsa, con currentTime e duration in ms. La risposta non viene usata.
+        { name: "player", types: ["series", "anime", "movie"], idPrefixes: ["mal", "kitsu", "tt", "tmdb", "tvdb"] },
+    ] as any,
     behaviorHints: { configurable: true },
     config: [
         { key: "tmdbApiKey", title: "TMDB API Key", type: "password" },
@@ -233,6 +238,16 @@ function _providerCacheSet(type: string, id: string, configDigest: string, strea
 export function createBuilder() {
     const manifest = loadCustomConfig();
     const builder = new addonBuilder(manifest);
+
+    // === HANDLER PLAYER (eventi di riproduzione) ===
+    // Serve a sapere quando un episodio sta per finire: la risposta non viene
+    // letta da Stremio, quindi si logga e basta.
+    // `defineResourceHandler` esiste nel runtime dell'SDK (builder.js:59) ma non
+    // nei suoi tipi: il cast e' l'unico modo senza un .d.ts nostro.
+    (builder as any).defineResourceHandler('player', async ({ type, id, extra }: any) => {
+        console.log(`[player] ${type}/${id} ${JSON.stringify(extra || {})}`);
+        return {};
+    });
 
     // === HANDLER STREAM ===
     builder.defineStreamHandler(
