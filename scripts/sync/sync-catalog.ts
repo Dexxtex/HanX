@@ -32,10 +32,7 @@ import {
   applyCardDetails,
   parseCardDetails,
   parseSaturnAnimeSitemap,
-  parseSaturnFilterPage,
   parseSaturnSitemapIndex,
-  saturnListingGap,
-  SATURN_TYPES,
   parseWorldMaxPage,
   parseUnityRecords,
   parseWorldFilterPage,
@@ -198,12 +195,6 @@ function jsonLdTitle(html: string): string {
   }
 }
 
-/**
- * Tetto del walk di /filter, su tutte le partizioni di tipo insieme. Il walk
- * arriva in fondo quando una partizione risponde con una pagina vuota: il
- * budget è solo un freno, non un piano.
- */
-const SATURN_WALK_BUDGET = 260;
 /** Oltre questo l'abort ha tagliato prima di `div.ag-links`: si rilegge intera. */
 const SATURN_CARD_BYTES = 32 * 1024;
 
@@ -268,53 +259,11 @@ async function crawlSaturn(maxPages: number, deadline: number, previous: Catalog
     );
     return { entries: [...bySlug.values()], capped: parts.length > maxPages || read < toRead.length };
   }
-  // Una partizione di tipo per giro: le pagine in totale restano ~206, e il tipo
-  // arriva dal filtro invece di essere dedotto. Titolo e data sono in ogni card.
-  let budget = SATURN_WALK_BUDGET;
-  let walked = 0;
-  // Il walk è arrivato in fondo (pagina vuota) o è stato tagliato da tetto/budget?
-  let truncatedByCap = false;
-  // Slug distinti arricchiti: una scheda può comparire in due partizioni di tipo.
-  const enriched = new Set<string>();
-  for (const type of SATURN_TYPES) {
-    let closed = false;
-    for (let page = 1; page <= maxPages && budget > 0 && Date.now() < deadline; page += 1) {
-      budget -= 1;
-      walked += 1;
-      const url = `${BASES.saturn}/filter?types%5B%5D=${encodeURIComponent(type)}&page=${page}`;
-      const found = parseSaturnFilterPage((await request(url)).body, type);
-      if (!found.length) {
-        closed = true;
-        break;
-      }
-      for (const entry of found) {
-        const known = bySlug.get(entry.slug);
-        if (!known) {
-          bySlug.set(entry.slug, entry);
-          enriched.add(entry.slug);
-          continue;
-        }
-        Object.assign(known, {
-          titleSite: entry.titleSite,
-          ...(entry.startDate ? { startDate: entry.startDate } : {}),
-          ...(entry.episodes ? { episodes: entry.episodes } : {}),
-          ...(entry.type ? { type: entry.type } : {}),
-        });
-        enriched.add(entry.slug);
-      }
-    }
-    if (!closed) truncatedByCap = true;
-  }
-  console.log(`[catalog] saturn: ${bySlug.size} schede, ${enriched.size}/${spine} arricchite dal listing (${walked} pagine)`);
-  // Solo su un walk completo: con --max-pages o budget esaurito la copertura
-  // parziale è voluta e non va segnalata come guasto.
-  if (!truncatedByCap) {
-    const gap = saturnListingGap(enriched.size, spine);
-    if (gap) throw new Error(gap);
-  }
-  // `budget === 0` da solo non vuol dire troncato: il walk può finire esattamente
-  // sull'ultima unità e aver coperto tutto. Conta solo se una partizione non è
-  // arrivata alla pagina vuota.
+  // Il walk su /filter e' stato tolto: il sito e' passato a una pagina Alpine che
+  // non contiene i risultati (il parser cercava `a.ac`, che non esiste piu'), e
+  // per ognuna delle 5 partizioni la prima pagina era vuota. Il tipo arriva dal
+  // badge della scheda (parseCardDetails), non dal listing.
+  console.log(`[catalog] saturn: ${bySlug.size} schede dalla sitemap`);
   return { entries: [...bySlug.values()], capped: parts.length > maxPages || truncatedByCap };
 }
 

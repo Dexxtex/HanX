@@ -221,6 +221,8 @@ export interface CardDetails {
   year?: number;
   startDate?: string;
   language?: CatalogLanguage;
+  /** Tipo dichiarato dal sito: badge `ac__type-badge` (Saturn) o `type` (Unity). */
+  type?: string;
   /** Solo AnimeUnity: coppie `[numero, id]` lette dall'attributo `episodes`. */
   ep?: [number, number | string][];
 }
@@ -360,6 +362,9 @@ export function parseCardDetails(html: string, site: CatalogSite): CardDetails {
   // Saturn scrive "Lingua <Giapponese|Italiano>": la lingua audio della scheda,
   // più affidabile del suffisso "(ITA)" del titolo.
   const saturnAudio = site === 'saturn' ? saturnLanguage(text) : undefined;
+  // Il JSON-LD dichiara solo TVSeries/Movie: il badge della card distingue
+  // OVA/ONA/Special, che altrimenti finiscono tutti in TV.
+  const type = site === 'saturn' ? text.match(/ac__type-badge[^>]*>([A-Za-z]+)</)?.[1] : undefined;
   const year = String(data.datePublished || '').match(/^(\d{4})/);
   const episodes = positive(data.numberOfEpisodes) ?? positive(info.episodes) ?? (site === 'world' ? worldEpisodes(text) : undefined);
   const ep =
@@ -373,6 +378,7 @@ export function parseCardDetails(html: string, site: CatalogSite): CardDetails {
     ...(info.year && !year ? { year: info.year } : {}),
     ...(info.startDate ? { startDate: info.startDate } : {}),
     ...(info.language ?? saturnAudio ? { language: (info.language ?? saturnAudio)! } : {}),
+    ...(type ? { type } : {}),
   };
 }
 
@@ -390,6 +396,7 @@ export function applyCardDetails(entry: CatalogEntry, details: CardDetails, conf
   if (details.episodes && !entry.episodes) entry.episodes = details.episodes;
   if (details.ep && !entry.ep) entry.ep = details.ep;
   if (details.startDate && !entry.startDate) entry.startDate = details.startDate;
+  if (details.type) entry.type = details.type;
   if (details.language && !entry.language) entry.language = details.language;
   if (details.year && !entry.year) entry.year = details.year;
   if (details.anilistId) entry.anilistId = details.anilistId;
@@ -407,18 +414,6 @@ export function isEnrichmentFinal(details: CardDetails, answered: Set<number>): 
   return !details.malId || !details.anilistId || answered.has(details.anilistId);
 }
 
-/** Il listing deve coprire almeno questa quota delle schede della sitemap. */
-export const SATURN_MIN_COVERAGE = 0.98;
-
-/**
- * Il listing che arricchisce meno del 98% delle schede della sitemap ha un buco
- * (markup cambiato, tipo nuovo): meglio una run rossa che un catalogo peggiore
- * pubblicato in silenzio. `null` quando la copertura è sufficiente.
- */
-export function saturnListingGap(covered: number, spine: number): string | null {
-  const min = Math.floor(spine * SATURN_MIN_COVERAGE);
-  return covered < min ? `listing con buchi: ${covered}/${spine} schede arricchite (minimo ${min})` : null;
-}
 
 /** Numero utile solo se positivo e finito: il sito manda 0, "", null per "assente". */
 function positive(value: unknown): number | undefined {
@@ -432,56 +427,10 @@ function cleanText(value: unknown, max = 1200): string | undefined {
   return text ? text.slice(0, max) : undefined;
 }
 
-/** Le partizioni di /filter: camminarne una per tipo dà il tipo insieme al resto. */
-export const SATURN_TYPES = ['TV', 'Movie', 'OVA', 'Special', 'ONA'] as const;
-
 const SATURN_MONTHS = [
   'gennaio', 'febbraio', 'marzo', 'aprile', 'maggio', 'giugno',
   'luglio', 'agosto', 'settembre', 'ottobre', 'novembre', 'dicembre',
 ];
-
-/** "08 Gennaio 2026 · 12 ep" → data ISO e episodi; ciascuno indipendente dall'altro. */
-export function parseSaturnCardMeta(text: string): { startDate?: string; episodes?: number } {
-  const lower = String(text || '').toLowerCase();
-  const date = lower.match(/(\d{1,2})\s+([a-z]+)\s+(\d{4})/);
-  const month = date ? SATURN_MONTHS.indexOf(date[2]) : -1;
-  const eps = lower.match(/(\d+)\s*ep(?![a-z])/);
-  return {
-    ...(month >= 0 ? { startDate: `${date![3]}-${String(month + 1).padStart(2, '0')}-${date![1].padStart(2, '0')}` } : {}),
-    ...(eps ? { episodes: Number(eps[1]) } : {}),
-  };
-}
-
-/**
- * Una pagina di /filter: 30 card `a.ac` con titolo mostrato vero e sottotitolo
- * con data di inizio ed episodi. `type` arriva dalla partizione camminata.
- */
-export function parseSaturnFilterPage(
-  html: string,
-  type?: string,
-  base = 'https://www.animesaturn.net'
-): CatalogEntry[] {
-  const $ = cheerio.load(String(html || ''));
-  const out: CatalogEntry[] = [];
-  const seen = new Set<string>();
-  $('a.ac').each((_, el) => {
-    const $card = $(el);
-    const href = String($card.attr('href') || '').trim();
-    const slug = href.match(/^\/anime\/([^/?#]+)\/?$/)?.[1];
-    const title = $card.find('.ac__title').first().text().replace(/\s+/g, ' ').trim();
-    if (!slug || !title || seen.has(slug)) return;
-    seen.add(slug);
-    out.push({
-      site: 'saturn',
-      slug,
-      url: `${base}${href}`,
-      titleSite: title,
-      ...parseSaturnCardMeta($card.find('.ac__sub').first().text()),
-      ...(type ? { type } : {}),
-    });
-  });
-  return out;
-}
 
 /**
  * AnimeWorld dichiara quante pagine ha /filter (`paginationMaxPage`). Oltre
