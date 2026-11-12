@@ -618,7 +618,6 @@ async function main(): Promise<number> {
     })
   );
 
-  const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
   const total = CATALOG_SITES.reduce((sum, site) => sum + catalog.sites[site].length, 0);
   // Sempre: il catalogo contiene tutti i siti (quelli non crawlerati stanotte
   // restano a ieri), e l'arricchimento è la parte che riempie i dati mancanti.
@@ -631,6 +630,8 @@ async function main(): Promise<number> {
     console.error(`[catalog] ${message}`);
     failures.push(message);
   }
+  // Il tempo si conta dopo l'arricchimento: prima diceva 45 s su una run da 90.
+  const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
 
   if (options.dryRun) {
     console.log(`[catalog] dry-run: ${total} schede, nessun file scritto (${elapsed}s)`);
