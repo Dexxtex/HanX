@@ -121,17 +121,40 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/**
+ * Tenrai: 4 req/s e **120/min per IP** sul tier pubblico, illimitato al giorno
+ * (documentato su api.tenrai.org/llms.txt). Il tetto vero e' il minuto, cioe'
+ * 2 req/s di media: senza pacing il builder va a raffica e prende 429.
+ * Con `TENRAI_SERVER_KEY` (Patreon) il tier sale a 5/s e 300/min.
+ */
+const TENRAI_HOST = 'api.tenrai.org';
+const TENRAI_SERVER_KEY = String(process.env.TENRAI_SERVER_KEY || '').trim();
+const TENRAI_INTERVAL_MS = TENRAI_SERVER_KEY ? 200 : 500;
+let tenraiSlot = 0;
+
 async function fetchJson(url, init, useCache = true) {
   const file = cachePath(url, init);
   if (useCache) {
     const cachedValue = readJson(file);
     if (cachedValue) return cachedValue;
   }
+  const isTenrai = (() => {
+    try {
+      return new URL(url).host === TENRAI_HOST;
+    } catch {
+      return false;
+    }
+  })();
   let lastError;
   // Tenrai risponde 429 a raffica e per piu' di quattro secondi: con 4
   // tentativi (300+600+1200+2400 ms) la run moriva li'.
   for (let attempt = 0; attempt < 6; attempt++) {
     let waitMs = Math.min(300 * 2 ** attempt, 10_000);
+    if (isTenrai) {
+      const wait = tenraiSlot - Date.now();
+      if (wait > 0) await sleep(wait);
+      tenraiSlot = Date.now() + TENRAI_INTERVAL_MS;
+    }
     try {
       const response = await fetch(url, {
         ...init,
@@ -141,6 +164,7 @@ async function fetchJson(url, init, useCache = true) {
           // Kitsu parla JSON:API e risponde 406 a "application/json".
           accept: new URL(url).host.endsWith('kitsu.io') ? 'application/vnd.api+json' : 'application/json',
           ...(init?.body ? { 'content-type': 'application/json' } : {}),
+          ...(isTenrai && TENRAI_SERVER_KEY ? { 'x-server-key': TENRAI_SERVER_KEY } : {}),
           ...(init?.headers || {}),
         },
       });
