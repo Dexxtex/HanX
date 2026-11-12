@@ -97,15 +97,15 @@ for (const c of dump) {
     saltati += 1;
     continue;
   }
-  const episodes = Number(scheda?.episodes) || 1;
-  // Se la scheda ha tanti episodi quanti ne ha S0, e' tutta la stagione 0
-  // ("Freezing Specials": 6 ep, S0 6 ep): parte da 1, non dall'episodio che
-  // ha fatto combaciare il nome.
-  const from = episodes === c.s0.length ? 1 : Number(ep.n);
-  // Solo l'episodio identificato: il match dice che la scheda e' QUELL'episodio,
-  // non che gli altri della scheda siano quelli adiacenti di S0 ("Freezing
-  // Specials" ha 6 episodi, S0 ne ha 12, il nome combacia sull'ultimo).
-  const coperti = 1;
+  const episodes = Math.max(1, Number(scheda?.episodes) || 1);
+  // Il match dice che la scheda CONTIENE l'episodio K di S0, non che sia solo
+  // quello. "Freezing Specials" ha 6 episodi che sono S0 1-6, ma il nome
+  // combacia sull'ultimo: prendere `from: 6` lasciava senza stream 5 episodi
+  // su 6. Se la scheda ha N episodi e il match cade su K, la scheda e' il blocco
+  // che finisce a K; se K < N il blocco parte da 1.
+  const k = Number(ep.n);
+  const from = episodes === 1 ? k : Math.max(1, k - episodes + 1);
+  const coperti = Math.max(1, Math.min(episodes, c.s0.length - from + 1));
   const key = `tmdb:${c.tmdbId}:${from}`;
   const cur = perChiave.get(key);
   if (!cur || title.length < cur.title.length) {
