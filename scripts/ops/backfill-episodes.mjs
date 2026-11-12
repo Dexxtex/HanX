@@ -51,6 +51,8 @@ const publish = process.argv.includes('--publish');
 const local = process.argv.includes('--local');
 /** Riprende dal file salvato: contiene già il lavoro fatto (e non ancora pubblicato). */
 const resume = process.argv.includes('--resume');
+/** Rilegge tutte le schede Saturn per correggere `type`, che il vecchio listing sbagliava. */
+const refreshTypes = process.argv.includes('--types');
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -123,14 +125,14 @@ async function unityEpisodes(entry, pace) {
       pairs.push([num, id]);
     }
   }
-  return pairs.length ? pairs.sort((a, b) => a[0] - b[0]) : null;
+  return { ep: pairs.length ? pairs.sort((a, b) => a[0] - b[0]) : null };
 }
 
 /** La pagina serie di World porta le coppie [numero, token] nelle anchor. */
 async function worldEpisodes(entry, pace) {
   const res = await get(entry.url, {}, pace);
   const html = await res.text();
-  return parseCardDetails(html, 'world').ep || null;
+  return { ep: parseCardDetails(html, 'world').ep || null };
 }
 
 /**
@@ -141,6 +143,8 @@ async function worldEpisodes(entry, pace) {
 async function saturnEpisodes(entry, pace) {
   const res = await get(entry.url, {}, pace);
   const html = await res.text();
+  // Il tipo sta nella stessa pagina: leggerlo qui evita una seconda passata.
+  const type = html.match(/Tipo<\/span>[\s\S]{0,300}?>(TV|Movie|OVA|ONA|Special)</)?.[1];
   const pairs = [];
   const seen = new Set();
   for (const match of html.matchAll(/\/episode\/[^"']*?\/(ep-\d+)/g)) {
@@ -149,7 +153,7 @@ async function saturnEpisodes(entry, pace) {
     seen.add(num);
     pairs.push([num, match[1]]);
   }
-  return pairs.length ? pairs.sort((a, b) => a[0] - b[0]) : null;
+  return { ep: pairs.length ? pairs.sort((a, b) => a[0] - b[0]) : null, type };
 }
 
 const FETCHERS = { saturn: saturnEpisodes, unity: unityEpisodes, world: worldEpisodes };
@@ -165,6 +169,7 @@ const catalog = await loadCatalog();
 const startedAt = Date.now();
 let done = 0;
 let filled = 0;
+let retyped = 0;
 let blocked = null;
 
 // Coda unica su tutti i siti: i worker la svuotano in ordine, ognuno col proprio
@@ -174,7 +179,12 @@ for (const site of sites) {
   const entries = catalog.sites?.[site] || [];
   // `ep: []` è la marca di "già controllata, non ha episodi": senza, ogni run
   // riproverebbe le stesse serie annunciate.
-  const pending = entries.filter((entry) => entry.ep === undefined && entry.slug && entry.url);
+  // Saturn ha anche il tipo da riempire: la pagina va letta finché manca uno dei due.
+  const pending = entries.filter((entry) => {
+    if (!entry.slug || !entry.url) return false;
+    if (refreshTypes) return site === 'saturn';
+    return entry.ep === undefined || (site === 'saturn' && !entry.type);
+  });
   console.log(`[ep] ${site}: ${pending.length} schede senza ep (su ${entries.length})`);
   for (const entry of pending) queue.push({ site, entry });
 }
@@ -187,8 +197,15 @@ async function worker() {
     if (!item) break;
     const { site, entry } = item;
     try {
-      const ep = await FETCHERS[site](entry, pace);
-      entry.ep = ep?.length ? ep : [];
+      const got = await FETCHERS[site](entry, pace);
+      // Una scheda che aveva già `ep` non si azzera: la pagina può rispondere
+      // senza anchor per un guasto transitorio.
+      if (got.ep?.length) entry.ep = got.ep;
+      else if (entry.ep === undefined) entry.ep = [];
+      if (got.type && got.type !== entry.type) {
+        entry.type = got.type;
+        retyped += 1;
+      }
       if (entry.ep.length) filled += 1;
       done += 1;
     } catch (error) {
@@ -211,7 +228,7 @@ await Promise.all(Array.from({ length: CONCURRENCY }, worker));
 
 save(catalog);
 const elapsed = ((Date.now() - startedAt) / 1000).toFixed(0);
-console.log(`[ep] ${done} schede lette, ${filled} riempite in ${elapsed}s -> ${path.join(OUT, 'catalogs.json')}`);
+console.log(`[ep] ${done} schede lette, ${filled} riempite, ${retyped} tipi corretti in ${elapsed}s -> ${path.join(OUT, 'catalogs.json')}`);
 if (blocked) {
   console.error(`[ep] BLOCCATO (${blocked}): stop immediato, il file salvato è valido`);
   process.exit(1);
