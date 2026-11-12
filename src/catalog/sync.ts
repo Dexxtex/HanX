@@ -363,8 +363,10 @@ export function parseCardDetails(html: string, site: CatalogSite): CardDetails {
   // più affidabile del suffisso "(ITA)" del titolo.
   const saturnAudio = site === 'saturn' ? saturnLanguage(text) : undefined;
   // Il JSON-LD dichiara solo TVSeries/Movie: il badge della card distingue
-  // OVA/ONA/Special, che altrimenti finiscono tutti in TV.
-  const type = site === 'saturn' ? text.match(/ac__type-badge[^>]*>([A-Za-z]+)</)?.[1] : undefined;
+  // OVA/ONA/Special, che altrimenti finiscono tutti in TV. Sui film pero' il
+  // badge dice "TV" (135 su 172 misurate): li' vince il JSON-LD.
+  const badge = site === 'saturn' ? text.match(/ac__type-badge[^>]*>([A-Za-z]+)</)?.[1] : undefined;
+  const type = site === 'saturn' ? (data['@type'] === 'Movie' ? 'Movie' : badge) : undefined;
   const year = String(data.datePublished || '').match(/^(\d{4})/);
   const episodes = positive(data.numberOfEpisodes) ?? positive(info.episodes) ?? (site === 'world' ? worldEpisodes(text) : undefined);
   const ep =
