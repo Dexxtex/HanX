@@ -129,7 +129,9 @@ for (const item of perChiave.values()) {
     saltati += 1;
     continue;
   }
-  s0.push({ from: item.from, title: item.title, episodeCount: item.episodeCount });
+  // `offset` e' obbligatorio per `validateIndex`, anche se il runtime lo
+  // ricaverebbe da `from`: senza, il build del mapping esce rosso.
+  s0.push({ from: item.from, offset: item.from - 1, title: item.title, episodeCount: item.episodeCount });
   s0.sort((a, b) => Number(a.from) - Number(b.from));
   aggiunti += 1;
   if (esempi.length < 10) esempi.push(`${item.title} -> ${key} S0 ep ${item.from}${item.episodeCount > 1 ? ` (${item.episodeCount} ep)` : ''}`);
