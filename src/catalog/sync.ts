@@ -362,11 +362,10 @@ export function parseCardDetails(html: string, site: CatalogSite): CardDetails {
   // Saturn scrive "Lingua <Giapponese|Italiano>": la lingua audio della scheda,
   // più affidabile del suffisso "(ITA)" del titolo.
   const saturnAudio = site === 'saturn' ? saturnLanguage(text) : undefined;
-  // Il JSON-LD dichiara solo TVSeries/Movie: il badge della card distingue
-  // OVA/ONA/Special, che altrimenti finiscono tutti in TV. Sui film pero' il
-  // badge dice "TV" (135 su 172 misurate): li' vince il JSON-LD.
-  const badge = site === 'saturn' ? text.match(/ac__type-badge[^>]*>([A-Za-z]+)</)?.[1] : undefined;
-  const type = site === 'saturn' ? (data['@type'] === 'Movie' ? 'Movie' : badge) : undefined;
+  // Il tipo di Saturn sta nella scheda info ("Tipo  Movie"). Il JSON-LD
+  // dichiara solo TVSeries/Movie, e il badge `ac__type-badge` della pagina e'
+  // quello dei correlati, non di questo anime.
+  const type = site === 'saturn' ? text.match(/Tipo<\/span>[\s\S]{0,300}?>(TV|Movie|OVA|ONA|Special)</)?.[1] : undefined;
   const year = String(data.datePublished || '').match(/^(\d{4})/);
   const episodes = positive(data.numberOfEpisodes) ?? positive(info.episodes) ?? (site === 'world' ? worldEpisodes(text) : undefined);
   const ep =
