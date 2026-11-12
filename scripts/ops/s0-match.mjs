@@ -86,21 +86,22 @@ export function classificaS0(c, scheda, { legacy = false } = {}) {
     // blocco e' un'assunzione. Va detto quale delle due cose e'.
     // `anchorSourcePosition` resta null: nessuno dei tre siti espone i titoli
     // per episodio, quindi la posizione dell'ancora nella scheda e' ignota.
-    let rangeReason;
-    let determinato;
-    if (nScheda === 1) {
-      rangeReason = "scheda di un solo episodio: il range e' quell'episodio";
-      determinato = true;
-    } else if (k === nScheda) {
-      rangeReason = "l'ancora e' l'ultimo episodio della scheda: il blocco finisce li'";
-      determinato = true;
-    } else if (k > nScheda) {
-      rangeReason = "l'ancora e' oltre la lunghezza della scheda: il blocco finisce li'";
-      determinato = true;
-    } else {
-      rangeReason = "ancora interna alla scheda: il blocco e' assunto a partire da S0E1, non dimostrato";
-      determinato = false;
-    }
+    // L'ancora NON dice dove sta nel blocco. Se il blocco e' consecutivo e
+    // mantiene l'ordine, from = anchorEpisode - anchorSourcePosition + 1: senza
+    // la posizione, l'unico from ricavabile e' quello che assume l'ancora come
+    // ULTIMO episodio della scheda. Vale anche quando l'ancora supera la
+    // lunghezza della scheda: con ancora 10 e scheda da 3, i range possibili
+    // sono 10-12, 9-11 e 8-10.
+    const rangeDetermined = nScheda === 1;
+    const rangeReason = nScheda === 1 ? 'single_episode' : 'assumed_anchor_is_last';
+
+    // Evidenza indipendente: le date del blocco proposto cadono nell'anno della
+    // scheda (+/-1). Non dimostra i confini, ma li sostiene (Freezing: 1-6 nel
+    // 2011, 7-12 nel 2013-14, la scheda e' del 2011).
+    const blocco = lista.filter((e) => e.n >= from && e.n < from + episodeCount);
+    const anniBlocco = blocco.map((e) => Number(anno(e.air))).filter(Number.isFinite);
+    const dateSupport =
+      Boolean(y) && anniBlocco.length > 0 && anniBlocco.every((a) => Math.abs(a - Number(y)) <= 1);
 
     // S0 con episodi in anni diversi contiene piu' blocchi (Freezing: 2011 e
     // 2013-14, speciali e OVA di Vibration): un range a cavallo e' sospetto.
@@ -115,7 +116,10 @@ export function classificaS0(c, scheda, { legacy = false } = {}) {
       from,
       episodeCount,
       rangeReason,
-      determinato,
+      rangeProposed: true,
+      rangeDetermined,
+      rangeVerified: false,
+      dateSupport,
       multiBlocco,
       segnale,
       lista,
