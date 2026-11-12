@@ -292,9 +292,46 @@ async function crawlWorldDelta(deadline: number, previous: CatalogEntry[]): Prom
   return { entries: [...bySlug.values()], capped: false };
 }
 
+/**
+ * Il tipo di World non e' nella scheda: lo dichiara solo il filtro, con un
+ * `type` numerico. Una passata per tipo (0=TV 1=OVA 2=ONA 3=Special 4=Movie
+ * 5=Music) e si annota la scheda che il catalogo gia' conosce: nessuna scheda
+ * nuova, solo il campo. ~126 pagine in tutto.
+ */
+const WORLD_TYPES: [string, string][] = [
+  ['0', 'TV'], ['1', 'OVA'], ['2', 'ONA'], ['3', 'Special'], ['4', 'Movie'], ['5', 'Music'],
+];
+
+async function tagWorldTypes(bySlug: Map<string, CatalogEntry>, deadline: number): Promise<number> {
+  let tagged = 0;
+  for (const [value, name] of WORLD_TYPES) {
+    let lastPage: number | null = null;
+    for (let page = 1; page <= 200 && Date.now() < deadline; page += 1) {
+      if (lastPage !== null && page > lastPage) break;
+      const html = (await request(`${BASES.world}/filter?type=${value}&sort=0&page=${page}`)).body;
+      if (page === 1) lastPage = parseWorldMaxPage(html);
+      const cards = parseWorldFilterPage(html);
+      if (!cards.length) break;
+      for (const card of cards) {
+        const entry = bySlug.get(card.slug);
+        if (!entry || entry.type === name) continue;
+        entry.type = name;
+        tagged += 1;
+      }
+    }
+  }
+  return tagged;
+}
+
 async function crawlWorld(maxPages: number, deadline: number, previous: CatalogEntry[] = []): Promise<CrawlResult> {
   // Senza catalogo di ieri il delta non ha una spina dorsale: si cammina /filter.
-  if (previous.length) return crawlWorldDelta(deadline, previous);
+  if (previous.length) {
+    const result = await crawlWorldDelta(deadline, previous);
+    const bySlug = new Map(result.entries.map((entry) => [entry.slug, entry]));
+    const tagged = await tagWorldTypes(bySlug, deadline);
+    if (tagged) console.log(`[catalog] world: ${tagged} schede tipizzate dal filtro`);
+    return { entries: [...bySlug.values()], capped: result.capped };
+  }
   const entries: CatalogEntry[] = [];
   const seen = new Set<string>();
   let declared: number | null = null;
@@ -312,8 +349,11 @@ async function crawlWorld(maxPages: number, deadline: number, previous: CatalogE
   }
   // Troncato se il dichiarato supera il tetto, se il numero non è dichiarato,
   // o se il tappo di tempo ha fermato il walk prima della fine.
+  const bySlug = new Map(entries.map((entry) => [entry.slug, entry]));
+  const tagged = await tagWorldTypes(bySlug, deadline);
+  if (tagged) console.log(`[catalog] world: ${tagged} schede tipizzate dal filtro`);
   const ranOutOfTime = Date.now() >= deadline;
-  return { entries, capped: declared === null || declared > maxPages || ranOutOfTime };
+  return { entries: [...bySlug.values()], capped: declared === null || declared > maxPages || ranOutOfTime };
 }
 
 function csrfFrom(html: string): { xsrf: string; token: string } {
