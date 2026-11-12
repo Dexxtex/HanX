@@ -27,12 +27,16 @@ on:
     - cron: '37 18 * * *' # 20:37 CEST
   workflow_dispatch:
     inputs:
+      # 100 era tarato su 3 s per richiesta; con 500 ms (tetto Tenrai 120/min)
+      # 300 entry sono ~5 minuti su un job da 90.
       limit:
         description: 'Mapping: entry nuove da convertire in questa run'
-        default: '100'
+        default: '300'
+      # `no-align` sono allineamenti TVDB/TMDB falliti, che possono risolversi da
+      # soli; `no-tmdb` (3.926) e' un vicolo cieco e resta fuori.
       retry:
         description: 'Mapping: esiti da riaprire (es. no-tmdb). Vuoto = nessuno'
-        default: ''
+        default: 'no-align'
       titleit-cap:
         description: 'Mapping: richieste TMDB per il titolo italiano dei film (0 = off)'
         default: '600'
