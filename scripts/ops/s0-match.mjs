@@ -73,14 +73,6 @@ export function classificaS0(c, scheda, { legacy = false } = {}) {
     const k = ep.n;
     // `legacy` riproduce il bug: `from` era l'episodio trovato, non l'inizio
     // del blocco. Con Freezing (scheda 6, match su S0E6) copriva 6-11.
-    const from = legacy
-      ? nScheda === nS0
-        ? 1
-        : k
-      : nScheda === 1
-        ? k
-        : Math.max(1, k - nScheda + 1);
-    const episodeCount = legacy ? 1 : Math.max(1, Math.min(nScheda, nS0 - from + 1));
 
     // Da "episodio plausibile" a "intero range": l'ancora e' un episodio, il
     // blocco e' un'assunzione. Va detto quale delle due cose e'.
@@ -88,20 +80,49 @@ export function classificaS0(c, scheda, { legacy = false } = {}) {
     // per episodio, quindi la posizione dell'ancora nella scheda e' ignota.
     // L'ancora NON dice dove sta nel blocco. Se il blocco e' consecutivo e
     // mantiene l'ordine, from = anchorEpisode - anchorSourcePosition + 1: senza
-    // la posizione, l'unico from ricavabile e' quello che assume l'ancora come
-    // ULTIMO episodio della scheda. Vale anche quando l'ancora supera la
-    // lunghezza della scheda: con ancora 10 e scheda da 3, i range possibili
-    // sono 10-12, 9-11 e 8-10.
-    const rangeDetermined = nScheda === 1;
-    const rangeReason = nScheda === 1 ? 'single_episode' : 'assumed_anchor_is_last';
+    // la posizione, ogni posizione possibile produce un range diverso.
+    // Non si sceglie con Math.max(1, ...): sarebbe una seconda assunzione
+    // ("il blocco parte da S0E1") che nessun dato sostiene.
+    const alternativeRanges = [];
+    for (let pos = 1; pos <= nScheda; pos += 1) {
+      const start = k - pos + 1;
+      if (start < 1) continue;
+      if (start + nScheda - 1 > nS0) continue;
+      const blocco = lista.filter((e) => e.n >= start && e.n < start + nScheda);
+      const anni = blocco.map((e) => Number(anno(e.air))).filter(Number.isFinite);
+      const dateSupport = Boolean(y) && anni.length > 0 && anni.every((a) => Math.abs(a - Number(y)) <= 1);
+      alternativeRanges.push({ from: start, episodeCount: nScheda, dateSupport });
+    }
+    const conData = alternativeRanges.filter((x) => x.dateSupport);
 
-    // Evidenza indipendente: le date del blocco proposto cadono nell'anno della
-    // scheda (+/-1). Non dimostra i confini, ma li sostiene (Freezing: 1-6 nel
-    // 2011, 7-12 nel 2013-14, la scheda e' del 2011).
-    const blocco = lista.filter((e) => e.n >= from && e.n < from + episodeCount);
-    const anniBlocco = blocco.map((e) => Number(anno(e.air))).filter(Number.isFinite);
-    const dateSupport =
-      Boolean(y) && anniBlocco.length > 0 && anniBlocco.every((a) => Math.abs(a - Number(y)) <= 1);
+    let from = null;
+    let episodeCount = nScheda;
+    let proposalReason;
+    let rangeDetermined = false;
+    if (legacy) {
+      // Versione precedente, solo per il diff: il range partiva dall'episodio
+      // trovato e copriva un episodio solo.
+      from = nScheda === nS0 ? 1 : k;
+      episodeCount = 1;
+      proposalReason = 'legacy';
+    } else if (nScheda === 1) {
+      from = k;
+      episodeCount = 1;
+      proposalReason = 'single_episode';
+      rangeDetermined = true;
+    } else if (alternativeRanges.length === 1) {
+      from = alternativeRanges[0].from;
+      proposalReason = 'only_valid_range';
+      rangeDetermined = true;
+    } else if (conData.length === 1) {
+      from = conData[0].from;
+      proposalReason = 'unique_date_consistent';
+    } else if (alternativeRanges.length === 0) {
+      proposalReason = 'no_valid_range';
+    } else {
+      proposalReason = 'ambiguous';
+    }
+    const dateSupport = Boolean(from) && alternativeRanges.some((x) => x.from === from && x.dateSupport);
 
     // S0 con episodi in anni diversi contiene piu' blocchi (Freezing: 2011 e
     // 2013-14, speciali e OVA di Vibration): un range a cavallo e' sospetto.
@@ -115,11 +136,13 @@ export function classificaS0(c, scheda, { legacy = false } = {}) {
       anchorSourcePosition: null,
       from,
       episodeCount,
-      rangeReason,
-      rangeProposed: true,
+      rangeReason: proposalReason,
+      proposalReason,
+      rangeProposed: from !== null,
       rangeDetermined,
       rangeVerified: false,
       dateSupport,
+      alternativeRanges,
       multiBlocco,
       segnale,
       lista,
