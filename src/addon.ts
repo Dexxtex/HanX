@@ -149,7 +149,9 @@ try {
 //
 // Disable with PROVIDER_CACHE_DISABLE=1.
 // 15 minuti, non 5: una voce costa ~1,1 KB (4 stream) e il fan-out a freddo
-// costa ~4 s su 3 host. La finestra copre una sessione di visione.
+// costa ~4 s su 3 host. La finestra serve alla riapertura dello stesso episodio
+// (chiudi e riprendi, cambio stream), non alla durata della riproduzione:
+// Stremio risolve una volta e il player usa quell'URL fino alla fine.
 const PROVIDER_CACHE_TTL_MS = 15 * 60 * 1000;
 // 5.000 voci = ~5,5 MB misurati: con 500 una serie da 100 episodi la svuota
 // gia' a meta'. Il container tiene 13 MB di mapping e 6 MB di catalogo, quindi
