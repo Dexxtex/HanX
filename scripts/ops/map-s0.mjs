@@ -52,7 +52,9 @@ for (const c of dump) {
   perFascia[fascia] = (perFascia[fascia] || 0) + 1;
   // ONA fuori dalla promozione, per scelta: 59% di copertura e 61 casi su 133
   // senza segnale affidabile.
-  if (!FASCE_PROMUOVIBILI.has(fascia) || !ep) continue;
+  // from null = piu' range alternativi: il resolver non ne sceglie uno, e
+  // scriverne uno a caso nel mapping sarebbe la stessa assunzione di prima.
+  if (!FASCE_PROMUOVIBILI.has(fascia) || !ep || esito.from === null) continue;
   if (!TIPI_PROMUOVIBILI.has(scheda?.type || '')) continue;
   const title = String(scheda?.titleSite || c.title || '').trim();
   if (!title) {
