@@ -81,7 +81,48 @@ export function classificaS0(c, scheda, { legacy = false } = {}) {
         ? k
         : Math.max(1, k - nScheda + 1);
     const episodeCount = legacy ? 1 : Math.max(1, Math.min(nScheda, nS0 - from + 1));
-    return { fascia, ep, from, episodeCount, segnale, lista, nS0, nScheda, candidati: perNome };
+
+    // Da "episodio plausibile" a "intero range": l'ancora e' un episodio, il
+    // blocco e' un'assunzione. Va detto quale delle due cose e'.
+    // `anchorSourcePosition` resta null: nessuno dei tre siti espone i titoli
+    // per episodio, quindi la posizione dell'ancora nella scheda e' ignota.
+    let rangeReason;
+    let determinato;
+    if (nScheda === 1) {
+      rangeReason = "scheda di un solo episodio: il range e' quell'episodio";
+      determinato = true;
+    } else if (k === nScheda) {
+      rangeReason = "l'ancora e' l'ultimo episodio della scheda: il blocco finisce li'";
+      determinato = true;
+    } else if (k > nScheda) {
+      rangeReason = "l'ancora e' oltre la lunghezza della scheda: il blocco finisce li'";
+      determinato = true;
+    } else {
+      rangeReason = "ancora interna alla scheda: il blocco e' assunto a partire da S0E1, non dimostrato";
+      determinato = false;
+    }
+
+    // S0 con episodi in anni diversi contiene piu' blocchi (Freezing: 2011 e
+    // 2013-14, speciali e OVA di Vibration): un range a cavallo e' sospetto.
+    const anni = [...new Set(lista.map((e) => anno(e.air)).filter(Boolean))].map(Number).sort((a, b) => a - b);
+    const multiBlocco = anni.length > 1 && anni[anni.length - 1] - anni[0] >= 1;
+
+    return {
+      fascia,
+      ep,
+      anchorEpisode: k,
+      anchorSourcePosition: null,
+      from,
+      episodeCount,
+      rangeReason,
+      determinato,
+      multiBlocco,
+      segnale,
+      lista,
+      nS0,
+      nScheda,
+      candidati: perNome,
+    };
   };
 
   if (perNomeAnno.length) return scegli(perNomeAnno[0], 'A', 'nome');
