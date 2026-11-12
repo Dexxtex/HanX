@@ -2,78 +2,36 @@
 // OVA/ONA/Special che non hanno un kitsuId: il codice li accetta gia' purche'
 // abbiano un `title` diverso da quello della serie madre (resolveSeasonRanges).
 //
-// Legge il dump della sonda (`scripts/research/s0-full-*.json`), quindi non fa
-// richieste: l'episodio e' gia' stato identificato e classificato.
+// Legge il dump della sonda TVDB (`scripts/research/s0-tvdb-*.json`), quindi non
+// fa richieste: l'episodio e' gia' stato identificato. Le regole stanno in
+// `s0-match.mjs`, condivise col report.
 //
 //   node scripts/ops/map-s0.mjs --mapping data/anime-seasons.json [--write]
 //
 // Senza `--write` stampa solo cosa farebbe.
 import fs from 'node:fs';
 import path from 'node:path';
+import { classificaS0, FASCE_PROMUOVIBILI, TIPI_PROMUOVIBILI } from './s0-match.mjs';
 
 const arg = (name, fallback) => {
   const i = process.argv.indexOf(name);
   return i >= 0 ? process.argv[i + 1] : fallback;
 };
 const mappingFile = arg('--mapping', 'data/anime-seasons.json');
-const dumpFile = arg('--dump', 'scripts/research/s0-full-2026-11-12.json');
+const dumpFile = arg('--dump', 'scripts/research/s0-tvdb-2026-11-12.json');
 const catalogoFile = arg('--catalogo', '.tmp/cat.json');
 const write = process.argv.includes('--write');
 // Solo le fasce con l'episodio identificato: A (nome + anno), B (data esatta),
 // C (stesso anno, un solo candidato). D/E/F/G restano fuori.
-const FASCE = new Set(['A', 'B', 'C']);
 
-const stop = new Set(['ita', 'sub', 'the', 'and', 'of', 'a', 'to', 'in', 'wa', 'ga', 'no', 'ni', 'wo', 'de', 'x']);
-const norm = (s) =>
-  String(s || '')
-    .toLowerCase()
-    .replace(/\(ita\)|\(sub ita\)|\bova\b|\bona\b|\bspecial\b|\bspecials\b|\bmovie\b/g, ' ')
-    .replace(/[^a-z0-9]+/g, ' ')
-    .trim();
-const toks = (s) => new Set(norm(s).split(' ').filter((w) => w.length > 2 && !stop.has(w)));
-const ov = (a, b) => {
-  const A = toks(a);
-  const B = toks(b);
-  if (!A.size || !B.size) return 0;
-  let n = 0;
-  for (const w of A) if (B.has(w)) n += 1;
-  return n / Math.min(A.size, B.size);
-};
-const anno = (x) => String(x || '').match(/(\d{4})/)?.[1] || null;
 
+// Le regole stanno in un punto solo: `s0-match.mjs`, condiviso col report.
 const dump = JSON.parse(fs.readFileSync(dumpFile, 'utf8'));
 const mapping = JSON.parse(fs.readFileSync(mappingFile, 'utf8'));
 const catalogo = JSON.parse(fs.readFileSync(catalogoFile, 'utf8'));
 const perSlug = new Map();
 for (const site of ['saturn', 'world', 'unity']) {
   for (const e of catalogo.sites[site] || []) perSlug.set(`${site}:${e.slug}`, e);
-}
-
-/** Stessa classificazione di `s0-campione.mjs`: le due devono restare allineate. */
-function classifica(c) {
-  const y = anno(c.startDate) || anno(c.year);
-  const nomeOk = (e) => ov(e.name, c.title) >= 0.5 || (c.titles || []).some((x) => ov(e.name, x) >= 0.5);
-  const punteggio = (e) => {
-    const nome = Math.max(ov(e.name, c.title), ...(c.titles || []).map((x) => ov(e.name, x)));
-    const ey = Number(anno(e.air));
-    return { nome, distanza: y && Number.isFinite(ey) ? Math.abs(ey - Number(y)) : 99 };
-  };
-  const perNome = c.s0
-    .filter((e) => {
-      if (!nomeOk(e)) return false;
-      const ey = anno(e.air);
-      return !y || !ey || Math.abs(Number(ey) - Number(y)) <= 1;
-    })
-    .sort((a, b) => punteggio(b).nome - punteggio(a).nome || punteggio(a).distanza - punteggio(b).distanza);
-  if (perNome.length) return { fascia: 'A', ep: perNome[0] };
-  const madreOk = ov(c.tmdbTitle, c.title) > 0 || (c.titles || []).some((t) => ov(c.tmdbTitle, t) > 0);
-  if (!madreOk) return { fascia: 'E', ep: null };
-  const esatta = c.s0.filter((e) => c.startDate && e.air === c.startDate);
-  if (esatta.length === 1) return { fascia: 'B', ep: esatta[0] };
-  const stessoAnno = c.s0.filter((e) => e.air && anno(e.air) === y);
-  if (stessoAnno.length === 1) return { fascia: 'C', ep: stessoAnno[0] };
-  if (stessoAnno.length > 1) return { fascia: 'D', ep: null };
-  return { fascia: 'F', ep: null };
 }
 
 let aggiunti = 0;
@@ -87,25 +45,21 @@ const esempi = [];
 const perChiave = new Map();
 
 for (const c of dump) {
-  const { fascia, ep } = classifica(c);
-  perFascia[fascia] = (perFascia[fascia] || 0) + 1;
-  if (!FASCE.has(fascia) || !ep) continue;
-
   const scheda = perSlug.get(`${c.site}:${c.slug}`);
+  const esito = classificaS0(c, scheda);
+  const { fascia } = esito;
+  const ep = esito.ep;
+  perFascia[fascia] = (perFascia[fascia] || 0) + 1;
+  // ONA fuori dalla promozione, per scelta: 59% di copertura e 61 casi su 133
+  // senza segnale affidabile.
+  if (!FASCE_PROMUOVIBILI.has(fascia) || !ep) continue;
+  if (!TIPI_PROMUOVIBILI.has(scheda?.type || '')) continue;
   const title = String(scheda?.titleSite || c.title || '').trim();
   if (!title) {
     saltati += 1;
     continue;
   }
-  const episodes = Math.max(1, Number(scheda?.episodes) || 1);
-  // Il match dice che la scheda CONTIENE l'episodio K di S0, non che sia solo
-  // quello. "Freezing Specials" ha 6 episodi che sono S0 1-6, ma il nome
-  // combacia sull'ultimo: prendere `from: 6` lasciava senza stream 5 episodi
-  // su 6. Se la scheda ha N episodi e il match cade su K, la scheda e' il blocco
-  // che finisce a K; se K < N il blocco parte da 1.
-  const k = Number(ep.n);
-  const from = episodes === 1 ? k : Math.max(1, k - episodes + 1);
-  const coperti = Math.max(1, Math.min(episodes, c.s0.length - from + 1));
+  const { from, episodeCount: coperti } = esito;
   const key = `tmdb:${c.tmdbId}:${from}`;
   const cur = perChiave.get(key);
   if (!cur || title.length < cur.title.length) {
