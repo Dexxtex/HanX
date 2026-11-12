@@ -242,9 +242,13 @@ function _providerCacheSet(type: string, id: string, configDigest: string, strea
 // l'episodio sta per finire, quindi si scalda la voce di cache del successivo.
 // Non aggiunge una risoluzione: sposta indietro quella che il click avrebbe
 // fatto (il click poi e' un cache hit). Il costo e' la risoluzione sprecata da
-// chi supera la soglia e non continua, quindi la soglia sta alta: al 97% di un
-// episodio da 24 minuti restano ~40 s, abbastanza per una risoluzione da ~1 s.
-const PRIME_AT = 0.97;
+// chi supera la soglia e non continua.
+//
+// La soglia sta sotto l'inizio dei titoli di coda (misurato: ~94% su episodi da
+// 24 minuti): chi arriva ai titoli ha finito l'episodio e clicchera' il
+// successivo, quindi il pre-cache deve essere gia' partito. Al 97% arrivava
+// dopo, e chi si fermava sui titoli non lo riceveva.
+const PRIME_AT = 0.9;
 /** Una voce per episodio: gli eventi sono ~10 per episodio, il pre-cache uno. */
 const primed = new Set<string>();
 const PRIMED_MAX = 100;
