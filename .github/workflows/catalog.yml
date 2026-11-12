@@ -141,13 +141,15 @@ jobs:
         if: steps.fresh.outputs.should_run == 'true'
         env:
           CATALOG_PROXY: ${{ secrets.CATALOG_PROXY }}
-          # Un sito per notte: il crawl scende a 10-15' e il resto va al
-          # backfill. 650 schede a 3,3 s sono ~36', dentro la deadline di 52'.
+          # 8 req/s per host, il massimo misurato su tutti e tre i siti. Il
+          # pacing e' per host, quindi i tre crawl procedono insieme senza
+          # rubarsi lo slot.
+          CATALOG_INTERVAL_MS: 125
           CATALOG_MALID_MAX_REQUESTS: 650
           CATALOG_MALID_DEADLINE_MIN: 52
           # Tappo del crawl: oltre 34' si ferma anche a metà sito.
           CATALOG_CRAWL_DEADLINE_MIN: 34
-        run: pnpm run sync-catalog
+        run: pnpm run sync-catalog --all
 
       # Le schede nuove arrivano dal crawl senza `ep`: il provider pagherebbe la
       # pagina serie a ogni episodio. Il backfill le riempie qui, prima del

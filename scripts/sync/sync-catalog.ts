@@ -47,7 +47,11 @@ import {
 const DATA_DIR = path.resolve(fileURLToPath(new URL('../../data', import.meta.url)));
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36';
 const TIMEOUT_MS = Number(process.env.CATALOG_TIMEOUT_MS) || 15_000;
-const INTERVAL_MS = Math.max(1_000, Number(process.env.CATALOG_INTERVAL_MS) || 3_000);
+/**
+ * Intervallo per host. Il pavimento e' 125 ms (8 req/s), il massimo misurato su
+ * tutti e tre i siti; il default resta prudente per chi non passa la variabile.
+ */
+const INTERVAL_MS = Math.max(125, Number(process.env.CATALOG_INTERVAL_MS) || 3_000);
 const RETRIES = 2;
 const BACKOFF_MS = [1_500, 4_000];
 
@@ -571,43 +575,48 @@ async function main(): Promise<number> {
     console.log(`[catalog] rotazione: stanotte si aggiorna ${crawlSites.join(', ')}`);
   }
 
-  for (const site of CATALOG_SITES) {
-    if (!crawlSites.includes(site)) {
-      catalog.sites[site] = previous.sites[site];
-      if (previous.truncated[site]) catalog.truncated[site] = true;
-      continue;
-    }
-    const siteStart = Date.now();
-    let result: CrawlResult;
-    try {
-      result = await CRAWLERS[site](options.maxPages[site], crawlDeadline, previous.sites[site] || []);
-    } catch (err: any) {
-      // Un sito bloccato non ferma gli altri (host diversi): il suo catalogo
-      // resta quello di ieri, gli altri si aggiornano e il job esce rosso.
-      const message = `${site}: ${err instanceof BlockedError ? 'BLOCCATO' : 'errore'} — ${describeError(err)}`;
-      console.error(`[catalog] ${message}; catalogo precedente mantenuto (${previous.sites[site].length} schede)`);
-      catalog.sites[site] = previous.sites[site];
-      if (previous.truncated[site]) catalog.truncated[site] = true;
-      failures.push(message);
-      continue;
-    }
-    const merged = mergeSite(site, previous.sites[site] || [], result.entries);
-    if (!merged.accepted) {
-      console.error(`[catalog] ${site}: ${merged.reason}`);
-      catalog.sites[site] = previous.sites[site];
-      if (previous.truncated[site]) catalog.truncated[site] = true;
-      failures.push(merged.reason || `${site}: catalogo incompleto`);
-      continue;
-    }
-    const diff = diffEntries(previous.sites[site] || [], merged.entries);
-    catalog.sites[site] = merged.entries;
-    if (result.capped) catalog.truncated[site] = true;
-    const capped = result.capped ? ` (tetto ${options.maxPages[site]} pagine raggiunto)` : '';
-    console.log(
-      `[catalog] ${site.padEnd(6)} ${String(merged.entries.length).padStart(6)} schede  ` +
-        `+${diff.added}/-${diff.removed}  ${((Date.now() - siteStart) / 1000).toFixed(1)}s${capped}`
-    );
-  }
+  // I tre siti insieme: sono host diversi e il pacing e' per host, quindi in
+  // fila due siti restavano fermi mentre il terzo lavorava. La run dura il sito
+  // piu' lungo, e un sito bloccato non ferma gli altri.
+  await Promise.all(
+    CATALOG_SITES.map(async (site) => {
+      if (!crawlSites.includes(site)) {
+        catalog.sites[site] = previous.sites[site];
+        if (previous.truncated[site]) catalog.truncated[site] = true;
+        return;
+      }
+      const siteStart = Date.now();
+      let result: CrawlResult;
+      try {
+        result = await CRAWLERS[site](options.maxPages[site], crawlDeadline, previous.sites[site] || []);
+      } catch (err: any) {
+        // Un sito bloccato non ferma gli altri (host diversi): il suo catalogo
+        // resta quello di ieri, gli altri si aggiornano e il job esce rosso.
+        const message = `${site}: ${err instanceof BlockedError ? 'BLOCCATO' : 'errore'} — ${describeError(err)}`;
+        console.error(`[catalog] ${message}; catalogo precedente mantenuto (${previous.sites[site].length} schede)`);
+        catalog.sites[site] = previous.sites[site];
+        if (previous.truncated[site]) catalog.truncated[site] = true;
+        failures.push(message);
+        return;
+      }
+      const merged = mergeSite(site, previous.sites[site] || [], result.entries);
+      if (!merged.accepted) {
+        console.error(`[catalog] ${site}: ${merged.reason}`);
+        catalog.sites[site] = previous.sites[site];
+        if (previous.truncated[site]) catalog.truncated[site] = true;
+        failures.push(merged.reason || `${site}: catalogo incompleto`);
+        return;
+      }
+      const diff = diffEntries(previous.sites[site] || [], merged.entries);
+      catalog.sites[site] = merged.entries;
+      if (result.capped) catalog.truncated[site] = true;
+      const capped = result.capped ? ` (tetto ${options.maxPages[site]} pagine raggiunto)` : '';
+      console.log(
+        `[catalog] ${site.padEnd(6)} ${String(merged.entries.length).padStart(6)} schede  ` +
+          `+${diff.added}/-${diff.removed}  ${((Date.now() - siteStart) / 1000).toFixed(1)}s${capped}`
+      );
+    })
+  );
 
   const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
   const total = CATALOG_SITES.reduce((sum, site) => sum + catalog.sites[site].length, 0);
