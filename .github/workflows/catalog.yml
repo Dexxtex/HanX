@@ -153,14 +153,16 @@ jobs:
 
       # Le schede nuove arrivano dal crawl senza `ep`: il provider pagherebbe la
       # pagina serie a ogni episodio. Il backfill le riempie qui, prima del
-      # publish, così il catalogo pubblicato è già completo. 4 worker a 333 ms
-      # sono 12 req/s, il massimo misurato su Saturn e World.
+      # publish, così il catalogo pubblicato è già completo. Stesso proxy del
+      # sync: i runner escono da datacenter. 4 worker a 500 ms sono 8 req/s.
       - name: Backfill ep
         if: always() && steps.fresh.outputs.should_run == 'true'
+        env:
+          CATALOG_PROXY: ${{ secrets.CATALOG_PROXY }}
         run: |
           set -euo pipefail
           pnpm run build
-          node scripts/ops/backfill-episodes.mjs --local --gap 333 --concurrency 4
+          node scripts/ops/backfill-episodes.mjs --local --gap 500 --concurrency 4
           cp data/backfill/catalogs.json data/catalogs.json
 
       # `always()`: anche con il sync rosso i siti riusciti vanno pubblicati.

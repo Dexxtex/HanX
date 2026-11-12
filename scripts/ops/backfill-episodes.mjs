@@ -14,7 +14,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { fetch as undiciFetch } from 'undici';
 import { parseCardDetails } from '../../dist/catalog/sync.js';
+import { proxyDispatcher } from '../../dist/catalog/proxy.js';
 
 const REPO = process.env.GITHUB_REPO || 'Dexxtex/HanX';
 const RAW = `https://raw.githubusercontent.com/${REPO}`;
@@ -39,6 +41,12 @@ const sites = arg('--site') ? [arg('--site')] : ['saturn', 'unity', 'world'];
  * blocco e salva ogni 100.
  */
 const GAP_MS = Math.max(83, Number(arg('--gap')) || 1000);
+/**
+ * Stesso IP residenziale del sync: i runner escono da datacenter e i siti sono
+ * dietro Cloudflare. Vuoto = diretto.
+ */
+const PROXY = String(process.env.CATALOG_PROXY || process.env.AU_PROXY || '').trim();
+const DISPATCHER = proxyDispatcher(PROXY);
 /**
  * Richieste in volo insieme. 4 contemporanee a 500 ms fanno ~8 req/s: provato con
  * 200 richieste consecutive su /play di World, zero 403/429. Con 1 resta la
@@ -71,9 +79,10 @@ function makePacer(gapMs = GAP_MS) {
 
 async function get(url, headers = {}, pace = makePacer()) {
   await pace();
-  const res = await fetch(url, {
+  const res = await undiciFetch(url, {
     headers: { 'User-Agent': UA, ...headers },
     signal: AbortSignal.timeout(TIMEOUT_MS),
+    ...(DISPATCHER ? { dispatcher: DISPATCHER } : {}),
   });
   if (res.status === 403 || res.status === 429) throw new Blocked(`${res.status} ${url}`);
   if (!res.ok) throw new Error(`${res.status} ${url}`);
