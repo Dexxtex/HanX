@@ -281,6 +281,9 @@ jobs:
         if: steps.restore.outputs.restored != 'false'
         env:
           CATALOG_PROXY: ${{ secrets.CATALOG_PROXY }}
+          # Stesso pacing del sync: senza, resta il default di 3 s per richiesta
+          # e 300 schede diventano 15 minuti. AniList ha il suo (1 s fra batch).
+          CATALOG_INTERVAL_MS: 125
           CATALOG_MALID_MAX_REQUESTS: 600
           CATALOG_MALID_DEADLINE_MIN: 32
         run: pnpm run enrich-catalog
