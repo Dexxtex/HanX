@@ -240,8 +240,11 @@ function _providerCacheSet(type: string, id: string, configDigest: string, strea
 // === PRE-CACHE DELL'EPISODIO SUCCESSIVO ===
 // Stremio manda gli eventi player con currentTime e duration: oltre la soglia
 // l'episodio sta per finire, quindi si scalda la voce di cache del successivo.
-// La soglia e' alta di proposito: chi chiude prima non deve pagare la risoluzione.
-const PRIME_AT = 0.9;
+// Non aggiunge una risoluzione: sposta indietro quella che il click avrebbe
+// fatto (il click poi e' un cache hit). Il costo e' la risoluzione sprecata da
+// chi supera la soglia e non continua, quindi la soglia sta alta: al 97% di un
+// episodio da 24 minuti restano ~40 s, abbastanza per una risoluzione da ~1 s.
+const PRIME_AT = 0.97;
 /** Una voce per episodio: gli eventi sono ~10 per episodio, il pre-cache uno. */
 const primed = new Set<string>();
 const PRIMED_MAX = 100;
