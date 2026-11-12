@@ -128,8 +128,10 @@ async function fetchJson(url, init, useCache = true) {
     if (cachedValue) return cachedValue;
   }
   let lastError;
-  for (let attempt = 0; attempt < 4; attempt++) {
-    let waitMs = 300 * 2 ** attempt;
+  // Tenrai risponde 429 a raffica e per piu' di quattro secondi: con 4
+  // tentativi (300+600+1200+2400 ms) la run moriva li'.
+  for (let attempt = 0; attempt < 6; attempt++) {
+    let waitMs = Math.min(300 * 2 ** attempt, 10_000);
     try {
       const response = await fetch(url, {
         ...init,
@@ -164,7 +166,7 @@ async function fetchJson(url, init, useCache = true) {
       if (error === lastError) throw error; // non-retryable HTTP status
       lastError = error; // network/parse error: retry
     }
-    if (attempt < 3) await sleep(waitMs);
+    if (attempt < 5) await sleep(waitMs);
   }
   throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
@@ -1048,13 +1050,25 @@ export function rangesFrom(entries) {
   return seasons;
 }
 
-function mergeSeries(target, key, title, seasons, titleIt = '') {
+export function mergeSeries(target, key, title, seasons, titleIt = '') {
   if (!target[key]) target[key] = { title, seasons: {} };
   if (!target[key].title && title) target[key].title = title;
   // Titolo italiano (TMDB it-IT): vale per l'opera, non per la singola cour.
   if (!target[key].titleIt && titleIt) target[key].titleIt = titleIt;
   for (const [season, ranges] of Object.entries(seasons)) {
-    target[key].seasons[season] = ranges;
+    if (season !== '0') {
+      target[key].seasons[season] = ranges;
+      continue;
+    }
+    // La stagione 0 puo' avere range senza kitsuId aggiunti da `map-s0.mjs`
+    // (OVA/ONA/Special mappati su TMDB): questo builder non li conosce e li
+    // cancellerebbe. Si tengono, e si aggiungono i nuovi per episodio.
+    const keep = (target[key].seasons['0'] || []).filter((range) => !range?.kitsuId);
+    const from = new Set(ranges.map((range) => Number(range?.from)));
+    target[key].seasons['0'] = [
+      ...ranges,
+      ...keep.filter((range) => !from.has(Number(range?.from))),
+    ].sort((a, b) => Number(a?.from) - Number(b?.from));
   }
 }
 
