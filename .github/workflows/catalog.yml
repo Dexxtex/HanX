@@ -399,10 +399,10 @@ jobs:
       - name: Converti e pubblica
         run: >-
           node scripts/build/build-anime-mapping.mjs
-          --limit=${{ inputs.limit || 100 }}
+          --limit=${{ inputs.limit || 300 }}
           --titleit-cap=${{ inputs.titleit-cap || 600 }}
           --publish
-          ${{ inputs.retry && format('--retry={0} --retry-limit={1}', inputs.retry, inputs.limit || 100) || '' }}
+          ${{ inputs.retry && format('--retry={0} --retry-limit={1}', inputs.retry, inputs.limit || 300) || '' }}
 
       # La release conteneva solo gli asset: ora vivono sul branch.
       - name: Ritira la vecchia release mapping
