@@ -83,11 +83,16 @@ export function classificaS0(c, scheda, { legacy = false } = {}) {
     // la posizione, ogni posizione possibile produce un range diverso.
     // Non si sceglie con Math.max(1, ...): sarebbe una seconda assunzione
     // ("il blocco parte da S0E1") che nessun dato sostiene.
+    // I numeri presenti in S0, non la sua lunghezza: se TVDB ha 1,2,4,5 il
+    // range 2-4 non esiste, anche se 4 <= nS0.
+    const numeriS0 = new Set(lista.map((e) => e.n));
     const alternativeRanges = [];
     for (let pos = 1; pos <= nScheda; pos += 1) {
       const start = k - pos + 1;
       if (start < 1) continue;
-      if (start + nScheda - 1 > nS0) continue;
+      const numeroEsiste = (n) => numeriS0.has(n);
+      const esiste = Array.from({ length: nScheda }, (_, i) => start + i).every(numeroEsiste);
+      if (!esiste) continue;
       const blocco = lista.filter((e) => e.n >= start && e.n < start + nScheda);
       const anni = blocco.map((e) => Number(anno(e.air))).filter(Number.isFinite);
       const dateSupport = Boolean(y) && anni.length > 0 && anni.every((a) => Math.abs(a - Number(y)) <= 1);

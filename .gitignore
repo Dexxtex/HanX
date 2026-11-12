@@ -35,7 +35,10 @@ server.log
 
 # --- Test e script locali ---
 # La suite resta in locale: non e' versionata e non entra nell'immagine.
-/tests/
+# I test del resolver S0 restano tracciati: sono la regressione di un errore
+# gia' pagato (from arbitrario). Il resto di tests/ resta locale.
+/tests/*
+!/tests/ops/
 test-provider*.ps1
 
 # --- IDE e sistema ---
