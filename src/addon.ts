@@ -260,15 +260,16 @@ function configDigest(config: any): string {
  * di stagione) prova il primo della stagione successiva: per Kitsu e' un
  * kitsuId diverso, per MAL e' la stagione dopo nello stesso id.
  */
-async function primeEpisode(builder: any, type: string, nextId: string, currentId: string, config: any): Promise<void> {
+async function primeEpisode(addonInterface: any, type: string, nextId: string, currentId: string, config: any): Promise<void> {
     try {
-        const { streams } = await builder.get('stream', type, nextId, {}, config);
+        // `get` sta sull'interfaccia (`builder.js:80-82`), non sul builder.
+        const { streams } = await addonInterface.get('stream', type, nextId, {}, config);
         if (streams?.length) return;
         const kitsu = String(currentId).match(/^kitsu:(\d+):(\d+)$/i);
         if (!kitsu) return;
         const seasonNext = nextSeasonFirstId(kitsu[1], Number(kitsu[2]));
         if (!seasonNext) return;
-        const { streams: altrove } = await builder.get('stream', type, seasonNext, {}, config);
+        const { streams: altrove } = await addonInterface.get('stream', type, seasonNext, {}, config);
         console.log(`[player] stagione successiva ${seasonNext}: ${altrove?.length || 0} stream`);
     } catch (err: any) {
         console.log(`[player] pre-cache fallito per ${nextId}: ${err?.message || err}`);
@@ -300,7 +301,7 @@ export function createBuilder() {
         primed.add(next);
         if (primed.size > PRIMED_MAX) primed.delete(primed.values().next().value as string);
         // In sottofondo: la risposta a Stremio non aspetta la risoluzione.
-        void primeEpisode(builder, type, next, id, cfg);
+        void primeEpisode(builder.getInterface(), type, next, id, cfg);
         return {};
     });
 
