@@ -278,7 +278,11 @@ async function crawlSaturn(maxPages: number, deadline: number, previous: Catalog
  * non è cambiata. Si scende finché una pagina intera non porta niente di nuovo.
  * `maxPages` qui è un tetto di sicurezza: 20 pagine sono 800 card, ~100 s.
  */
-const WORLD_UPDATED_MAX_PAGES = 20;
+// World non espone una data per scheda (la sitemap ha una data sola per tutti i
+// ~50k URL, /updated non porta date): l'unico segnale e' l'ordine. Misurato il
+// 13/11: ~1.295 schede toccate al giorno, quindi 20 pagine (800) coprivano ~14
+// ore e il job gira ogni 24. 40 pagine = 1.600 schede, ~30 ore.
+const WORLD_UPDATED_MAX_PAGES = 40;
 
 async function crawlWorldDelta(deadline: number, previous: CatalogEntry[]): Promise<CrawlResult> {
   const bySlug = new Map(previous.map((entry) => [entry.slug, entry]));
