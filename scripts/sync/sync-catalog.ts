@@ -297,22 +297,21 @@ async function crawlWorldDelta(deadline: number, previous: CatalogEntry[]): Prom
 }
 
 /**
- * Il tipo di World non e' nella scheda: lo dichiara solo il filtro, con un
- * `type` numerico. Una passata per tipo (0=TV 1=OVA 2=ONA 3=Special 4=Movie
- * 5=Music) e si annota la scheda che il catalogo gia' conosce: nessuna scheda
- * nuova, solo il campo. ~126 pagine in tutto.
+ * Il tipo di World non e' nella scheda: lo dichiara il listato per tipo. Si
+ * annota la scheda che il catalogo gia' conosce, senza aggiungerne di nuove.
+ * 172 pagine in tutto, e il numero e' dichiarato in `paginationMaxPage`.
  */
-const WORLD_TYPES: [string, string][] = [
-  ['0', 'TV'], ['1', 'OVA'], ['2', 'ONA'], ['3', 'Special'], ['4', 'Movie'], ['5', 'Music'],
+const WORLD_TYPE_LISTINGS: [string, string][] = [
+  ['/animes', 'TV'], ['/movies', 'Movie'], ['/ova', 'OVA'], ['/ona', 'ONA'], ['/specials', 'Special'],
 ];
 
 async function tagWorldTypes(bySlug: Map<string, CatalogEntry>, deadline: number): Promise<number> {
   let tagged = 0;
-  for (const [value, name] of WORLD_TYPES) {
+  for (const [path, name] of WORLD_TYPE_LISTINGS) {
     let lastPage: number | null = null;
     for (let page = 1; page <= 200 && Date.now() < deadline; page += 1) {
       if (lastPage !== null && page > lastPage) break;
-      const html = (await request(`${BASES.world}/filter?type=${value}&sort=0&page=${page}`)).body;
+      const html = (await request(`${BASES.world}${path}?page=${page}`)).body;
       if (page === 1) lastPage = parseWorldMaxPage(html);
       const cards = parseWorldFilterPage(html);
       if (!cards.length) break;
@@ -333,7 +332,7 @@ async function crawlWorld(maxPages: number, deadline: number, previous: CatalogE
     const result = await crawlWorldDelta(deadline, previous);
     const bySlug = new Map(result.entries.map((entry) => [entry.slug, entry]));
     const tagged = await tagWorldTypes(bySlug, deadline);
-    if (tagged) console.log(`[catalog] world: ${tagged} schede tipizzate dal filtro`);
+    if (tagged) console.log(`[catalog] world: ${tagged} schede tipizzate dal listato`);
     return { entries: [...bySlug.values()], capped: result.capped };
   }
   const entries: CatalogEntry[] = [];
@@ -355,7 +354,7 @@ async function crawlWorld(maxPages: number, deadline: number, previous: CatalogE
   // o se il tappo di tempo ha fermato il walk prima della fine.
   const bySlug = new Map(entries.map((entry) => [entry.slug, entry]));
   const tagged = await tagWorldTypes(bySlug, deadline);
-  if (tagged) console.log(`[catalog] world: ${tagged} schede tipizzate dal filtro`);
+  if (tagged) console.log(`[catalog] world: ${tagged} schede tipizzate dal listato`);
   const ranOutOfTime = Date.now() >= deadline;
   return { entries: [...bySlug.values()], capped: declared === null || declared > maxPages || ranOutOfTime };
 }
