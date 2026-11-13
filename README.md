@@ -26,9 +26,8 @@
 - Riproduce in **diretta** o tramite **EasyProxy** (HLS).
 - Ha una pagina di configurazione: scegli le sorgenti e ottieni il link da
   incollare in Stremio.
-- Consulta un catalogo locale dei tre siti prima di chiedere al sito: meno
-  ricerche, risposte più rapide.
-- Rispetta i limiti dei siti (pacing, cache, stop su `403`/`429`).
+- Consulta un catalogo locale dei tre siti prima di chiedere al sito, e rispetta i
+  loro limiti (pacing, cache, stop su `403`/`429`).
 
 | AnimeUnity | AnimeSaturn | AnimeWorld |
 |:---:|:---:|:---:|
@@ -49,11 +48,8 @@ Serve Docker con Compose v2.
    Il compose elenca tutte le variabili con il loro default: il `.env` le
    sovrascrive, e ogni default si legge dove serve.
 
-2. **Compila il `.env`.**
-
-   `ANIME_MAPPING_URL` serve per i match multi-stagione; senza, ogni ID passa
-   dalla risoluzione live. Senza `CATALOG_URL` e `TMDB_API_KEY` l'addon funziona
-   ma degrada (senza chiave TMDB gli ID fuori indice restano senza stream).
+2. **Compila il `.env`.** Le tre obbligatorie sono nella tabella qui sotto; senza
+   `CATALOG_URL` e `TMDB_API_KEY` l'addon funziona ma degrada.
 
 3. **Avvia:**
 
@@ -138,19 +134,6 @@ comunque dalla ricerca del sito.
 - Il catalogo si aggiorna una volta al giorno: un titolo aggiunto dopo l'ultimo
   aggiornamento non è ancora indicizzato e passa dalla ricerca di rete.
 
-## Sviluppo
-
-Node.js 26+.
-
-```bash
-pnpm install            # dipendenze
-pnpm test               # build + test
-pnpm run dev            # sviluppo con tsx
-```
-
-Struttura: `src/` (addon, provider, mapping, catalogo), `scripts/` (build,
-automazione, sync), `config/` (domini), `tests/`.
-
 ## Licenza e avvertenze
 
 Codice sotto licenza [MIT](LICENSE): usalo, modificalo e ridistribuiscilo, senza
@@ -163,7 +146,6 @@ ai titolari dei diritti, a Stremio o a StreamViX.
 Chi installa l'addon verifica da sé di poter accedere ai contenuti nella propria
 giurisdizione e di rispettare i termini d'uso delle fonti. Il progetto non aggira
 misure tecniche di protezione e non fornisce nulla a questo scopo. Un'informativa
-non esclude la responsabilità prevista dalla legge.
-
-Chi è titolare di diritti può chiedere la rimozione di un riferimento scrivendo
-alla pagina delle issue: qui non è ospitato nessun file.
+non esclude la responsabilità prevista dalla legge. Chi è titolare di diritti può
+chiedere la rimozione di un riferimento scrivendo alla pagina delle issue: qui non
+è ospitato nessun file.
