@@ -30,6 +30,13 @@ export const DEFAULT_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) App
 export const DEFAULT_FETCH_TIMEOUT = 10000;
 
 /**
+ * Tetto per provider: l'handler vive dentro una Promise.race con questo
+ * timeout (addon.ts). Un'unica casa, perché i retry interni dei provider
+ * devono starci: fuori, il loro risultato viene buttato dal race.
+ */
+export const PROVIDER_TIMEOUT_MS = 30000;
+
+/**
  * Stato del provider-run in corso: `runProvider` (addon.ts) esegue l'handler
  * dentro questo store e legge `failed` per non cachare una lista parziale.
  * Unica istanza nel processo, una per provider-run.

@@ -52,10 +52,10 @@ export function minHostIntervalMs(): number {
 }
 
 /**
- * Oltre questa lunghezza la coda non smaltisce più: con 1 s di intervallo 30
- * richieste sono già 30 s di attesa, cioè il timeout del provider. Il tetto è
- * tarato su quel numero: più basso rifiuterebbe richieste che sarebbero andate
- * a buon fine.
+ * Oltre questa lunghezza la coda non smaltisce più: al default di 2 req/s 30
+ * richieste sono 15 s di attesa, al tetto di 8 req/s 3,75 s. Il tetto è tarato
+ * sul default: più basso rifiuterebbe richieste che sarebbero andate a buon
+ * fine, più alto aprirebbe la coda al timeout del provider.
  */
 const MAX_QUEUE_PER_HOST = 30;
 const queueDepth = new Map<string, number>();

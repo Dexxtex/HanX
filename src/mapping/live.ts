@@ -166,7 +166,10 @@ export async function getKitsuStartDate(kitsuId: string): Promise<string | null>
   if (!kitsuId) return null;
   try {
     return (await fetchKitsuAnime(kitsuId))?.startDate || null;
-  } catch {
+  } catch (error) {
+    // Il ripiego per anno è facoltativo: senza la data la ricerca parte
+    // comunque, ma il guasto va visto (non si spegne in silenzio).
+    console.warn('[Mapping/Live] startDate Kitsu non disponibile:', (error as any)?.message || String(error));
     return null;
   }
 }
@@ -258,8 +261,8 @@ async function getTvdbEpisodes(tvdbId: string, season?: number, credentials: Map
         episodes.push({ seasonNumber, number, aired: episode?.aired || null, name: episode?.name || null });
       }
       if (batch.length === 0) break;
-      // Prefer the API's next link. If it is absent, keep paging only while the
-      // endpoint is still returning new rows (some TVDB responses omit links).
+      // Pagina numericamente (`page=N`, fino a 50): `links.next` serve solo a
+      // fermarsi prima, quando una pagina non aggiunge righe nuove.
       if (!json?.links?.next && added === 0) break;
     }
     return episodes;
@@ -439,7 +442,9 @@ async function searchKitsuMovie(title: string, year?: string): Promise<KitsuAnim
   const wanted = normalizedTitle(title);
   const exact = candidates.find((entry) => {
     const candidate = normalizedTitle(entry.title);
-    return candidate === wanted || candidate.includes(wanted) || wanted.includes(candidate);
+    // Il contenuto decide male: "Naruto" dentro "Naruto: The Last" dava
+    // il film come la serie. Solo l'uguaglianza vale, l'anno smista il resto.
+    return candidate === wanted;
   });
   if (exact) return exact;
   if (year) {
@@ -475,8 +480,11 @@ async function resolveLiveMovieUncached(request: MappingRequest, tmdbKey: string
         `${TMDB_API}/find/${encodeURIComponent(request.id)}?external_source=imdb_id&api_key=${tmdbKey}`
       );
       tmdbId = found?.movie_results?.[0]?.id ? String(found.movie_results[0].id) : null;
-    } catch {
-      return null;
+    } catch (error) {
+      // Un errore di rete non è "film non trovato": lancia, così `cached` non lo
+      // memorizza per sei ore (convenzione: english-title.ts:40).
+      debug(3, 'Mapping/Live', 'find imdb fallito', (error as any)?.message || String(error));
+      throw error;
     }
   }
   if (!tmdbId) return null;
@@ -492,8 +500,10 @@ async function resolveLiveMovieUncached(request: MappingRequest, tmdbKey: string
       displaySeason: null,
       source: 'live',
     };
-  } catch {
-    return null;
+  } catch (error) {
+    // Stessa convenzione: l'errore va in alto, la cache non lo memorizza.
+    debug(3, 'Mapping/Live', 'movie lookup fallito', (error as any)?.message || String(error));
+    throw error;
   }
 }
 
@@ -762,10 +772,13 @@ export async function resolveLiveTarget(
       };
     }
     if (request.provider === 'mal') return null;
-    if (request.isMovie || request.episode === null) return resolveLiveMovie(request, credentials);
-    return resolveLiveSeries(request, credentials);
+    // `return await`, non `return`: un rifiuto di una promise restituita non è
+    // preso dal catch, e l'errore sfuggiva a tutta la catena.
+    if (request.isMovie || request.episode === null) return await resolveLiveMovie(request, credentials);
+    return await resolveLiveSeries(request, credentials);
   } catch (error) {
-    debug(3, 'Mapping/Live', 'failed', { error: (error as any)?.message || String(error) });
+    // Un outage TVDB/TMDB non è "anime non mappato": va visto nei log.
+    console.warn('[Mapping/Live] risoluzione live fallita:', (error as any)?.message || String(error));
     return null;
   }
 }

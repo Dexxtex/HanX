@@ -92,7 +92,6 @@ jobs:
         run: >-
           node scripts/build/build-anime-mapping.mjs
           --limit=${{ inputs.limit || 300 }}
-          --titleit-cap=600
           --publish
           --retry=no-align,no-tmdb,no-tvdb,no-kitsu
           --retry-limit=${{ inputs.retry-limit || 4000 }}

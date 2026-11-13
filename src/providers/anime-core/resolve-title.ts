@@ -116,7 +116,11 @@ export async function resolveKitsuRequest(
   const request = resolveMappingRequest(kitsuIdString);
   if (!request) return empty();
 
-  let title = await getKitsuTitle(request.id);
+  // L'id Kitsu non porta stagione: la fornisce l'indice insieme al titolo italiano.
+  const target = await resolveAnimeTarget(request, ctx);
+  // L'override (kitsu:<id>) è la correzione manuale per i siti che romanizzano
+  // diverso da Kitsu: come query principale, non scartato (D9).
+  let title = target?.title || (await getKitsuTitle(request.id));
   if (!title) {
     try {
       title = await getEnglishTitleFromAnyId(request.id, 'kitsu', ctx.tmdbApiKey);
@@ -128,8 +132,6 @@ export async function resolveKitsuRequest(
     console.warn(`[${ctx.label}] Nessun titolo recuperabile per l id richiesto: nessuna ricerca`);
     return empty();
   }
-  // L'id Kitsu non porta stagione: la fornisce l'indice insieme al titolo italiano.
-  const target = await resolveAnimeTarget(request, ctx);
   // `fd2d4ec` perse questo dato passando a resolve-title: il ripiego per anno di
   // AnimeWorld non partiva più. Arriva come parametro, non come stato di istanza
   // (il provider è un singleton: era un leak fra richieste).

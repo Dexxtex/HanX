@@ -21,6 +21,7 @@ export {
   fetchWithTimeout,
   DEFAULT_USER_AGENT,
   DEFAULT_FETCH_TIMEOUT,
+  PROVIDER_TIMEOUT_MS,
   type ProviderCaches,
   type FetchResourceOptions,
   proxyAgentFor,

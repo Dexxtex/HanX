@@ -58,9 +58,6 @@ const args = process.argv.slice(2);
 const checkOnly = args.includes('--check');
 const statusOnly = args.includes('--status');
 const reset = args.includes('--reset');
-// `--only=titleit` fa una sola passata: riempie il titolo italiano mancante
-// sulle chiavi TMDB gia' in indice, col proprio cursore. Serve a non farla
-// competere con la conversione delle entry nuove per lo stesso --limit.
 const onlyArg = (args.find((arg) => arg.startsWith('--only=')) || '').split('=')[1] || '';
 const only = onlyArg.trim();
 const titlesCap = Number((args.find((arg) => arg.startsWith('--titles-cap=')) || '').split('=')[1]) || 0;
@@ -88,9 +85,6 @@ const retryStatuses = retryArg
 const retryLimit = Number((args.find((arg) => arg.startsWith('--retry-limit=')) || '').split('=')[1]) || 0;
 const publish = args.includes('--publish');
 const backfillTitles = args.includes('--backfill-titles');
-// --titleit-cap=N: dopo il build, riempie il titolo italiano dei film già in
-// indice (propagazione gratis + richieste TMDB fino al tetto N per run).
-const titleItCap = Number((args.find((arg) => arg.startsWith('--titleit-cap=')) || '').split('=')[1]) || 0;
 const limitArg = args.find((arg) => arg.startsWith('--limit='));
 const parsedLimit = limitArg ? Number.parseInt(limitArg.split('=')[1], 10) : 200;
 // 0 (o un valore non numerico) significa "tutto il catalogo in un colpo".
@@ -1291,51 +1285,6 @@ async function main() {
   let processed = 0;
 
   /**
-   * Riempie `titleIt` sulle chiavi TMDB gia' in indice. Cursore proprio
-   * (`state.titleit.pos`) sull'elenco ordinato delle chiavi: quando arriva in
-   * fondo riparte da zero, cosi' le voci aggiunte nel frattempo vengono viste.
-   */
-  const runTitleItPass = async () => {
-    const keys = [...Object.keys(index.series), ...Object.keys(index.movies)]
-      .filter((key) => key.startsWith('tmdb:'))
-      .sort();
-    if (!keys.length) return { filled: 0, requests: 0 };
-    state.titleit = state.titleit || { pos: 0 };
-    const start = Number(state.titleit.pos) || 0;
-    const cap = titleItCap || keys.length;
-    let filled = 0;
-    let requests = 0;
-    for (let i = 0; i < keys.length && requests < cap; i += 1) {
-      const pos = (start + i) % keys.length;
-      const key = keys[pos];
-      const isSeries = Boolean(index.series[key]);
-      const entry = index.series[key] || index.movies[key];
-      if (!entry || entry.titleIt) continue;
-      const id = key.slice('tmdb:'.length);
-      requests += 1;
-      try {
-        const detail = await fetchJson(
-          `${TMDB}/${isSeries ? 'tv' : 'movie'}/${id}?api_key=${encodeURIComponent(tmdbKey)}&language=it-IT`
-        );
-        const it = String(detail?.name || detail?.title || '').trim();
-        if (it && !samePlainTitle(it, entry.title)) {
-          entry.titleIt = it;
-          filled += 1;
-        }
-      } catch (error) {
-        // 404: TMDB non conosce quell'id, non c'e' niente da riempire.
-        if (!/HTTP 404/.test(String(error?.message || ''))) throw error;
-      }
-      state.titleit.pos = (pos + 1) % keys.length;
-      if (requests % 100 === 0) {
-        persist();
-        console.log(`  titleIt: ${requests}/${cap} richieste, ${filled} riempiti`);
-      }
-    }
-    return { filled, requests };
-  };
-
-  /**
    * Riempie `titleEn`/`titleJa`/`titleAlt` sulle entry gia' in indice, leggendo
    * Kitsu per il primo kitsuId della voce (una chiamata per opera, non per
    * chiave: imdb/tvdb/tmdb della stessa serie condividono il kitsuId).
@@ -1397,14 +1346,6 @@ async function main() {
     console.log(`  cursore di partenza: titles p${state.titles?.pos || 0}`);
     const { filled, requests } = await runTitlesPass();
     console.log(`  titles: ${filled} voci riempite in ${requests} richieste, cursore p${state.titles.pos}`);
-    persist();
-    return;
-  }
-
-  if (only === 'titleit') {
-    console.log(`  cursore di partenza: titleit p${state.titleit?.pos || 0}`);
-    const { filled, requests } = await runTitleItPass();
-    console.log(`  titleIt: ${filled} voci riempite in ${requests} richieste, cursore p${state.titleit.pos}`);
     persist();
     return;
   }
@@ -1498,7 +1439,8 @@ async function main() {
   // quello già presente in 2.599 casi, quindi il passo chiedeva 600 titoli a
   // ogni run per non riempire niente (e ripartiva sempre dalla testa, senza
   // cursore). La propagazione resta perché è gratis.
-  if (titleItCap > 0) {
+  {
+    // Propagazione fra chiavi sorelle dei film: gratis, e serve alle entry nuove.
     const groups = new Map();
     for (const [key, entry] of Object.entries(index.movies)) {
       const gk = entry.kitsuId ? `kitsu:${entry.kitsuId}` : `key:${key}`;

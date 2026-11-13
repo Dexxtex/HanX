@@ -540,6 +540,11 @@ async function asSearch(query: string): Promise<AnimeSaturnResult[]> {
       outFromApi.push({ title, url: buildSaturnUrl(path) || `${getSaturnBaseUrl()}${path}` });
     }
     debug(2, 'AnimeSaturn', `[AnimeSaturn][Search] API /api/search?q="${qRaw}" -> ${outFromApi.length} risultati`);
+    if (!outFromApi.length) {
+      // La risposta vuota non è "questo titolo non c'è": il titolo aggiunto al
+      // sito resta invisibile fino a 12 h. La voce si toglie, non si ricacha.
+      asCaches.http.delete(`as-search-api:${qRaw.toLowerCase()}`);
+    }
     if (outFromApi.length) return outFromApi;
   } catch (err: any) {
     console.warn('[AnimeSaturn][Search] API /api/search fallita, fallback HTML:', err?.message || err);
@@ -594,6 +599,10 @@ async function asSearch(query: string): Promise<AnimeSaturnResult[]> {
     });
     debug(2, 'AnimeSaturn', `[AnimeSaturn][Search] scraping HTML ${url} -> ${out.length} risultati cumulativi`);
     if (out.length) break;
+  }
+  if (!out.length) {
+    // Stessa regola: la ricerca vuota non resta 12 ore in cache.
+    for (const u of urls) asCaches.http.delete(`as-search:${u}`);
   }
   return out;
 }
@@ -881,7 +890,12 @@ export class AnimeSaturnProvider {
 
     const initialWatchUrls = await resolveWatchUrlsForEpisodeEntry(selected);
 
-    if (initialWatchUrls.length === 0) return [];
+    if (initialWatchUrls.length === 0) {
+      // L'episodio c'è ma nessuna pagina watch: è un cambiamento del sito, non
+      // "episodio non trovato". Senza log la causa restava invisibile.
+      console.warn(`[AnimeSaturn] nessuna pagina watch per ep=${normalizedEpisode} di ${baseTitle}`);
+      return [];
+    }
     
     const queue = [...initialWatchUrls];
     const visitedWatchUrls = new Set<string>();

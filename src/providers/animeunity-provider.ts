@@ -266,7 +266,7 @@ function extractAnimeIdSlugFromPath(animePath: string): { animeId: number | null
 
 let searchCooldownUntil = 0;
 
-async function searchEndpoint(query: string, _dubbed = false): Promise<AnimeUnitySearchResult[]> {
+async function searchEndpoint(query: string): Promise<AnimeUnitySearchResult[]> {
   if (isUnityCoBase()) return searchUnityCo(query);
   if (searchCooldownUntil > Date.now()) {
     // Il cooldown locale azzera la ricerca per 60 s: senza questa riga il log a
@@ -314,6 +314,11 @@ async function searchEndpoint(query: string, _dubbed = false): Promise<AnimeUnit
   }
 
   const hits = parseSearchResultsHtml(String(payload?.result?.html || ''));
+  if (!hits.length) {
+    // La risposta vuota non è "questo titolo non c'è": il titolo aggiunto al
+    // sito resta invisibile fino a 12 h. La voce si toglie, non si ricacha.
+    caches.http.delete(`au-search:${query}`);
+  }
   return hits.map((hit) => ({
     ...hit,
     name_it: hit.name,
@@ -335,7 +340,11 @@ async function searchUnityCo(query: string): Promise<AnimeUnitySearchResult[]> {
     ) || '');
 
     const raw = html.match(/\brecords="([^"]+)"/)?.[1];
-    if (!raw) return [];
+    if (!raw) {
+      // Stessa regola: la ricerca vuota non resta 12 ore in cache.
+      caches.http.delete(`au-co-search:${query}`);
+      return [];
+    }
 
     const records = JSON.parse(decodeHtmlAttribute(raw)) as any[];
     return records
@@ -549,10 +558,18 @@ async function getStreamData(
     const candidates = parseEpisodeServers(String(html || ''), episodeId)
       .filter((server) => server.type === language);
     const server = candidates.find((entry) => entry.host === 'vixcloud') || candidates[0];
-    if (!server) return empty;
+    if (!server) {
+      // L'episodio c'è ma nessun server in quella lingua: è un cambiamento del
+      // sito, non "episodio non trovato". Senza log la causa restava invisibile.
+      console.warn(`[AnimeUnity][Stream] nessun server ${language} per l'episodio ${episodeId}`);
+      return empty;
+    }
 
     const embedUrl = await resolveServerEmbedUrl(server.linkId, episodePage);
-    if (!embedUrl) return empty;
+    if (!embedUrl) {
+      console.warn(`[AnimeUnity][Stream] embed non risolto per l'episodio ${episodeId}`);
+      return empty;
+    }
 
     const media = await resolveEmbedMedia(embedUrl, episodePage, needVariant);
     return { ...empty, embed_url: embedUrl, ...media };
@@ -928,17 +945,14 @@ export class AnimeUnityProvider {
   // Made public for catalog search
   async searchAllVersions(title: string): Promise<{ version: AnimeUnitySearchResult; language_type: string }[]> {
     try {
-      const subPromise = searchEndpoint(title, false).catch(() => []);
-      const dubPromise = searchEndpoint(title, true).catch(() => []);
-
-      const [subResults, dubResults]: [AnimeUnitySearchResult[], AnimeUnitySearchResult[]] = await Promise.all([subPromise, dubPromise]);
+      // Una sola ricerca: il flag DUB era ignorato, le due chiamate erano
+      // identiche (la seconda un cache hit puro).
+      const allResults = await searchEndpoint(title).catch(() => []);
       const results: { version: AnimeUnitySearchResult; language_type: string }[] = [];
 
-      debug(2, 'AnimeUnity', `[AnimeUnity] Risultati SUB per "${title}":`, subResults?.length || 0);
-      debug(2, 'AnimeUnity', `[AnimeUnity] Risultati DUB per "${title}":`, dubResults?.length || 0);
+      debug(2, 'AnimeUnity', `[AnimeUnity] Risultati ricerca per "${title}":`, allResults?.length || 0);
 
-      // Unisci tutti i risultati (SUB e DUB), ma assegna ITA o CR se il nome contiene
-      const allResults = [...(subResults || []), ...(dubResults || [])];
+      // Assegna ITA o CR se il nome contiene
       // Filtra duplicati per nome e id
       const seen = new Set();
       for (const r of allResults) {

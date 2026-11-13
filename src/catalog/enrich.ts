@@ -140,7 +140,10 @@ export async function enrichMalIds(catalog: CatalogFile, options: EnrichOptions)
       if ((entry.titles?.length || 0) > aliasesBefore) aliased += 1;
       // `enrichedAt` solo per un esito definitivo: la scheda senza link MAL o
       // senza link AniList non ha niente da confermare, quella muta si riprova.
-      if (isEnrichmentFinal(details, answered)) entry.enrichedAt = today;
+      // Per i siti da cui si leggono gli id episodio, definitivo significa anche
+      // "ep letti": altrimenti un errore di lettura chiudeva la scheda per sempre.
+      if (isEnrichmentFinal(details, answered) && (!EPISODE_SITES.has(site) || details.ep))
+        entry.enrichedAt = today;
     }
     if (EPISODE_SITES.has(site)) {
       // Niente AniList qui: il conteggio utile è quante schede hanno gli id.

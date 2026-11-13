@@ -64,6 +64,8 @@ export interface CatalogLookup {
 }
 
 let cached: { file: string; mtimeMs: number; data: TitleIndexFile } | null = null;
+// L'ultima lettura ha prodotto un indice vuoto: il file c'è ma non è un indice.
+let loadFailed = false;
 
 /** Indice token -> schede, per sito. Costruito una volta per versione del file. */
 type SiteIndex = {
@@ -152,7 +154,10 @@ export function getCatalogStatus(staleMs: number) {
       entries: counts.saturn + counts.world + counts.unity,
       sites: counts,
       ageMs: Math.max(0, Date.now() - mtimeMs),
-      stale: Date.now() - mtimeMs > staleMs,
+      // Un file corrotto ma recente non è "sano": lo stale lo dice al posto
+      // del mtime, che da solo mentiva (il file c'era, l'indice no).
+      stale: loadFailed || Date.now() - mtimeMs > staleMs,
+      ...(loadFailed ? { corrupt: true } : {}),
       ...attempt,
     };
   } catch {
@@ -167,16 +172,24 @@ function loadIndex(): TitleIndexFile | null {
     const { mtimeMs } = fs.statSync(file);
     if (cached && cached.file === file && cached.mtimeMs === mtimeMs) return cached.data;
     const data = JSON.parse(fs.readFileSync(file, 'utf8')) as TitleIndexFile;
-    if (!data || typeof data !== 'object' || !data.sites) return null;
+    if (!data || typeof data !== 'object' || !data.sites) {
+      loadFailed = true;
+      return null;
+    }
     cached = { file, mtimeMs, data };
+    loadFailed = false;
     return data;
-  } catch {
+  } catch (error) {
     // File corrotto: si memorizza l'esito vuoto per questa versione del file.
     // Senza, ogni lookup (3 per richiesta) rifarebbe stat + read + parse di un
     // file da 15k schede, per sempre se la rete non lo ri-scarica.
+    // Il file corrotto va visto: senza questa riga il catalogo si spegneva in
+    // silenzio e `/status.json` diceva "sano" (lo stale è calcolato sulla mtime).
+    console.warn('[Catalog] catalog-titles.json illeggibile, catalogo spento:', (error as any)?.message || String(error));
     try {
       const { mtimeMs } = fs.statSync(file);
       cached = { file, mtimeMs, data: { generatedAt: null, sites: {} } as TitleIndexFile };
+      loadFailed = true;
     } catch { /* file assente: niente da memorizzare */ }
     return null;
   }
@@ -343,8 +356,8 @@ export function lookupTitle(site: CatalogSite, queries: string[], options?: Cata
         return { hits, generatedAt };
       }
       debug(2, 'Catalog', JSON.stringify({ t: 'catalog-lookup', site, query: `mal:${wantedMal}`, slug: exact[0].slug, score: 1, band: 'auto', served: false, tie: null, ep: wantedEpisode, reason: 'episode' }));
-      // L'id è giusto ma la scheda non ha quell'episodio: decide la ricerca.
-      return { hits: [], generatedAt };
+      // L'id è giusto ma la scheda non ha quell'episodio: decide la ricerca,
+      // che qui sotto trova l'opera col titolo (il commento lo diceva già).
     }
   }
   const wantedSeason = Number.isInteger(options?.season) && Number(options?.season) > 0 ? Number(options?.season) : null;
@@ -371,10 +384,6 @@ export function lookupTitle(site: CatalogSite, queries: string[], options?: Cata
       if (score > 0) all.push({ entry, score, queryTokens });
     }
   }
-  const scoreBest = all.reduce((max, item) => Math.max(max, item.score), 0);
-  const band: CatalogBand =
-    scoreBest >= AUTO_SCORE ? 'auto' : scoreBest >= REVIEW_SCORE ? 'review' : scoreBest > 0 ? 'low' : 'none';
-
   // Una scheda che dichiara un'altra stagione non è quella richiesta, e una che
   // dichiara meno episodi non può contenere l'episodio: si scartano **prima** del
   // tie-break, così la scelta avviene tra schede che possono rispondere. Le schede
@@ -416,6 +425,13 @@ export function lookupTitle(site: CatalogSite, queries: string[], options?: Cata
     tie = selected.slice(0, 5).map((item) => ({ slug: item.entry.slug, score: Number(item.score.toFixed(2)) }));
     selected = resolveTie([...groups.values()], { season: wantedSeason, isFilm }) || [];
   }
+
+  // La banda la decide ciò che viene servito, non le candidate: il punteggio
+  // massimo su `all` contava anche le schede scartate per stagione/episodio, e
+  // una scheda da 0,67 usciva come "automatica".
+  const servedBest = selected.reduce((max, item) => Math.max(max, item.score), 0);
+  const band: CatalogBand =
+    servedBest >= AUTO_SCORE ? 'auto' : servedBest >= REVIEW_SCORE ? 'review' : servedBest > 0 ? 'low' : 'none';
 
   const hits: CatalogHit[] =
     band === 'auto'

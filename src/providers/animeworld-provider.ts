@@ -20,6 +20,7 @@ import {
 import {
   createCaches,
   DEFAULT_FETCH_TIMEOUT,
+  PROVIDER_TIMEOUT_MS,
   fetchResource,
   getProviderUrl,
   getEnglishTitleFromAnyId,
@@ -462,6 +463,11 @@ async function awSearch(query: string, date?: string): Promise<AnimeWorldResult[
     out.length = 0;
     seen.clear();
   }
+  if (!out.length) {
+    // La risposta vuota non è "questo titolo non c'è": il titolo aggiunto al
+    // sito resta invisibile fino a 12 h. La voce si toglie, non si ricacha.
+    for (const u of urls) awCaches.http.delete(`aw-search:${u}`);
+  }
   return out;
 }
 
@@ -571,7 +577,7 @@ async function awExtractEpisodeStreamFromPlayPage(
 
     const fromApi = collectMediaLinksFromHtml(String(playerHtml || ''))[0] || null;
     if (fromApi) return fromApi;
-    debug(3, 'AnimeWorld', '[AnimeWorld][Stream] no media link in serverPlayer payload for', slug, 'ep=', episodeNumber);
+    console.warn(`[AnimeWorld][Stream] nessun media nel payload serverPlayer per ${slug} ep=${episodeNumber}`);
     if (catalogUrlToken) {
       const fresh = await playPageToken();
       if (fresh && fresh !== urlToken) {
@@ -607,7 +613,7 @@ async function awExtractEpisodeStreamFromPlayPage(
   }
   const mp4 = collectMediaLinksFromHtml(epHtml)[0] || null;
   if (!mp4) {
-    debug(3, 'AnimeWorld', '[AnimeWorld][Stream] no mp4 link in episode page for', slug, 'ep=', episodeNumber);
+    console.warn(`[AnimeWorld][Stream] nessun mp4 nella pagina episodio per ${slug} ep=${episodeNumber}`);
   }
   return mp4;
 }
@@ -1011,6 +1017,9 @@ export class AnimeWorldProvider {
   }
 
   async handleTitleRequest(title: string, seasonNumber: number | null, episodeNumber: number | null, isMovie = false, titleAlt?: string | null, titleIt?: string | null, titleItSeason?: number | null, malId?: number | null, kitsuStartDate?: string | null): Promise<{ streams: StreamForStremio[] }> {
+    // Il budget del provider è il tetto del race in addon.ts: il retry del
+    // get_stream deve starci, altrimenti il suo risultato viene buttato.
+    const handlerStartedAt = Date.now();
     debug(1, 'AnimeWorld', 'title request', { title, titleAlt, titleIt, titleItSeason, season: seasonNumber, episode: episodeNumber, isMovie });
     const universalTitle = applyUniversalAnimeTitleNormalization(title);
     if (universalTitle !== title) {
@@ -1304,7 +1313,8 @@ export class AnimeWorldProvider {
         }
         if (timedOut) {
           try {
-            streamData = await invokePython(['get_stream', '--anime-slug', v.slug, ...(epNum != null ? ['--episode', String(epNum)] : []), ...catalogTokenArgs], 15000);
+            const restante = Math.max(3000, PROVIDER_TIMEOUT_MS - (Date.now() - handlerStartedAt) - 500);
+            streamData = await invokePython(['get_stream', '--anime-slug', v.slug, ...(epNum != null ? ['--episode', String(epNum)] : []), ...catalogTokenArgs], Math.min(15000, restante));
           } catch (e2) {
             console.error('[AnimeWorld] get_stream retry failed', v.slug, e2);
             return null;

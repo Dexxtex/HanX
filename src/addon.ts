@@ -22,7 +22,7 @@ import {
 import { AnimeUnityProvider } from './providers/animeunity-provider.js';
 import { dispatchRequest } from './providers/registry.js';
 import { collectProviderStreams } from './stream.js';
-import { providerRequestStore } from './providers/anime-core/fetch-resource.js';
+import { PROVIDER_TIMEOUT_MS, providerRequestStore } from './providers/anime-core/fetch-resource.js';
 import { cooldownSnapshot } from './providers/anime-core/net-policy.js';
 import { providerLabel } from './utils/unifiedNames.js';
 import { landingTemplate } from './landingPage.js';
@@ -62,7 +62,7 @@ function sortStreamsByPriority(streams: { url?: string; title?: string }[]): voi
 // ================= MANIFEST BASE (restored) =================
 const baseManifest: Manifest = {
     id: "org.stremio.hanx",
-    version: "2.0.19",
+    version: "2.0.20",
     name: "HanX",
     description: "HanX addon dedicato ad AnimeUnity, AnimeSaturn e AnimeWorld",
     types: ["movie", "series", "anime"],
@@ -171,10 +171,10 @@ const PROVIDER_CACHE_DISABLED: boolean = (() => {
         return v === '1' || v === 'true' || v === 'on' || v === 'yes';
     } catch { return false; }
 })();
-// Tetto per provider. Il default sta qui e non al call site: con `null` un
-// provider nuovo che dimentica il quinto argomento blocca `Promise.all` e la
-// risposta non parte mai.
-const PROVIDER_TIMEOUT_MS = 30000;
+// Tetto per provider. La costante sta in fetch-resource.ts (una casa sola):
+// anche i retry interni dei provider devono starci. Con `null` un provider
+// nuovo che dimentica il quinto argomento blocca `Promise.all` e la risposta
+// non parte mai.
 // Una risposta vuota non è un guasto: è "questo titolo non c'è". Cacharla per
 // pochi minuti evita che ogni play ripaghi il fan-out intero (3 host x 3-4 hop).
 // Corto di proposito: un titolo appena aggiunto al sito deve comparire subito.
@@ -267,7 +267,7 @@ function configDigest(config: any): string {
  * di stagione) prova il primo della stagione successiva: per Kitsu e' un
  * kitsuId diverso, per MAL e' la stagione dopo nello stesso id.
  */
-async function primeEpisode(addonInterface: any, type: string, nextId: string, currentId: string, config: any): Promise<void> {
+async function primeEpisode(addonInterface: any, type: string, nextId: string, currentId: string, config: any): Promise<boolean> {
     try {
         // `get` sta sull'interfaccia (`builder.js:80-82`), non sul builder.
         const { streams } = await addonInterface.get('stream', type, nextId, {}, config);
@@ -275,17 +275,19 @@ async function primeEpisode(addonInterface: any, type: string, nextId: string, c
         // non si sa quante volte il pre-cache ha davvero scaldato qualcosa.
         if (streams?.length) {
             console.log(`[player] pre-cache ok per ${nextId}: ${streams.length} stream`);
-            return;
+            return true;
         }
-        console.log(`[player] pre-cache vuoto per ${nextId}: l'episodio non e' ancora uscito`);
+        console.log(`[player] pre-cache vuoto per ${nextId}: episodio futuro o errore a monte (vedi log del provider)`);
         const kitsu = String(currentId).match(/^kitsu:(\d+):(\d+)$/i);
-        if (!kitsu) return;
+        if (!kitsu) return false;
         const seasonNext = nextSeasonFirstId(kitsu[1], Number(kitsu[2]));
-        if (!seasonNext) return;
+        if (!seasonNext) return false;
         const { streams: altrove } = await addonInterface.get('stream', type, seasonNext, {}, config);
         console.log(`[player] stagione successiva ${seasonNext}: ${altrove?.length || 0} stream`);
+        return Boolean(altrove?.length);
     } catch (err: any) {
         console.log(`[player] pre-cache fallito per ${nextId}: ${err?.message || err}`);
+        return false;
     }
 }
 
@@ -314,7 +316,11 @@ export function createBuilder() {
         primed.add(next);
         if (primed.size > PRIMED_MAX) primed.delete(primed.values().next().value as string);
         // In sottofondo: la risposta a Stremio non aspetta la risoluzione.
-        void primeEpisode(builder.getInterface(), type, next, id, cfg);
+        void primeEpisode(builder.getInterface(), type, next, id, cfg).then((ok) => {
+            // Il pre-cache fallito o vuoto si riprova al prossimo evento: restare
+            // in `primed` lo spegne per tutta la vita del processo.
+            if (!ok) primed.delete(next);
+        });
         return {};
     });
 
@@ -331,8 +337,10 @@ export function createBuilder() {
         }): Promise<{
             streams: Stream[];
         }> => {
-            // Se l'evento player arriva senza config, il pre-cache usa questa.
-            lastStreamConfig = requestConfig || null;
+            // Se l'evento player arriva senza config, il pre-cache usa l'ultima
+            // vista: una richiesta senza config non la cancella, altrimenti il
+            // pre-cache parte con la config del server invece che dell'utente.
+            if (requestConfig && Object.keys(requestConfig).length) lastStreamConfig = requestConfig;
             try {
                 // Normalize type: handle Italian endpoint names (film->movie, serie->series)
                 let normalizedType = type;
@@ -555,7 +563,14 @@ export function createBuilder() {
                                 result = await providerRequestStore.run(store, () => handler());
                             }
 
-                            if (store.failed) providerFailure = true;
+                            if (store.failed) {
+                                // L'handler che è ripartito da un fallback interno ha
+                                // consegnato la lista: la marcatura era recuperata, e
+                                // cachare il risultato non nasconde nulla. Restare
+                                // spenti faceva ripagare il fan-out a ogni play.
+                                if (result && result.streams?.length) store.failed = false;
+                                else providerFailure = true;
+                            }
 
                             if (result && result.streams) {
                                 const prepared = result.streams.map(s => ({ ...s, name: (s as any).name || streamName } as Stream));

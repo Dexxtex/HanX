@@ -394,8 +394,10 @@ export function applyCardDetails(entry: CatalogEntry, details: CardDetails, conf
     if (compactKey(title) !== compactKey(entry.titleSite)) titles.add(title);
   }
   if (titles.size) entry.titles = [...titles];
-  if (details.episodes && !entry.episodes) entry.episodes = details.episodes;
-  if (details.ep && !entry.ep) entry.ep = details.ep;
+  // Il conteggio e i link di oggi sono la verità del sito: il congelamento
+  // scartava per sempre le serie in corso (un episodio nuovo non arrivava mai).
+  if (details.episodes) entry.episodes = details.episodes;
+  if (details.ep) entry.ep = details.ep;
   if (details.startDate && !entry.startDate) entry.startDate = details.startDate;
   if (details.type) entry.type = details.type;
   if (details.language && !entry.language) entry.language = details.language;

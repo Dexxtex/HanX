@@ -202,7 +202,14 @@ function buildKitsuAlt(index: AnimeMappingIndex): Map<string, { titleAlt: string
       const season = Number(seasonKey);
       for (const range of ranges) {
         if (!isRecord(range)) continue;
-        add(String(range.kitsuId || ''), Number.isFinite(season) ? season : null, String(range.titleAlt || ''), entryTitleIt);
+        // Il titleIt della madre è sbagliato per uno special: lo speciale è
+      // un'opera diversa, e cercarlo col titolo della serie trovava la serie.
+      add(
+        String(range.kitsuId || ''),
+        Number.isFinite(season) ? season : null,
+        String(range.titleAlt || ''),
+        season === 0 ? '' : entryTitleIt
+      );
       }
     }
   }
@@ -280,7 +287,9 @@ export function nextSeasonFirstId(kitsuId: string, episode: number): string | nu
   if (!first) return null;
   const nextKitsu = String(first.kitsuId || '');
   if (!nextKitsu) return null;
-  return `kitsu:${nextKitsu}:${Number(first.from) || 1}`;
+  // Per gli id Kitsu l'episodio è il numero Kitsu, che riparte da 1 a ogni
+  // stagione: `from` è il numero esterno (es. 13) e su Kitsu non esiste.
+  return `kitsu:${nextKitsu}:1`;
 }
 
 function loadIndex(): AnimeMappingIndex {
@@ -539,6 +548,7 @@ export function resolveLocalTarget(request: MappingRequest): MappingTarget | nul
     // Un override esplicito (kitsu:<id>) vince: alcuni siti romanizzano il
     // titolo in modo diverso da Kitsu e senza la query giusta non esce nulla.
     const override = seriesFor(request);
+    const altTitle = override?.titleAlt || alt?.titleAlt || '';
     const target: MappingTarget = {
       kitsuId: request.id,
       kitsuEpisode: request.episode ?? 1,
@@ -547,7 +557,8 @@ export function resolveLocalTarget(request: MappingRequest): MappingTarget | nul
       // distingue un arco dalla serie base. Senza, la ricerca cade sulla madre
       // e la stagione 4 mostra la 1.
       title: override?.title || '',
-      titleAlt: override?.titleAlt || alt?.titleAlt || '',
+      // Un romaji in ideogrammi non è una query: i siti non lo listano (357 kitsuId).
+      titleAlt: hasCjk(altTitle) ? '' : altTitle,
       titleIt: alt?.titleIt || override?.titleIt || '',
       titleItSeason: alt?.season ?? null,
       displaySeason: null,

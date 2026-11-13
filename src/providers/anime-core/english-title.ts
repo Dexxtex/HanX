@@ -20,21 +20,23 @@ interface TmdbTitleResponse {
 }
 
 async function fetchTmdbTitle(tmdbId: string, tmdbKey: string): Promise<string> {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), DEFAULT_FETCH_TIMEOUT);
-  try {
-    for (const kind of ['tv', 'movie'] as const) {
-      const response = await fetch(
-        `https://api.themoviedb.org/3/${kind}/${encodeURIComponent(tmdbId)}?api_key=${encodeURIComponent(tmdbKey)}`,
-        { signal: controller.signal }
-      );
-      if (!response.ok) continue;
-      const json = (await response.json()) as TmdbTitleResponse;
-      const title = kind === 'tv' ? json.name : json.title;
-      if (title) return title;
-    }
-  } finally {
-    clearTimeout(timeoutId);
+  for (const kind of ['tv', 'movie'] as const) {
+      // Un controller a richiesta: uno solo per la coppia nasceva già scaduto
+      // alla seconda chiamata (il timeout è per richiesta, non per coppia).
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), DEFAULT_FETCH_TIMEOUT);
+      try {
+        const response = await fetch(
+          `https://api.themoviedb.org/3/${kind}/${encodeURIComponent(tmdbId)}?api_key=${encodeURIComponent(tmdbKey)}`,
+          { signal: controller.signal }
+        );
+        if (!response.ok) continue;
+        const json = (await response.json()) as TmdbTitleResponse;
+        const title = kind === 'tv' ? json.name : json.title;
+        if (title) return title;
+      } finally {
+        clearTimeout(timeoutId);
+      }
   }
   // Lancia invece di tornare null: `cached` non memorizza i rifiuti, quindi un
   // errore transitorio non resta in cache per sei ore.
