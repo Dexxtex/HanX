@@ -500,23 +500,6 @@ function seriesFor(request: MappingRequest): SeriesIndexEntry | undefined {
   return loadIndex().series[`${request.provider}:${request.id}`];
 }
 
-/**
- * Lo stesso kitsuId serve anche un'altra stagione? Allora è la serie madre
- * riusata da un range di stagione 0 costruito male, non una special.
- */
-export function kitsuUsedElsewhere(series: SeriesIndexEntry, kitsuId: string | undefined, season: number): boolean {
-  const id = String(kitsuId || '');
-  if (!id) return false;
-  const seasons = (series as any)?.seasons;
-  if (!seasons || typeof seasons !== 'object') return false;
-  return Object.entries(seasons).some(
-    ([key, list]) =>
-      Number(key) !== season &&
-      Array.isArray(list) &&
-      list.some((range: any) => String(range?.kitsuId || '') === id)
-  );
-}
-
 /** Un titolo "italiano" con caratteri CJK non serve a cercare sui siti. */
 function latinTitle(value: string | undefined): string {
   const title = String(value || '');
@@ -599,10 +582,20 @@ export function resolveLocalTarget(request: MappingRequest): MappingTarget | nul
   }
 
   const episode = request.episode;
+  // La stagione 0 è un'opera a sé (OVA/special): il titolo italiano e la
+  // stagione della serie madre non c'entrano, e passandoli il provider
+  // filtrerebbe i risultati sulla madre e chiederebbe il suo episodio 1.
+  const isSpecial = Number(season) === 0;
+  // Un range in stagione 0 col titolo della madre porterebbe alla serie e al suo
+  // episodio N: si scarta prima di scegliere, altrimenti con lo stesso `from`
+  // vince lui e il range buono non viene mai provato.
+  const sharesSeriesTitle = (range: any) =>
+    !range.title || range.title === series.title || (!!series.titleIt && range.title === series.titleIt);
   const range = ranges
     // Un range senza kitsuId (mappato col solo TMDB) è valido se ha un titolo:
     // è quello che i provider cercano.
     .filter((item) => Number.isFinite(item.from) && item.from <= episode && (item.kitsuId || item.title))
+    .filter((item) => !isSpecial || !sharesSeriesTitle(item))
     .sort((a, b) => b.from - a.from)
     // Un range-alias con offset negativo può superare episodeCount: in quel caso
     // vale il range precedente, che per questo episodio è ancora dentro la entry.
@@ -617,13 +610,6 @@ export function resolveLocalTarget(request: MappingRequest): MappingTarget | nul
   }
 
   const offset = Number.isFinite(range.offset) ? Number(range.offset) : range.from - 1;
-  // L'errore vero era una special di stagione 0 che riusava il kitsuId
-  // della madre: quello si riconosce perché lo stesso kitsuId serve anche
-  // un'altra stagione della serie.
-  if (season === 0 && kitsuUsedElsewhere(series, range.kitsuId, season)) {
-    debug(3, 'Mapping', 'local miss', { provider: request.provider, id: request.id, season: request.season, episode, reason: 'special-reuses-series-kitsu', offset });
-    return null;
-  }
   const kitsuEpisode = episode - offset;
   if (kitsuEpisode <= 0 || (Number.isFinite(range.episodeCount) && kitsuEpisode > Number(range.episodeCount))) {
     debug(3, 'Mapping', 'local miss', {
@@ -638,20 +624,6 @@ export function resolveLocalTarget(request: MappingRequest): MappingTarget | nul
     return null;
   }
 
-  // La stagione 0 è un'opera a sé (OVA/special): il titolo italiano e la
-  // stagione della serie madre non c'entrano, e passandoli il provider
-  // filtrerebbe i risultati sulla madre e chiederebbe il suo episodio 1.
-  const isSpecial = Number(season) === 0;
-  // Un range in stagione 0 col titolo della madre porterebbe alla serie e al suo
-  // episodio N: meglio il live che un episodio sbagliato. Il titolo della madre
-  // può essere quello TVDB (giapponese) o l'italiano di TMDB, e il range porta
-  // spesso il secondo.
-  const sharesSeriesTitle =
-    !range.title || range.title === series.title || (!!series.titleIt && range.title === series.titleIt);
-  if (isSpecial && sharesSeriesTitle) {
-    debug(3, 'Mapping', 'local miss', { provider: request.provider, id: request.id, reason: 'special-shares-series-title' });
-    return null;
-  }
   const target: MappingTarget = {
     kitsuId: String(range.kitsuId || ''),
     kitsuEpisode,

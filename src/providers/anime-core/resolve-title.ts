@@ -15,6 +15,7 @@ import { normalizeBool } from '../../config.js';
 import { debug } from '../../utils/logger.js';
 import {
   resolveAnimeTarget,
+  resolveLocalTarget,
   resolveMappingRequest,
   type MappingRequest,
 } from '../../mapping/index.js';
@@ -79,6 +80,10 @@ async function resolveExternalId(
 
   // `resolveMappingRequest` vuole l'id completo (`tmdb:123`), non il numero.
   const request = resolveMappingRequest(type === 'imdb' ? rawId : `${type}:${rawId}`, seasonNumber, episodeNumber, isMovie);
+  // In stagione 0 il live non ha niente da dire: cerca il titolo della serie e
+  // restituisce l'episodio della serie, non lo speciale. Senza un range per
+  // quell'episodio la risposta giusta e' nessuno stream.
+  if (request && Number(request.season) === 0 && !resolveLocalTarget(request)) return empty();
   if (request) {
     const target = await resolveAnimeTarget(request, ctx);
     const title = target ? target.title || (await getKitsuTitle(target.kitsuId)) : '';
@@ -198,6 +203,7 @@ export async function resolveTvdbRequest(
   if (!(await passesAnimeGate('tvdb', tvdbId, isMovie, ctx))) return empty();
 
   const request = resolveMappingRequest(`tvdb:${tvdbId}`, seasonNumber, episodeNumber, isMovie);
+  if (request && Number(request.season) === 0 && !resolveLocalTarget(request)) return empty();
   if (request) {
     const target = await resolveAnimeTarget(request, ctx);
     const title = target ? target.title || (await getKitsuTitle(target.kitsuId)) : '';

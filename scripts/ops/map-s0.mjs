@@ -12,7 +12,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { classificaS0, FASCE_PROMUOVIBILI, TIPI_PROMUOVIBILI } from './s0-match.mjs';
-import { kitsuUsedElsewhere } from '../../dist/mapping/index.js';
 
 const arg = (name, fallback) => {
   const i = process.argv.indexOf(name);
@@ -104,12 +103,6 @@ async function externalIds(tmdbId) {
   return value;
 }
 
-/** Toglie i range S0 il cui kitsuId serve anche una stagione vera: il runtime li scarta. */
-function pulisciS0(entry) {
-  const s0 = Array.isArray(entry.seasons['0']) ? entry.seasons['0'] : [];
-  return s0.filter((r) => !kitsuUsedElsewhere(entry, r?.kitsuId, 0));
-}
-
 for (const item of perChiave.values()) {
   const ext = await externalIds(item.tmdbId);
   const chiavi = [`tmdb:${item.tmdbId}`];
@@ -125,13 +118,17 @@ for (const item of perChiave.values()) {
       serieNuove += 1;
     }
     if (!entry.seasons || typeof entry.seasons !== 'object') entry.seasons = {};
-    // Prima si tolgono i range che il runtime scarta, poi si aggiunge il buono:
-    // con lo stesso `from` il range sbagliato vinceva l'ordinamento.
-    const s0 = pulisciS0(entry);
-    if (s0.some((r) => Number(r?.from) === Number(item.from))) {
+    const s0 = Array.isArray(entry.seasons['0']) ? entry.seasons['0'] : [];
+    // Lo stesso `from` non basta a dire "gia' mappato": su `imdb:` il builder
+    // lascia un range `{from:1, title:"Freezing"}` che punta alla serie. Va
+    // sostituito, non affiancato: due range con lo stesso `from` fanno fallire
+    // `validateIndex` e il primo che capita vince.
+    const idx = s0.findIndex((r) => Number(r?.from) === Number(item.from));
+    if (idx >= 0 && String(s0[idx]?.title || '') === String(item.title || '')) {
       entry.seasons['0'] = s0.sort((a, b) => Number(a.from) - Number(b.from));
       continue;
     }
+    if (idx >= 0) s0.splice(idx, 1);
     s0.push({ from: item.from, offset: item.from - 1, title: item.title, episodeCount: item.episodeCount });
     entry.seasons['0'] = s0.sort((a, b) => Number(a.from) - Number(b.from));
     scritto = true;
