@@ -62,7 +62,7 @@ function sortStreamsByPriority(streams: { url?: string; title?: string }[]): voi
 // ================= MANIFEST BASE (restored) =================
 const baseManifest: Manifest = {
     id: "org.stremio.hanx",
-    version: "2.0.17",
+    version: "2.0.18",
     name: "HanX",
     description: "HanX addon dedicato ad AnimeUnity, AnimeSaturn e AnimeWorld",
     types: ["movie", "series", "anime"],
@@ -271,7 +271,13 @@ async function primeEpisode(addonInterface: any, type: string, nextId: string, c
     try {
         // `get` sta sull'interfaccia (`builder.js:80-82`), non sul builder.
         const { streams } = await addonInterface.get('stream', type, nextId, {}, config);
-        if (streams?.length) return;
+        // Il successo va loggato: senza, dai log si vedono solo i fallimenti e
+        // non si sa quante volte il pre-cache ha davvero scaldato qualcosa.
+        if (streams?.length) {
+            console.log(`[player] pre-cache ok per ${nextId}: ${streams.length} stream`);
+            return;
+        }
+        console.log(`[player] pre-cache vuoto per ${nextId}: l'episodio non e' ancora uscito`);
         const kitsu = String(currentId).match(/^kitsu:(\d+):(\d+)$/i);
         if (!kitsu) return;
         const seasonNext = nextSeasonFirstId(kitsu[1], Number(kitsu[2]));
