@@ -39,6 +39,8 @@ server.log
 # gia' pagato (from arbitrario). Il resto di tests/ resta locale.
 /tests/*
 !/tests/ops/
+# Il setup lo carica `pnpm test` con --import: senza, il CI non parte.
+!/tests/setup.mjs
 test-provider*.ps1
 
 # --- IDE e sistema ---
