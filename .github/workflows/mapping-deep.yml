@@ -97,14 +97,14 @@ jobs:
           --retry=no-align,no-tmdb,no-tvdb,no-kitsu
           --retry-limit=${{ inputs.retry-limit || 4000 }}
 
-      # Passata separata: ha il proprio cursore (`state.titleit.pos`), quindi
-      # non compete con `--limit` per la conversione delle entry nuove. Il cap
-      # e' alto apposta: e' il lavoro che oggi resta fermo al 53%.
-      - name: Titolo italiano mancante
+      # Romaji, inglese e giapponese dalle voci gia' in indice: una chiamata
+      # Kitsu per opera. Misurato il 13/11: 15.529 voci riempite in 15.930
+      # richieste. Il cursore e' proprio (`state.titles.pos`).
+      - name: Titoli alternativi mancanti
         run: >-
           node scripts/build/build-anime-mapping.mjs
-          --only=titleit
-          --titleit-cap=6000
+          --only=titles
+          --titles-cap=20000
           --publish
 
       - name: Stato finale

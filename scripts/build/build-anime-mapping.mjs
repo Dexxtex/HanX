@@ -63,6 +63,17 @@ const reset = args.includes('--reset');
 // competere con la conversione delle entry nuove per lo stesso --limit.
 const onlyArg = (args.find((arg) => arg.startsWith('--only=')) || '').split('=')[1] || '';
 const only = onlyArg.trim();
+const titlesCap = Number((args.find((arg) => arg.startsWith('--titles-cap=')) || '').split('=')[1]) || 0;
+
+/** Primo kitsuId della voce: le chiavi sorelle della stessa opera lo condividono. */
+function firstKitsuId(entry) {
+  for (const ranges of Object.values(entry?.seasons || {})) {
+    for (const range of ranges || []) {
+      if (range?.kitsuId) return String(range.kitsuId);
+    }
+  }
+  return '';
+}
 const retryError = args.includes('--retry-error');
 const retryArg = (args.find((arg) => arg.startsWith('--retry=')) || '').split('=')[1];
 // --retry=no-tmdb,no-align riapre le entry finite con quegli esiti.
@@ -363,6 +374,8 @@ function kitsuEntry(resource) {
     id: String(resource.id),
     title,
     titleAlt: alt,
+    titleEn: String(titles.en || '').trim(),
+    titleJa: String(titles.ja_jp || '').trim(),
     startDate: attributes.startDate || null,
     subtype: attributes.subtype || null,
     episodeCount: Number.isFinite(attributes.episodeCount) ? Number(attributes.episodeCount) : null,
@@ -1321,6 +1334,68 @@ async function main() {
     }
     return { filled, requests };
   };
+
+  /**
+   * Riempie `titleEn`/`titleJa`/`titleAlt` sulle entry gia' in indice, leggendo
+   * Kitsu per il primo kitsuId della voce (una chiamata per opera, non per
+   * chiave: imdb/tvdb/tmdb della stessa serie condividono il kitsuId).
+   */
+  const runTitlesPass = async () => {
+    const keys = [...Object.keys(index.series), ...Object.keys(index.movies)].sort();
+    state.titles = state.titles || { pos: 0 };
+    const start = Number(state.titles.pos) || 0;
+    const cap = titlesCap || keys.length;
+    const cache = new Map();
+    let filled = 0;
+    let requests = 0;
+    for (let i = 0; i < keys.length && requests < cap; i += 1) {
+      const pos = (start + i) % keys.length;
+      const key = keys[pos];
+      const entry = index.series[key] || index.movies[key];
+      if (!entry || (entry.titleEn && entry.titleJa && entry.titleAlt)) continue;
+      const kitsuId = firstKitsuId(entry);
+      if (!kitsuId) continue;
+      requests += 1;
+      if (!cache.has(kitsuId)) {
+        try {
+          const json = await fetchJson(`${KITSU}/anime/${kitsuId}`);
+          cache.set(kitsuId, kitsuEntry(json?.data));
+        } catch (error) {
+          if (!/HTTP 404/.test(String(error?.message || ''))) throw error;
+          cache.set(kitsuId, null);
+        }
+      }
+      const info = cache.get(kitsuId);
+      if (info) {
+        let wrote = false;
+        for (const [field, value] of [
+          ['titleAlt', info.titleAlt],
+          ['titleEn', info.titleEn],
+          ['titleJa', info.titleJa],
+        ]) {
+          if (!entry[field] && value) {
+            entry[field] = value;
+            wrote = true;
+          }
+        }
+        if (wrote) filled += 1;
+      }
+      state.titles.pos = (pos + 1) % keys.length;
+      if (requests % 100 === 0) {
+        persist();
+        console.log(`  titles: ${requests}/${cap} richieste, ${filled} voci riempite`);
+      }
+    }
+    return { filled, requests };
+  };
+
+  if (only === 'titles') {
+    console.log(`  cursore di partenza: titles p${state.titles?.pos || 0}`);
+    const { filled, requests } = await runTitlesPass();
+    console.log(`  titles: ${filled} voci riempite in ${requests} richieste, cursore p${state.titles.pos}`);
+    persist();
+    return;
+  }
 
   if (only === 'titleit') {
     console.log(`  cursore di partenza: titleit p${state.titleit?.pos || 0}`);
