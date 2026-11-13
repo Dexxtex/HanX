@@ -1252,6 +1252,18 @@ async function main() {
   const stats = {};
   let processed = 0;
 
+  // Il cursore vive sul branch `mapping`, quindi la run riprende da dove si era
+  // fermata. Stamparlo all'inizio e alla fine e' l'unico modo per sapere, dai
+  // log, se una run ha davvero avanzato o e' rimasta ferma.
+  const describeCursor = () =>
+    catalogTypes
+      .map((type) => {
+        const c = state.cursor[type] || { page: 1, pos: 0 };
+        return `${type} p${c.page}${c.pos ? `+${c.pos}` : ''}`;
+      })
+      .join(' | ');
+  console.log(`  cursore di partenza: ${describeCursor()}`);
+
   outer: for (const type of catalogTypes) {
     const cursor = state.cursor[type] || { page: 1, pos: 0 };
     state.cursor[type] = cursor;
@@ -1304,6 +1316,14 @@ async function main() {
       cursor.pos = 0;
     }
   }
+
+  console.log(`  cursore di arrivo:   ${describeCursor()}`);
+  console.log(
+    `  esiti: ${Object.entries(stats)
+      .sort((a, b) => b[1] - a[1])
+      .map(([k, v]) => `${k} ${v}`)
+      .join(', ') || 'nessuna entry convertita'}`
+  );
 
   applyOverrides(index, readJson(overridesFile));
   const errors = validateIndex(index);
