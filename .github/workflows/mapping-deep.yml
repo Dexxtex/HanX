@@ -104,7 +104,7 @@ jobs:
         run: >-
           node scripts/build/build-anime-mapping.mjs
           --only=titles
-          --titles-cap=20000
+          --titles-cap=2000
           --publish
 
       - name: Stato finale

@@ -1353,6 +1353,9 @@ async function main() {
       const key = keys[pos];
       const entry = index.series[key] || index.movies[key];
       if (!entry || (entry.titleEn && entry.titleJa && entry.titleAlt)) continue;
+      // Kitsu non ha quei titoli per molte opere: senza questo marcatore ogni
+      // giro riproverebbe le stesse ~6.700 voci per non riempire niente.
+      if (entry.titlesAt) continue;
       const kitsuId = firstKitsuId(entry);
       if (!kitsuId) continue;
       requests += 1;
@@ -1366,6 +1369,7 @@ async function main() {
         }
       }
       const info = cache.get(kitsuId);
+      entry.titlesAt = new Date().toISOString().slice(0, 10);
       if (info) {
         let wrote = false;
         for (const [field, value] of [
