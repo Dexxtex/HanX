@@ -97,6 +97,16 @@ jobs:
           --retry=no-align,no-tmdb,no-tvdb,no-kitsu
           --retry-limit=${{ inputs.retry-limit || 4000 }}
 
+      # Passata separata: ha il proprio cursore (`state.titleit.pos`), quindi
+      # non compete con `--limit` per la conversione delle entry nuove. Il cap
+      # e' alto apposta: e' il lavoro che oggi resta fermo al 53%.
+      - name: Titolo italiano mancante
+        run: >-
+          node scripts/build/build-anime-mapping.mjs
+          --only=titleit
+          --titleit-cap=6000
+          --publish
+
       - name: Stato finale
         if: always()
         run: node scripts/build/build-anime-mapping.mjs --status

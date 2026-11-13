@@ -58,6 +58,11 @@ const args = process.argv.slice(2);
 const checkOnly = args.includes('--check');
 const statusOnly = args.includes('--status');
 const reset = args.includes('--reset');
+// `--only=titleit` fa una sola passata: riempie il titolo italiano mancante
+// sulle chiavi TMDB gia' in indice, col proprio cursore. Serve a non farla
+// competere con la conversione delle entry nuove per lo stesso --limit.
+const onlyArg = (args.find((arg) => arg.startsWith('--only=')) || '').split('=')[1] || '';
+const only = onlyArg.trim();
 const retryError = args.includes('--retry-error');
 const retryArg = (args.find((arg) => arg.startsWith('--retry=')) || '').split('=')[1];
 // --retry=no-tmdb,no-align riapre le entry finite con quegli esiti.
@@ -209,6 +214,9 @@ export function validateIndex(index) {
     }
     for (const [season, ranges] of Object.entries(entry.seasons)) {
       if (entry.titleIt !== undefined && typeof entry.titleIt !== 'string') errors.push(`series ${key} invalid titleIt`);
+      for (const field of ['titleAlt', 'titleEn', 'titleJa']) {
+        if (entry[field] !== undefined && typeof entry[field] !== 'string') errors.push(`series ${key} invalid ${field}`);
+      }
       if (!Array.isArray(ranges) || ranges.length === 0) {
         errors.push(`series ${key} season ${season} has no ranges`);
         continue;
@@ -736,6 +744,13 @@ async function convertCatalogEntry(entry, index) {
   // già in Jikan, quindi costa zero chiamate in più.
   const altTitle = String(entry?.title || '').trim();
   const titleAlt = altTitle && altTitle !== title ? altTitle : '';
+  // Gli stessi tre titoli che il resolver puo' usare come query: romaji (MAL
+  // `title`), inglese e giapponese. Jikan li ha gia' in mano.
+  const malTitles = {
+    alt: titleAlt,
+    en: String(entry?.title_english || '').trim(),
+    ja: String(entry?.title_japanese || '').trim(),
+  };
   // Titolo e tipo nel registro: senza, i miss non sono più ricostruibili.
   const record = { at, title, type: String(entry?.type || '') };
 
@@ -837,7 +852,7 @@ async function convertCatalogEntry(entry, index) {
       if (!result) result = await buildSeriesSeedFromTmdb({ kitsuId, tmdbId: String(tmdb.id), titleAlt, titleIt: titleItUseful });
       if (!result) return { ...record, kitsuId, status: 'no-align' };
       for (const [key, value] of Object.entries(result.series)) {
-        mergeSeries(index.series, key, value.title, value.seasons, value.titleIt);
+        mergeSeries(index.series, key, value.title, value.seasons, value.titleIt, malTitles);
         // Questa entry è migliore del ripiego senza Kitsu: il flag va tolto,
         // altrimenti la prossima la tratterebbe come sostituibile.
         if (index.series[key].nokitsu) delete index.series[key].nokitsu;
@@ -1074,11 +1089,21 @@ export function rangesFrom(entries) {
   return seasons;
 }
 
-export function mergeSeries(target, key, title, seasons, titleIt = '') {
+export function mergeSeries(target, key, title, seasons, titleIt = '', titles = {}) {
   if (!target[key]) target[key] = { title, seasons: {} };
   if (!target[key].title && title) target[key].title = title;
   // Titolo italiano (TMDB it-IT): vale per l'opera, non per la singola cour.
   if (!target[key].titleIt && titleIt) target[key].titleIt = titleIt;
+  // Romaji, inglese e giapponese: il resolver li usa per cercare sui siti, che
+  // listano le OVA col romaji e le serie con l'inglese. Il dato e' gia' in
+  // Jikan durante la conversione, quindi costa zero richieste.
+  for (const [field, value] of [
+    ['titleAlt', titles.alt],
+    ['titleEn', titles.en],
+    ['titleJa', titles.ja],
+  ]) {
+    if (!target[key][field] && value) target[key][field] = value;
+  }
   for (const [season, ranges] of Object.entries(seasons)) {
     if (season !== '0') {
       target[key].seasons[season] = ranges;
@@ -1251,6 +1276,59 @@ async function main() {
 
   const stats = {};
   let processed = 0;
+
+  /**
+   * Riempie `titleIt` sulle chiavi TMDB gia' in indice. Cursore proprio
+   * (`state.titleit.pos`) sull'elenco ordinato delle chiavi: quando arriva in
+   * fondo riparte da zero, cosi' le voci aggiunte nel frattempo vengono viste.
+   */
+  const runTitleItPass = async () => {
+    const keys = [...Object.keys(index.series), ...Object.keys(index.movies)]
+      .filter((key) => key.startsWith('tmdb:'))
+      .sort();
+    if (!keys.length) return { filled: 0, requests: 0 };
+    state.titleit = state.titleit || { pos: 0 };
+    const start = Number(state.titleit.pos) || 0;
+    const cap = titleItCap || keys.length;
+    let filled = 0;
+    let requests = 0;
+    for (let i = 0; i < keys.length && requests < cap; i += 1) {
+      const pos = (start + i) % keys.length;
+      const key = keys[pos];
+      const isSeries = Boolean(index.series[key]);
+      const entry = index.series[key] || index.movies[key];
+      if (!entry || entry.titleIt) continue;
+      const id = key.slice('tmdb:'.length);
+      requests += 1;
+      try {
+        const detail = await fetchJson(
+          `${TMDB}/${isSeries ? 'tv' : 'movie'}/${id}?api_key=${encodeURIComponent(tmdbKey)}&language=it-IT`
+        );
+        const it = String(detail?.name || detail?.title || '').trim();
+        if (it && !samePlainTitle(it, entry.title)) {
+          entry.titleIt = it;
+          filled += 1;
+        }
+      } catch (error) {
+        // 404: TMDB non conosce quell'id, non c'e' niente da riempire.
+        if (!/HTTP 404/.test(String(error?.message || ''))) throw error;
+      }
+      state.titleit.pos = (pos + 1) % keys.length;
+      if (requests % 100 === 0) {
+        persist();
+        console.log(`  titleIt: ${requests}/${cap} richieste, ${filled} riempiti`);
+      }
+    }
+    return { filled, requests };
+  };
+
+  if (only === 'titleit') {
+    console.log(`  cursore di partenza: titleit p${state.titleit?.pos || 0}`);
+    const { filled, requests } = await runTitleItPass();
+    console.log(`  titleIt: ${filled} voci riempite in ${requests} richieste, cursore p${state.titleit.pos}`);
+    persist();
+    return;
+  }
 
   // Il cursore vive sul branch `mapping`, quindi la run riprende da dove si era
   // fermata. Stamparlo all'inizio e alla fine e' l'unico modo per sapere, dai
