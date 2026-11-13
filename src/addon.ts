@@ -62,7 +62,7 @@ function sortStreamsByPriority(streams: { url?: string; title?: string }[]): voi
 // ================= MANIFEST BASE (restored) =================
 const baseManifest: Manifest = {
     id: "org.stremio.hanx",
-    version: "2.0.16",
+    version: "2.0.17",
     name: "HanX",
     description: "HanX addon dedicato ad AnimeUnity, AnimeSaturn e AnimeWorld",
     types: ["movie", "series", "anime"],
