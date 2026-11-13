@@ -33,6 +33,7 @@ import {
   parseCardDetails,
   parseSaturnAnimeSitemap,
   parseSaturnSitemapIndex,
+  WORLD_URL_TOKEN,
   parseWorldMaxPage,
   parseUnityRecords,
   parseWorldFilterPage,
@@ -306,6 +307,11 @@ const WORLD_TYPE_LISTINGS: [string, string][] = [
 ];
 
 async function tagWorldTypes(bySlug: Map<string, CatalogEntry>, deadline: number): Promise<number> {
+  // Le schede scritte prima del fix del token hanno lo slug col punto
+  // (`sword-art-online-2.cdkvda`): il listato lo da' senza, quindi si confronta
+  // sulla forma normalizzata. Senza collisioni (verificato: 0 su 1.165).
+  const byBase = new Map<string, CatalogEntry>();
+  for (const entry of bySlug.values()) byBase.set(entry.slug.replace(WORLD_URL_TOKEN, ''), entry);
   let tagged = 0;
   for (const [path, name] of WORLD_TYPE_LISTINGS) {
     let lastPage: number | null = null;
@@ -316,7 +322,7 @@ async function tagWorldTypes(bySlug: Map<string, CatalogEntry>, deadline: number
       const cards = parseWorldFilterPage(html);
       if (!cards.length) break;
       for (const card of cards) {
-        const entry = bySlug.get(card.slug);
+        const entry = byBase.get(card.slug);
         if (!entry || entry.type === name) continue;
         entry.type = name;
         tagged += 1;

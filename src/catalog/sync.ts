@@ -119,7 +119,7 @@ const URL_TOKEN = /-[A-Za-z0-9]{5}$/;
 // 5, 485 da 6, 32 da 7, 2 da 8). Con `{5}` restava attaccato allo slug su 541
 // schede, e se il sito rigenera il token lo slug cambia: il carry-over perde
 // l'arricchimento di quelle schede.
-const WORLD_URL_TOKEN = /\.[A-Za-z0-9]{5,8}$/;
+export const WORLD_URL_TOKEN = /\.[A-Za-z0-9_-]{5,8}$/;
 
 function slugTitle(slug: string): string {
   return slug
