@@ -504,7 +504,7 @@ function seriesFor(request: MappingRequest): SeriesIndexEntry | undefined {
  * Lo stesso kitsuId serve anche un'altra stagione? Allora è la serie madre
  * riusata da un range di stagione 0 costruito male, non una special.
  */
-function kitsuUsedElsewhere(series: SeriesIndexEntry, kitsuId: string | undefined, season: number): boolean {
+export function kitsuUsedElsewhere(series: SeriesIndexEntry, kitsuId: string | undefined, season: number): boolean {
   const id = String(kitsuId || '');
   if (!id) return false;
   const seasons = (series as any)?.seasons;

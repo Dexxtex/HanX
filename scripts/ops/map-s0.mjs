@@ -12,6 +12,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { classificaS0, FASCE_PROMUOVIBILI, TIPI_PROMUOVIBILI } from './s0-match.mjs';
+import { kitsuUsedElsewhere } from '../../dist/mapping/index.js';
 
 const arg = (name, fallback) => {
   const i = process.argv.indexOf(name);
@@ -69,28 +70,80 @@ for (const c of dump) {
   }
 }
 
-for (const item of perChiave.values()) {
-  const key = `tmdb:${item.tmdbId}`;
-  let entry = mapping.series[key];
-  if (!entry || typeof entry !== 'object') {
-    entry = { title: item.tmdbTitle || item.title, seasons: {} };
-    mapping.series[key] = entry;
-    serieNuove += 1;
+/**
+ * Le chiavi della stessa serie: `tmdb:`, `imdb:`, `tvdb:`. Stremio usa `tt:`,
+ * Nuvio `tmdb:`, e il mapping le tiene separate: scrivere solo su `tmdb:`
+ * lasciava `imdb:` con il range sbagliato del builder (che punta alla serie).
+ */
+const TMDB_KEY = String(process.env.TMDB_API_KEY || '').trim();
+const GAP_MS = 125;
+let slot = 0;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const extCache = new Map();
+
+async function externalIds(tmdbId) {
+  if (extCache.has(tmdbId)) return extCache.get(tmdbId);
+  let value = { imdb_id: null, tvdb_id: null };
+  if (TMDB_KEY) {
+    const wait = slot - Date.now();
+    if (wait > 0) await sleep(wait);
+    slot = Date.now() + GAP_MS;
+    try {
+      const res = await fetch(`https://api.themoviedb.org/3/tv/${tmdbId}/external_ids?api_key=${TMDB_KEY}`, {
+        signal: AbortSignal.timeout(20_000),
+      });
+      if (res.ok) {
+        const j = await res.json();
+        value = { imdb_id: j?.imdb_id || null, tvdb_id: j?.tvdb_id || null };
+      }
+    } catch {
+      /* senza external_ids si scrive solo su tmdb: */
+    }
   }
-  if (!entry.seasons || typeof entry.seasons !== 'object') entry.seasons = {};
-  const s0 = Array.isArray(entry.seasons['0']) ? entry.seasons['0'] : (entry.seasons['0'] = []);
-  // Un range gia' presente per lo stesso episodio non si duplica: quelli che
-  // arrivano da TVDB hanno anche il kitsuId, e sono piu' precisi.
-  if (s0.some((r) => Number(r?.from) === Number(item.from))) {
+  extCache.set(tmdbId, value);
+  return value;
+}
+
+/** Toglie i range S0 il cui kitsuId serve anche una stagione vera: il runtime li scarta. */
+function pulisciS0(entry) {
+  const s0 = Array.isArray(entry.seasons['0']) ? entry.seasons['0'] : [];
+  return s0.filter((r) => !kitsuUsedElsewhere(entry, r?.kitsuId, 0));
+}
+
+for (const item of perChiave.values()) {
+  const ext = await externalIds(item.tmdbId);
+  const chiavi = [`tmdb:${item.tmdbId}`];
+  if (ext.imdb_id) chiavi.push(`imdb:${ext.imdb_id}`);
+  if (ext.tvdb_id) chiavi.push(`tvdb:${ext.tvdb_id}`);
+
+  let scritto = false;
+  for (const key of chiavi) {
+    let entry = mapping.series[key];
+    if (!entry || typeof entry !== 'object') {
+      entry = { title: item.tmdbTitle || item.title, seasons: {} };
+      mapping.series[key] = entry;
+      serieNuove += 1;
+    }
+    if (!entry.seasons || typeof entry.seasons !== 'object') entry.seasons = {};
+    // Prima si tolgono i range che il runtime scarta, poi si aggiunge il buono:
+    // con lo stesso `from` il range sbagliato vinceva l'ordinamento.
+    const s0 = pulisciS0(entry);
+    if (s0.some((r) => Number(r?.from) === Number(item.from))) {
+      entry.seasons['0'] = s0.sort((a, b) => Number(a.from) - Number(b.from));
+      continue;
+    }
+    s0.push({ from: item.from, offset: item.from - 1, title: item.title, episodeCount: item.episodeCount });
+    entry.seasons['0'] = s0.sort((a, b) => Number(a.from) - Number(b.from));
+    scritto = true;
+  }
+  if (!scritto) {
     saltati += 1;
     continue;
   }
-  // `offset` e' obbligatorio per `validateIndex`, anche se il runtime lo
-  // ricaverebbe da `from`: senza, il build del mapping esce rosso.
-  s0.push({ from: item.from, offset: item.from - 1, title: item.title, episodeCount: item.episodeCount });
-  s0.sort((a, b) => Number(a.from) - Number(b.from));
   aggiunti += 1;
-  if (esempi.length < 10) esempi.push(`${item.title} -> ${key} S0 ep ${item.from}${item.episodeCount > 1 ? ` (${item.episodeCount} ep)` : ''}`);
+  if (esempi.length < 10) {
+    esempi.push(`${item.title} -> ${chiavi.join(', ')} S0 ep ${item.from}${item.episodeCount > 1 ? ` (${item.episodeCount} ep)` : ''}`);
+  }
 }
 
 console.log(`dump: ${dump.length} schede con S0`);
