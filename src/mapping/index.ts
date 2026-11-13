@@ -500,6 +500,26 @@ function seriesFor(request: MappingRequest): SeriesIndexEntry | undefined {
   return loadIndex().series[`${request.provider}:${request.id}`];
 }
 
+/** Un titolo con ideogrammi non compare nei cataloghi dei siti italiani. */
+const CJK = /[぀-ヿ㐀-䶿一-鿿가-힯]/;
+const hasCjk = (value: string) => CJK.test(String(value || ''));
+
+/**
+ * Titolo da dare al provider come query principale. Il giapponese non compare
+ * nei cataloghi dei tre siti (verificato: 0 su 11.833 titoli CJK), quindi
+ * aprirlo come prima query e' una richiesta sprecata su due terzi delle voci.
+ * Ordine: inglese, romaji, e solo alla fine il CJK.
+ */
+function searchTitles(primary: string, alt: string, english: string): { title: string; titleAlt: string } {
+  if (!hasCjk(primary)) return { title: primary, titleAlt: alt };
+  const latinAlt = alt && !hasCjk(alt) ? alt : '';
+  const latinEn = english && !hasCjk(english) ? english : '';
+  const best = latinEn || latinAlt;
+  if (!best) return { title: primary, titleAlt: alt };
+  // Il CJK resta come ultimo ripiego, non si perde.
+  return { title: best, titleAlt: latinEn && latinAlt ? latinAlt : primary };
+}
+
 /** Un titolo "italiano" con caratteri CJK non serve a cercare sui siti. */
 function latinTitle(value: string | undefined): string {
   const title = String(value || '');
@@ -624,11 +644,16 @@ export function resolveLocalTarget(request: MappingRequest): MappingTarget | nul
     return null;
   }
 
+  const titles = searchTitles(
+    range.title || series.title || '',
+    range.titleAlt || series.titleAlt || '',
+    series.titleEn || ''
+  );
   const target: MappingTarget = {
     kitsuId: String(range.kitsuId || ''),
     kitsuEpisode,
-    title: range.title || series.title || '',
-    titleAlt: range.titleAlt || series.titleAlt || '',
+    title: titles.title,
+    titleAlt: titles.titleAlt,
     // TMDB it-IT a volte restituisce il titolo giapponese (es. "ファントム THE
     // ANIMATION"): come query italiana è una richiesta sprecata, quindi si scarta.
     titleIt: isSpecial ? '' : latinTitle(series.titleIt),

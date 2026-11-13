@@ -86,6 +86,10 @@ export interface SeriesIndexEntry {
   titleAlt?: string;
   /** Titolo italiano dell'opera (TMDB it-IT), usato come query di ripiego. */
   titleIt?: string;
+  /** Titolo inglese (Kitsu/MAL): e' quello che i cataloghi italiani usano piu' spesso. */
+  titleEn?: string;
+  /** Titolo giapponese: non compare quasi mai nei cataloghi, resta come ultimo ripiego. */
+  titleJa?: string;
   /** External season number -> step ranges, ordered by `from`. */
   seasons?: Record<string, SeasonRange[]>;
 }
