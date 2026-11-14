@@ -131,6 +131,12 @@ export function createCaches() {
  * una delete sulla chiave nuda non trova mai la voce. Il carattere dopo il
  * cacheKey (':' o '#') esclude i cacheKey che lo estendono ("naruto" non tocca
  * "naruto-shippuden"). Torna quante voci ha tolto.
+ *
+ * Limite: un cacheKey con ':' dentro (solo l'API di Saturn passa la query
+ * grezza, non url-encoded) fa cancellare anche la voce della query che lo
+ * estende. Costa una richiesta in piu' quando capita (la voce e' rifetchata,
+ * mai un risultato sbagliato) e richiede la ricerca del prefisso vuota mentre
+ * l'estensione ne aveva: non osservato.
  */
 export function invalidateCached(
   caches: { http: Map<string, CacheEntry> },
