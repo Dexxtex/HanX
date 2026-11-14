@@ -124,3 +124,28 @@ export function createCaches() {
     inflight: new Map<string, Promise<any>>(),
   };
 }
+
+/**
+ * Invalida tutte le voci del `cacheKey` dato. La chiave reale porta un prefisso
+ * (`as:metodo:`) e un suffisso di hop (`#<exit>:`) aggiunti da fetchResource:
+ * una delete sulla chiave nuda non trova mai la voce. Il carattere dopo il
+ * cacheKey (':' o '#') esclude i cacheKey che lo estendono ("naruto" non tocca
+ * "naruto-shippuden"). Torna quante voci ha tolto.
+ */
+export function invalidateCached(
+  caches: { http: Map<string, CacheEntry> },
+  cacheKey: string,
+  as = 'text',
+  method = 'GET'
+): number {
+  const prefix = `${as}:${method}:${cacheKey}`;
+  let n = 0;
+  for (const key of [...caches.http.keys()]) {
+    const rest = key.slice(prefix.length);
+    if (key.startsWith(prefix) && (rest.startsWith(':') || rest.startsWith('#'))) {
+      caches.http.delete(key);
+      n += 1;
+    }
+  }
+  return n;
+}

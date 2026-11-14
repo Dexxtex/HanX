@@ -11,6 +11,7 @@ export {
   getCached,
   setCached,
   createCaches,
+  invalidateCached,
   type CacheEntry,
 } from './cache.js';
 

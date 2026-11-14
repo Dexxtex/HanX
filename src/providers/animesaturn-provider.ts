@@ -21,6 +21,7 @@ import {
   createCaches,
   DEFAULT_FETCH_TIMEOUT,
   fetchResource,
+  invalidateCached,
   getProviderUrl,
   toAbsoluteUrl,
   normalizeRequestedEpisode,
@@ -543,7 +544,7 @@ async function asSearch(query: string): Promise<AnimeSaturnResult[]> {
     if (!outFromApi.length) {
       // La risposta vuota non è "questo titolo non c'è": il titolo aggiunto al
       // sito resta invisibile fino a 12 h. La voce si toglie, non si ricacha.
-      asCaches.http.delete(`as-search-api:${qRaw.toLowerCase()}`);
+      invalidateCached(asCaches, `as-search-api:${qRaw.toLowerCase()}`, 'json');
     }
     if (outFromApi.length) return outFromApi;
   } catch (err: any) {
@@ -602,7 +603,7 @@ async function asSearch(query: string): Promise<AnimeSaturnResult[]> {
   }
   if (!out.length) {
     // Stessa regola: la ricerca vuota non resta 12 ore in cache.
-    for (const u of urls) asCaches.http.delete(`as-search:${u}`);
+    for (const u of urls) invalidateCached(asCaches, `as-search:${u}`);
   }
   return out;
 }

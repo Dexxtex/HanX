@@ -1,6 +1,6 @@
 {
   "name": "hanx",
-  "version": "2.0.20",
+  "version": "2.0.21",
   "description": "HanX - addon Stremio/Nuvio per anime: AnimeUnity, AnimeSaturn e AnimeWorld in un'unica interfaccia",
   "license": "MIT",
   "main": "dist/addon.js",

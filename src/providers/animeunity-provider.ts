@@ -30,6 +30,7 @@ import {
 } from '../utils/anime-title-normalization.js';
 import {
   createCaches,
+  invalidateCached,
   DEFAULT_FETCH_TIMEOUT,
   fetchResource,
   markProviderFetchFailure,
@@ -317,7 +318,7 @@ async function searchEndpoint(query: string): Promise<AnimeUnitySearchResult[]> 
   if (!hits.length) {
     // La risposta vuota non è "questo titolo non c'è": il titolo aggiunto al
     // sito resta invisibile fino a 12 h. La voce si toglie, non si ricacha.
-    caches.http.delete(`au-search:${query}`);
+    invalidateCached(caches, `au-search:${query}`, 'json');
   }
   return hits.map((hit) => ({
     ...hit,
@@ -342,7 +343,7 @@ async function searchUnityCo(query: string): Promise<AnimeUnitySearchResult[]> {
     const raw = html.match(/\brecords="([^"]+)"/)?.[1];
     if (!raw) {
       // Stessa regola: la ricerca vuota non resta 12 ore in cache.
-      caches.http.delete(`au-co-search:${query}`);
+      invalidateCached(caches, `au-co-search:${query}`);
       return [];
     }
 

@@ -19,6 +19,7 @@ import {
 } from '../utils/anime-title-normalization.js';
 import {
   createCaches,
+  invalidateCached,
   DEFAULT_FETCH_TIMEOUT,
   PROVIDER_TIMEOUT_MS,
   fetchResource,
@@ -466,7 +467,7 @@ async function awSearch(query: string, date?: string): Promise<AnimeWorldResult[
   if (!out.length) {
     // La risposta vuota non è "questo titolo non c'è": il titolo aggiunto al
     // sito resta invisibile fino a 12 h. La voce si toglie, non si ricacha.
-    for (const u of urls) awCaches.http.delete(`aw-search:${u}`);
+    for (const u of urls) invalidateCached(awCaches, `aw-search:${u}`);
   }
   return out;
 }

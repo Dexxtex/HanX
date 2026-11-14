@@ -394,10 +394,11 @@ export function applyCardDetails(entry: CatalogEntry, details: CardDetails, conf
     if (compactKey(title) !== compactKey(entry.titleSite)) titles.add(title);
   }
   if (titles.size) entry.titles = [...titles];
-  // Il conteggio e i link di oggi sono la verità del sito: il congelamento
-  // scartava per sempre le serie in corso (un episodio nuovo non arrivava mai).
-  if (details.episodes) entry.episodes = details.episodes;
-  if (details.ep) entry.ep = details.ep;
+  // Il conteggio e i link crescono (le serie in corso): il congelamento li
+  // teneva fermi per sempre, ma un HTML troncato non deve accorciare la lista:
+  // la scheda è definitiva per l'enrich e non verrebbe più riletta.
+  if (details.episodes && details.episodes >= (entry.episodes || 0)) entry.episodes = details.episodes;
+  if (details.ep && details.ep.length >= (entry.ep?.length || 0)) entry.ep = details.ep;
   if (details.startDate && !entry.startDate) entry.startDate = details.startDate;
   if (details.type) entry.type = details.type;
   if (details.language && !entry.language) entry.language = details.language;
