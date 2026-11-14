@@ -1278,6 +1278,14 @@ export class AnimeWorldProvider {
         } else if (episodeNumber != null) {
           target = episodes.find(e => e.number === episodeNumber);
           if (!target) {
+            // La lista viene da una pagina cachata 6 h: l'episodio può essere
+            // uscito nel frattempo. Un refresh della pagina e si ritenta prima
+            // di arrendersi (il costo è limitato dal fan-out negativo di 5 min).
+            invalidateCached(awCaches, `aw-play:${v.slug}`);
+            episodes = await invokePython(['get_episodes', '--anime-slug', v.slug]);
+            target = episodes.find(e => e.number === episodeNumber);
+          }
+          if (!target) {
             debug(3, 'AnimeWorld', `[AnimeWorld] Skipping ${v.language_type} version: episode ${episodeNumber} not found for slug=${v.slug}`);
             return null;
           }
