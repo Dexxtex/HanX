@@ -20,7 +20,8 @@ class UpdateDomainsTests(unittest.TestCase):
             {'animeunity': 'animeunity.co'},
         )
         # Il dominio corrente resta il primo: i mirror arrivano solo se non risponde.
-        self.assertEqual(hosts, ['animeunity.co', 'animeunity.so'])
+        # In coda i fallback noti, che oggi sono `animeunity.cx`.
+        self.assertEqual(hosts, ['animeunity.co', 'animeunity.so', 'animeunity.cx'])
 
     def test_animeunity_at_non_e_mai_candidato(self):
         # .at e .io rispondono ma con un markup diverso da quello che il provider legge.
@@ -67,7 +68,8 @@ class UpdateDomainsTests(unittest.TestCase):
                 self.assertEqual(u.main(), 1)
 
             domains = json.loads(domains_file.read_text('utf-8'))
-            self.assertEqual(domains['animeunity'], 'animeunity.co')
+            # `.so` è morto: si passa al fallback noto, che dal 17/11 è `.cx`.
+            self.assertEqual(domains['animeunity'], 'animeunity.cx')
 
 
 if __name__ == '__main__':

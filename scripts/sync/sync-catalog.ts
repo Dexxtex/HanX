@@ -3,18 +3,18 @@
  * Catalogo locale AnimeSaturn / AnimeWorld / AnimeUnity.
  *
  * Budget di rete (dichiarato prima delle richieste, regole in AGENTS.md):
- * - una richiesta alla volta **per host**, 3 s tra la fine di una e l'inizio
- *   della successiva (`CATALOG_INTERVAL_MS`, pavimento 1 s: è la tariffa
- *   misurata sicura). Lo slot è per host: i tre siti possono procedere insieme
- *   e ognuno vede comunque una richiesta ogni 3 s;
+ * - una richiesta alla volta **per host**, `CATALOG_INTERVAL_MS` tra la fine di
+ *   una e l'inizio della successiva (pavimento 125 ms = 8 req/s, il massimo
+ *   misurato sui tre siti). Lo slot è per host: i tre siti possono procedere
+ *   insieme e ognuno vede comunque una richiesta per intervallo;
  * - timeout 15 s, User-Agent esplicito, 2 retry con backoff solo su 5xx/rete;
  * - 403 ferma tutto subito; 429 fa **una** attesa di 60 s e un retry, poi ferma
  *   tutto (regola di AGENTS.md: un rate-limit transitorio non è un WAF);
- * - tetti per sito: Saturn 2 sitemap + 260 pagine, World 300, Unity 300. Il
- *   tetto vero però è la deadline del crawl (34 minuti): a 3 s per richiesta
- *   sono ~680 richieste, quindi i cap delle pagine sono una sicurezza e non la
- *   pianificazione. L'arricchimento ha una deadline propria (52 minuti) e
- *   un tetto per run. `truncated` dice quale sito è stato tagliato.
+ * - tetti per sito: Saturn 2 sitemap + 260 pagine, World 300, Unity 300 (ne
+ *   servono 212: 2 sitemap + 210 pagine da 30 schede). Il tetto vero però è la
+ *   deadline del crawl (34 minuti), quindi i cap delle pagine sono una sicurezza
+ *   e non la pianificazione. L'arricchimento ha una deadline propria (52 minuti)
+ *   e un tetto per run. `truncated` dice quale sito è stato tagliato.
  *
  * Uso: pnpm run sync-catalog [-- --site unity --max-pages 2 --dry-run]
  */
@@ -31,8 +31,8 @@ import {
   mergeSite,
   applyCardDetails,
   parseCardDetails,
-  parseSaturnAnimeSitemap,
-  parseSaturnSitemapIndex,
+  parseAnimeSitemap,
+  parseAnimeSitemapIndex,
   WORLD_URL_TOKEN,
   parseWorldMaxPage,
   parseUnityRecords,
@@ -58,8 +58,8 @@ const BACKOFF_MS = [1_500, 4_000];
 
 /**
  * Proxy per l'intero crawl (IP residenziale): http(s) o socks5, gestiti da
- * undici. Un solo IP per tutta la run, altrimenti il cookie di sessione di
- * Unity si rompe: se il pool ruota, chiedere una sessione sticky. Non è un fix
+ * undici. Un solo IP per tutta la run, altrimenti un pool che ruota cambia
+ * indirizzo a metà crawl: se ruota, chiedere una sessione sticky. Non è un fix
  * del WAF, è un cambio di IP.
  */
 const PROXY = String(process.env.CATALOG_PROXY || process.env.AU_PROXY || '').trim();
@@ -74,13 +74,12 @@ function describeError(err: any): string {
 const BASES = {
   saturn: 'https://www.animesaturn.net',
   world: 'https://www.animeworld.ac',
-  unity: 'https://www.animeunity.co',
+  unity: 'https://animeunity.cx',
 } as const;
 
 class BlockedError extends Error {}
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-const cookies = new Map<string, string>();
 /**
  * Uno slot per host, non uno globale: Saturn, World e Unity sono host diversi e
  * con lo slot unico due siti restavano fermi mentre il terzo lavorava. Il rate
@@ -94,18 +93,6 @@ function hostOf(url: string): string {
     return new URL(url).host;
   } catch {
     return url;
-  }
-}
-
-function cookieHeader(): string {
-  return [...cookies].map(([name, value]) => `${name}=${value}`).join('; ');
-}
-
-function rememberCookies(headers: Headers): void {
-  for (const line of headers.getSetCookie?.() || []) {
-    const [pair] = line.split(';');
-    const index = pair.indexOf('=');
-    if (index > 0) cookies.set(pair.slice(0, index).trim(), pair.slice(index + 1).trim());
   }
 }
 
@@ -155,7 +142,6 @@ async function request(url: string, init: RequestInit = {}, maxBytes = 0): Promi
       // che altrimenti farebbero ripartire il retry prima dell'intervallo.
       nextSlotByHost.set(host, Date.now() + INTERVAL_MS);
     }
-    rememberCookies(response.headers);
     if (response.status === 403) {
       throw new BlockedError(`403 su ${url}`);
     }
@@ -205,13 +191,13 @@ const SATURN_CARD_BYTES = 32 * 1024;
 
 async function crawlSaturn(maxPages: number, deadline: number, previous: CatalogEntry[] = []): Promise<CrawlResult> {
   const index = await request(`${BASES.saturn}/sitemap.xml`);
-  const parts = parseSaturnSitemapIndex(index.body);
+  const parts = parseAnimeSitemapIndex(index.body);
   if (!parts.length) throw new Error('sitemap index senza parti /sitemap-anime-*.xml');
   // La sitemap resta la spina (2 richieste): le schede sono quelle, il listing
   // aggiunge titolo vero, data e tipo senza poterle perdere.
   const bySlug = new Map<string, CatalogEntry>();
   for (const part of parts.slice(0, maxPages)) {
-    for (const entry of parseSaturnAnimeSitemap((await request(part)).body)) bySlug.set(entry.slug, entry);
+    for (const entry of parseAnimeSitemap((await request(part)).body)) bySlug.set(entry.slug, entry);
   }
   const spine = bySlug.size;
 
@@ -269,7 +255,7 @@ async function crawlSaturn(maxPages: number, deadline: number, previous: Catalog
   // per ognuna delle 5 partizioni la prima pagina era vuota. Il tipo arriva dal
   // badge della scheda (parseCardDetails), non dal listing.
   console.log(`[catalog] saturn: ${bySlug.size} schede dalla sitemap`);
-  return { entries: [...bySlug.values()], capped: parts.length > maxPages || truncatedByCap };
+  return { entries: [...bySlug.values()], capped: parts.length > maxPages };
 }
 
 /**
@@ -369,59 +355,59 @@ async function crawlWorld(maxPages: number, deadline: number, previous: CatalogE
   return { entries: [...bySlug.values()], capped: declared === null || declared > maxPages || ranOutOfTime };
 }
 
-function csrfFrom(html: string): { xsrf: string; token: string } {
-  const xsrf = decodeURIComponent(cookies.get('XSRF-TOKEN') || '');
-  const token = html.match(/name="csrf-token"\s+content="([^"]+)"/)?.[1] || '';
-  return { xsrf, token };
-}
-
+/**
+ * AnimeUnity non dichiara una data per scheda nell'archivio, ma la sitemap sì:
+ * due richieste dicono se qualcosa è cambiato, e solo allora si rilegge
+ * l'archivio paginato (30 schede per risposta, ~41 KB).
+ */
 async function crawlUnity(maxPages: number, deadline: number, previous: CatalogEntry[] = []): Promise<CrawlResult> {
-  // Il GET serve al token CSRF (Laravel) e fa da canary: i dati arrivano dal POST.
-  const page = await request(`${BASES.unity}/archivio`);
-  const { xsrf, token } = csrfFrom(page.body);
-  if (!xsrf && !token) throw new Error('nessun token CSRF su /archivio');
+  const index = await request(`${BASES.unity}/sitemap.xml`);
+  const parts = parseAnimeSitemapIndex(index.body);
+  if (!parts.length) throw new Error('sitemap index senza parti anime-*.xml');
+  const spine = new Map<string, CatalogEntry>();
+  for (const part of parts.slice(0, maxPages)) {
+    for (const entry of parseAnimeSitemap((await request(part)).body, 'unity')) spine.set(entry.slug, entry);
+  }
+  const newest = [...spine.values()].reduce(
+    (max, entry) => (entry.lastmod && entry.lastmod > max ? entry.lastmod : max),
+    ''
+  );
+  const stored = previous.reduce(
+    (max, entry) => (entry.lastmod && entry.lastmod > max ? entry.lastmod : max),
+    ''
+  );
+
+  const first = parseUnityRecords(JSON.parse((await request(`${BASES.unity}/api/archive?page=1`)).body));
+  const total = first.total || Number.POSITIVE_INFINITY;
+  // DELTA: aggiunte e modifiche alzano una `lastmod` nella sitemap, le rimozioni
+  // cambiano il conteggio del sito. Se nessuna delle due è successa, il catalogo
+  // di ieri vale e i 209 chunk restanti non possono portare niente di nuovo.
+  if (previous.length === total && stored && newest <= stored) {
+    console.log(`[catalog] unity: ${total} schede, nessuna lastmod nuova`);
+    return { entries: previous, capped: false };
+  }
+
   const entries: CatalogEntry[] = [];
   const seen = new Set<string>();
-  let offset = 0;
-  let total = Number.POSITIVE_INFINITY;
-  for (let chunk = 0; chunk < maxPages && offset < total && Date.now() < deadline; chunk += 1) {
-    const response = await request(`${BASES.unity}/archivio/get-animes`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-requested-with': 'XMLHttpRequest',
-        referer: `${BASES.unity}/archivio`,
-        ...(xsrf ? { 'x-xsrf-token': xsrf } : {}),
-        ...(token ? { 'x-csrf-token': token } : {}),
-        cookie: cookieHeader(),
-      },
-      body: JSON.stringify({
-        title: '', type: '', year: '', order: '', status: '', genres: [], dubbed: '', season: '',
-        offset,
-      }),
-    });
-    const parsed = parseUnityRecords(JSON.parse(response.body));
-    if (parsed.total) total = parsed.total;
-    // `tot` è il numero di schede del sito: se è uguale a quante ne ha il
-    // catalogo, la lista è la stessa e i 242 chunk restanti non possono portare
-    // niente di nuovo. Cambia anche quando una scheda viene tolta, quindi non
-    // si può restare indietro in silenzio.
-    if (chunk === 0 && previous.length === total) {
-      console.log(`[catalog] unity: tot ${total} invariato, nessun chunk da rileggere`);
-      return { entries: previous, capped: false };
-    }
-    if (!parsed.entries.length) break;
-    for (const entry of parsed.entries) {
+  const keep = (list: CatalogEntry[]): void => {
+    for (const entry of list) {
       if (seen.has(entry.slug)) continue;
       seen.add(entry.slug);
-      entries.push(entry);
+      // La data della sitemap è il perno del delta: si porta sulla scheda.
+      const lastmod = spine.get(entry.slug)?.lastmod;
+      entries.push(lastmod ? { ...entry, lastmod } : entry);
     }
-    offset += parsed.entries.length;
+  };
+  keep(first.entries);
+  for (let page = 2; page <= maxPages && Date.now() < deadline && entries.length < total; page += 1) {
+    const parsed = parseUnityRecords(JSON.parse((await request(`${BASES.unity}/api/archive?page=${page}`)).body));
+    if (!parsed.entries.length) break;
+    keep(parsed.entries);
   }
-  return { entries, capped: offset < total || Date.now() >= deadline };
+  return { entries, capped: entries.length < total || Date.now() >= deadline };
 }
 
-/** Schede a cui prendere il malId per run: a 3,3 s di pacing, 650 ≈ 36 min. */
+/** Schede a cui prendere il malId per run: 650 a 125 ms sono ~2 min, il resto è latenza. */
 const MALID_MAX_REQUESTS = Number(process.env.CATALOG_MALID_MAX_REQUESTS) || 300;
 /** Oltre questo minuto dall'avvio l'arricchimento si ferma: il job ha 60 min di tetto. */
 const MALID_DEADLINE_MIN = Number(process.env.CATALOG_MALID_DEADLINE_MIN) || 52;
@@ -447,41 +433,10 @@ const CRAWL_ROTATION: CatalogSite[] = ['saturn', 'world', 'unity'];
 function enrichMalIds(catalog: CatalogFile, startedAt: number) {
   return enrichMalIdsImpl(catalog, {
     readPage: async (entry) => (await request(entry.url)).body,
-    // Unity: gli id episodio da `info_api` (3,8 KB) invece della scheda (~95 KB),
-    // che si ferma comunque a 120 episodi. Gli altri campi di Unity arrivano da
-    // `get-animes` e sono già nel catalogo.
-    readEpisodes: async (entry) => {
-      const animeId = Number(String(entry.slug || '').split('-')[0]);
-      if (!animeId) return null;
-      const total = Number(entry.episodes) || 0;
-      const chunks = Math.min(10, Math.max(1, Math.ceil(total / 120)));
-      const pairs: [number, number][] = [];
-      const seen = new Set<number>();
-      for (let chunk = 0; chunk < chunks; chunk += 1) {
-        const start = chunk * 120 + 1;
-        const response = await request(
-          `${BASES.unity}/info_api/${animeId}/1?start_range=${start}&end_range=${start + 119}`,
-          { headers: { 'x-requested-with': 'XMLHttpRequest', referer: `${BASES.unity}/` } }
-        );
-        const payload = JSON.parse(response.body) as { episodes?: { id?: number; number?: string }[] };
-        const episodes = Array.isArray(payload?.episodes) ? payload.episodes : [];
-        if (!episodes.length) break;
-        for (const item of episodes) {
-          const id = Number(item?.id);
-          const num = Number(String(item?.number ?? '').match(/(\d{1,4})/)?.[1]);
-          if (!Number.isFinite(id) || id <= 0 || !Number.isFinite(num) || num <= 0 || seen.has(num)) continue;
-          seen.add(num);
-          pairs.push([num, id]);
-        }
-      }
-      return pairs.length ? pairs.sort((a, b) => a[0] - b[0]) : null;
-    },
     isBlocked: (err) => err instanceof BlockedError,
-    // Il budget totale non cambia: meta' a Unity (id episodio), il resto diviso
-    // tra saturn e world. Con 600 richieste a 3 s sono ~30 min, dentro la
-    // deadline di 32: se il totale sfora, Unity si ferma senza fare progressi.
-    quota: Math.ceil((MALID_MAX_REQUESTS - Math.ceil(MALID_MAX_REQUESTS / 2)) / 2),
-    quotaBySite: { unity: Math.ceil(MALID_MAX_REQUESTS / 2) },
+    // Il budget si divide fra i due siti che restano: Unity non si arricchisce
+    // più, i suoi id arrivano dal crawl.
+    quota: Math.ceil(MALID_MAX_REQUESTS / 2),
     deadline: startedAt + MALID_DEADLINE_MIN * 60_000,
     describe: describeError,
     log: (line) => console.log(line),

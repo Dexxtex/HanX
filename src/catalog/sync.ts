@@ -121,24 +121,30 @@ const URL_TOKEN = /-[A-Za-z0-9]{5}$/;
 // l'arricchimento di quelle schede.
 export const WORLD_URL_TOKEN = /\.[A-Za-z0-9_-]{5,8}$/;
 
-function slugTitle(slug: string): string {
+function titleFromSlug(slug: string): string {
   return slug
-    .replace(URL_TOKEN, '')
     .replace(/-/g, ' ')
     .trim()
     .replace(/\b[a-z]/g, (ch) => ch.toUpperCase());
 }
 
-/** Sitemap index di Saturn: solo le parti con le schede anime, non episodi e pagine. */
-export function parseSaturnSitemapIndex(xml: string): string[] {
+function slugTitle(slug: string): string {
+  return titleFromSlug(slug.replace(URL_TOKEN, ''));
+}
+
+/**
+ * Sitemap index: solo le parti con le schede anime, non episodi e pagine.
+ * Saturn le chiama `sitemap-anime-1.xml`, Unity `sitemaps/anime-1.xml`.
+ */
+export function parseAnimeSitemapIndex(xml: string): string[] {
   const $ = cheerio.load(String(xml || ''), { xmlMode: true });
   return $('sitemap > loc')
     .toArray()
     .map((el) => $(el).text().trim())
-    .filter((url) => /\/sitemap-anime-\d+\.xml$/.test(url));
+    .filter((url) => /[-/]anime-\d+\.xml$/.test(url));
 }
 
-export function parseSaturnAnimeSitemap(xml: string, site: CatalogSite = 'saturn'): CatalogEntry[] {
+export function parseAnimeSitemap(xml: string, site: CatalogSite = 'saturn'): CatalogEntry[] {
   const $ = cheerio.load(String(xml || ''), { xmlMode: true });
   const out: CatalogEntry[] = [];
   $('url').each((_, el) => {
@@ -149,7 +155,9 @@ export function parseSaturnAnimeSitemap(xml: string, site: CatalogSite = 'saturn
     const slug = match[1];
     // La data serve al delta: senza, ogni notte si rileggono tutte le schede.
     const lastmod = $url.find('> lastmod').text().trim().slice(0, 10);
-    out.push({ site, slug, url, titleSite: slugTitle(slug), ...(lastmod ? { lastmod } : {}) });
+    // Unity non mette un token in coda: `one-piece` è una parola del titolo.
+    const titleSite = site === 'unity' ? titleFromSlug(slug) : slugTitle(slug);
+    out.push({ site, slug, url, titleSite, ...(lastmod ? { lastmod } : {}) });
   });
   return out;
 }
@@ -196,7 +204,9 @@ export function carryOverProgress(previous: CatalogEntry[], entries: CatalogEntr
     field('enrichedAt', old.enrichedAt);
     field('language', old.language);
     field('episodes', old.episodes);
-    field('ep', old.ep);
+    // Su Unity `ep` non si porta avanti: dal sito nuovo sono id episodio, e
+    // l'URL dell'episodio vuole l'id del video. Il campo resta solo su World.
+    if (entry.site !== 'unity') field('ep', old.ep);
     field('startDate', old.startDate);
     field('lastmod', old.lastmod);
     field('year', old.year);
@@ -515,51 +525,79 @@ interface UnityRecord {
   id?: number;
   slug?: string;
   title?: string;
-  title_eng?: string;
+  title_ja?: string;
   title_it?: string;
-  date?: string;
+  year?: number | string | null;
   type?: string;
   mal_id?: number | null;
   anilist_id?: number | null;
-  dub?: number | string | boolean | null;
+  total_episodes?: number | string | null;
   season?: string | null;
-  episodes_count?: number | string | null;
+  /** Lingue presenti sulla scheda (`ita`, `jpn`): prima erano schede separate. */
+  variants?: { language?: string }[];
 }
 
-/** POST /archivio/get-animes: { tot, records: [...] }, 30 schede per risposta. */
+/**
+ * Il sito scrive `tv`, `movie`, `tv_short`; il catalogo usa le etichette di
+ * Saturn e World (`TV`, `Movie`, `TV Short`) e il provider confronta `'Movie'`.
+ * Un tipo sconosciuto resta com'è: meglio un valore nuovo che uno perso.
+ */
+const UNITY_TYPES: Record<string, string> = {
+  tv: 'TV',
+  movie: 'Movie',
+  ova: 'OVA',
+  ona: 'ONA',
+  special: 'Special',
+  tv_short: 'TV Short',
+  music: 'Music',
+};
+
+function unityType(raw: unknown): string | undefined {
+  const value = String(raw || '').trim();
+  if (!value) return undefined;
+  return UNITY_TYPES[value.toLowerCase()] || value;
+}
+
+/** GET /api/archive?page=N: paginatore Laravel, 30 schede per risposta. */
 export function parseUnityRecords(payload: unknown): { total: number; entries: CatalogEntry[] } {
-  const data = (payload || {}) as { tot?: unknown; records?: unknown };
-  const records: UnityRecord[] = Array.isArray(data.records) ? (data.records as UnityRecord[]) : [];
+  const data = (payload || {}) as { total?: unknown; data?: unknown };
+  const records: UnityRecord[] = Array.isArray(data.data) ? (data.data as UnityRecord[]) : [];
   const entries: CatalogEntry[] = [];
   for (const record of records) {
     const id = Number(record?.id);
     const slug = String(record?.slug || '').trim();
     if (!Number.isFinite(id) || id <= 0 || !slug) continue;
     // Il sito lascia `title` vuoto su alcune schede (.hack, 830): il titolo
-    // italiano o inglese evita di perdere la scheda, lo slug è l'ultima spiaggia.
-    const names = [record.title, record.title_it, record.title_eng]
+    // italiano o giapponese evita di perdere la scheda, lo slug è l'ultima spiaggia.
+    const names = [record.title, record.title_it, record.title_ja]
       .map((value) => String(value || '').replace(/\s+/g, ' ').trim())
       .filter(Boolean);
-    const titleSite = names[0] || slugTitle(slug);
+    // Niente `slugTitle`: Unity non mette un token in coda, e `one-piece`
+    // perderebbe l'ultima parola come se fosse il token di Saturn.
+    const titleSite = names[0] || titleFromSlug(slug);
     const titles = [...new Set(names.slice(1))].filter((value) => value !== titleSite);
-    const year = /^\d{4}$/.test(String(record.date || '')) ? Number(record.date) : null;
+    const year = /^\d{4}$/.test(String(record.year || '')) ? Number(record.year) : null;
+    const dubbed = (record.variants || []).some(
+      (variant) => String(variant?.language || '').toLowerCase() === 'ita'
+    );
+    const type = unityType(record.type);
     entries.push({
       site: 'unity',
       slug: `${id}-${slug}`,
-      url: `https://www.animeunity.co/anime/${id}-${slug}`,
+      url: `https://animeunity.cx/anime/${id}-${slug}`,
       titleSite,
       ...(titles.length ? { titles } : {}),
       ...(year ? { year } : {}),
-      ...(record.type ? { type: String(record.type) } : {}),
+      ...(type ? { type } : {}),
       ...(Number(record.mal_id) > 0 ? { malId: Number(record.mal_id) } : {}),
       ...(positive(record.anilist_id) ? { anilistId: positive(record.anilist_id)! } : {}),
       ...(record.season ? { season: String(record.season) } : {}),
-      // `dub` è l'unica lingua dichiarata dal sito; sulle altre si deduce dal titolo.
-      ...(Number(record.dub) === 1 ? { language: 'ITA' as const } : {}),
-      ...(positive(record.episodes_count) ? { episodes: positive(record.episodes_count)! } : {}),
+      // `variants` dichiara le lingue della scheda; sulle altre si deduce dal titolo.
+      ...(dubbed ? { language: 'ITA' as const } : {}),
+      ...(positive(record.total_episodes) ? { episodes: positive(record.total_episodes)! } : {}),
     });
   }
-  return { total: Number(data.tot) || 0, entries };
+  return { total: Number(data.total) || 0, entries };
 }
 
 /**

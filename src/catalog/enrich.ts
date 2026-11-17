@@ -20,28 +20,20 @@ import {
 } from './sync.js';
 
 /**
- * Siti con il backfill. Unity non ha bisogno di AniList (il `malId` arriva
- * dall'API), ma la sua pagina porta le coppie `[numero, id]` degli episodi:
- * senza quelle il provider deve scaricarla a ogni richiesta.
+ * Siti con il backfill. Unity non c'è: il suo `malId` arriva già dal crawl
+ * (`api/archive`) e `ep` non si usa più, perché sul sito nuovo le coppie
+ * `[numero, id]` sono id **episodio** mentre l'URL dell'episodio vuole l'id del
+ * **video**. Un campo che nessuno può usare è peggio di un campo assente.
  */
-const ENRICH_SITES = ['saturn', 'world', 'unity'] as const;
-/** Solo Unity: la scheda si legge per gli id episodio, non per il malId. */
-const EPISODE_SITES: ReadonlySet<string> = new Set(['unity']);
+const ENRICH_SITES = ['saturn', 'world'] as const;
 
 export interface EnrichOptions {
   /** HTML della scheda. Lancia sull'errore: `isBlocked` decide se fermarsi. */
   readPage: (entry: CatalogEntry) => Promise<string>;
-  /**
-   * Solo per i siti in `EPISODE_SITES`: gli id episodio da un endpoint dedicato.
-   * Unity li dà in 3,8 KB contro i ~95 KB della scheda, e senza il tetto di 120.
-   */
-  readEpisodes?: (entry: CatalogEntry) => Promise<[number, number | string][] | null>;
   /** true solo per 403/429: il WAF si prolunga se si insiste. */
   isBlocked: (err: unknown) => boolean;
   /** Schede per sito da leggere in una run. */
   quota: number;
-  /** Quota diversa per un sito specifico (Unity legge per gli id episodio). */
-  quotaBySite?: Partial<Record<(typeof ENRICH_SITES)[number], number>>;
   /** Timestamp oltre il quale la fase si ferma (il job ha un tetto di tempo). */
   deadline: number;
   /** Testo breve di un errore, senza segreti. */
@@ -89,19 +81,13 @@ export async function enrichMalIds(catalog: CatalogFile, options: EnrichOptions)
     // Prima le schede mai lette (le nuove comprese), poi le più vecchie: quelle
     // lette da poco non si rileggono.
     const found: { entry: CatalogEntry; details: ReturnType<typeof parseCardDetails> }[] = [];
-    const siteQuota = options.quotaBySite?.[site] ?? options.quota;
+    const siteQuota = options.quota;
     let requests = 0;
     for (const entry of pendingBySite[site]) {
       if (requests >= siteQuota || now() > options.deadline) break;
       requests += 1;
       try {
-        let details: CardDetails;
-        if (options.readEpisodes && EPISODE_SITES.has(site)) {
-          const ep = await options.readEpisodes(entry);
-          details = { malId: null, anilistId: null, ...(ep?.length ? { ep } : {}) };
-        } else {
-          details = parseCardDetails(await options.readPage(entry), site);
-        }
+        const details: CardDetails = parseCardDetails(await options.readPage(entry), site);
         found.push({ entry, details });
       } catch (err) {
         // Un blocco ferma il sito; una scheda rotta si salta e la run continua.
@@ -114,15 +100,11 @@ export async function enrichMalIds(catalog: CatalogFile, options: EnrichOptions)
     }
     // Solo gli id che AniList conferma: una pagina con il link MAL sbagliato non
     // deve entrare nel ramo esatto del matcher.
-    // Unity non passa da AniList: il suo malId viene dall'API del sito e qui si
-    // leggono solo gli id episodio. Una mappa vuota lascia `malId` invariato.
-    const { confirmed, answered } = EPISODE_SITES.has(site)
-      ? { confirmed: new Map<number, number>(), answered: new Set<number>() }
-      : await confirmMalIds(
-          found.map((item) => item.details),
-          options.fetcher,
-          { delayMs: options.delayMs }
-        );
+    const { confirmed, answered } = await confirmMalIds(
+      found.map((item) => item.details),
+      options.fetcher,
+      { delayMs: options.delayMs }
+    );
     let accepted = 0;
     let rejected = 0;
     let unanswered = 0;
@@ -140,34 +122,21 @@ export async function enrichMalIds(catalog: CatalogFile, options: EnrichOptions)
       if ((entry.titles?.length || 0) > aliasesBefore) aliased += 1;
       // `enrichedAt` solo per un esito definitivo: la scheda senza link MAL o
       // senza link AniList non ha niente da confermare, quella muta si riprova.
-      // Per i siti da cui si leggono gli id episodio, definitivo significa anche
-      // "ep letti": altrimenti un errore di lettura chiudeva la scheda per sempre.
-      if (isEnrichmentFinal(details, answered) && (!EPISODE_SITES.has(site) || details.ep))
-        entry.enrichedAt = today;
+      if (isEnrichmentFinal(details, answered)) entry.enrichedAt = today;
     }
-    if (EPISODE_SITES.has(site)) {
-      // Niente AniList qui: il conteggio utile è quante schede hanno gli id.
-      const withEp = entries.filter((entry) => entry.ep?.length).length;
-      log(
-        `[catalog] schede ${site}: ${found.length} lette per gli id episodio, ` +
-          `${aliased} con alias nuovi (${withEp}/${entries.length} con id episodio)`
-      );
-    } else {
-      const withMalId = entries.filter((entry) => entry.malId).length;
-      log(
-        `[catalog] schede ${site}: ${found.length} lette, ${accepted} malId confermati, ${rejected} rifiutati, ` +
-          `${unanswered} in attesa di AniList, ${skipped} senza id da confermare, ${aliased} con alias nuovi ` +
-          `(${withMalId}/${entries.length} con malId)`
-      );
-    }
+    const withMalId = entries.filter((entry) => entry.malId).length;
+    log(
+      `[catalog] schede ${site}: ${found.length} lette, ${accepted} malId confermati, ${rejected} rifiutati, ` +
+        `${unanswered} in attesa di AniList, ${skipped} senza id da confermare, ${aliased} con alias nuovi ` +
+        `(${withMalId}/${entries.length} con malId)`
+    );
     return found.length;
   }
 
   const reads = await Promise.all(ENRICH_SITES.map((site) => enrichSite(site)));
   const read = reads.reduce((sum, count) => sum + count, 0);
   // Un sito senza backfill non si legge: senza questa riga nei log sembrerebbe
-  // un sito dimenticato. Oggi nessun sito è fuori dalla lista, ma la riga resta
-  // per il giorno in cui uno esce.
+  // un sito dimenticato. Oggi è Unity, che si arricchisce con il crawl.
   for (const site of CATALOG_SITES) {
     if ((ENRICH_SITES as readonly string[]).includes(site)) continue;
     const entries = catalog.sites[site];

@@ -2,8 +2,8 @@
 // l'hanno. Il provider usa quelle coppie per saltare la pagina della serie:
 // ogni hop è un secondo di pacing, quindi è il guadagno più diretto che resta.
 //
-//   node scripts/ops/backfill-episodes.mjs                  # saturn + unity + world
-//   node scripts/ops/backfill-episodes.mjs --site unity --limit 500
+//   node scripts/ops/backfill-episodes.mjs                  # saturn + world
+//   node scripts/ops/backfill-episodes.mjs --site world --limit 500
 //   node scripts/ops/backfill-episodes.mjs --resume         # riprende dal file salvato
 //   node scripts/ops/backfill-episodes.mjs --gap 500        # 2 req/s (misurato, vedi sotto)
 //   node scripts/ops/backfill-episodes.mjs --publish        # e pusha sul branch data
@@ -24,16 +24,14 @@ const OUT = path.join('data', 'backfill');
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36';
 const TIMEOUT_MS = 15_000;
 const SAVE_EVERY = 100;
-/** `info_api` accetta al massimo 120 episodi per chiamata. */
-const UNITY_CHUNK = 120;
-/** Oltre questo si smette di chiedere: nessuna serie ha 1200 episodi veri. */
-const UNITY_MAX_CHUNKS = 10;
 
 const arg = (name, fallback = null) => {
   const i = process.argv.indexOf(name);
   return i >= 0 ? process.argv[i + 1] : fallback;
 };
-const sites = arg('--site') ? [arg('--site')] : ['saturn', 'unity', 'world'];
+// Unity non c'è: sul sito nuovo le coppie `[numero, id]` sono id episodio e
+// l'URL dell'episodio vuole l'id del video, quindi il campo non si usa più.
+const sites = arg('--site') ? [arg('--site')] : ['saturn', 'world'];
 /**
  * 1 s è la tariffa prudente. Il pavimento è 83 ms (12 req/s): l'11/11 la rampa
  * con stop al primo 429 ha misurato Saturn 12 req/s (50/50) e World 12 (200/200)
@@ -105,38 +103,6 @@ async function loadCatalog() {
   return res.json();
 }
 
-/** `4354-ippon-again` -> 4354. */
-const unityId = (slug) => Number(String(slug || '').split('-')[0]) || 0;
-
-/** Tutti gli episodi di una scheda Unity in blocchi da 120 (3,8 KB l'uno). */
-async function unityEpisodes(entry, pace) {
-  const animeId = unityId(entry.slug);
-  if (!animeId) return null;
-  const total = Number(entry.episodes) || 0;
-  const chunks = Math.min(UNITY_MAX_CHUNKS, Math.max(1, Math.ceil(total / UNITY_CHUNK)));
-  const pairs = [];
-  const seen = new Set();
-  for (let chunk = 0; chunk < chunks; chunk += 1) {
-    const start = chunk * UNITY_CHUNK + 1;
-    const res = await get(
-      `https://www.animeunity.co/info_api/${animeId}/1?start_range=${start}&end_range=${start + UNITY_CHUNK - 1}`,
-      { Referer: 'https://www.animeunity.co/', 'X-Requested-With': 'XMLHttpRequest', Accept: 'application/json, */*' },
-      pace
-    );
-    const payload = await res.json().catch(() => null);
-    const episodes = Array.isArray(payload?.episodes) ? payload.episodes : [];
-    if (!episodes.length) break;
-    for (const item of episodes) {
-      const id = Number(item?.id);
-      const num = Number(String(item?.number ?? '').match(/(\d{1,4})/)?.[1]);
-      if (!Number.isFinite(id) || id <= 0 || !Number.isFinite(num) || num <= 0 || seen.has(num)) continue;
-      seen.add(num);
-      pairs.push([num, id]);
-    }
-  }
-  return { ep: pairs.length ? pairs.sort((a, b) => a[0] - b[0]) : null };
-}
-
 /** La pagina serie di World porta le coppie [numero, token] nelle anchor. */
 async function worldEpisodes(entry, pace) {
   const res = await get(entry.url, {}, pace);
@@ -165,7 +131,7 @@ async function saturnEpisodes(entry, pace) {
   return { ep: pairs.length ? pairs.sort((a, b) => a[0] - b[0]) : null, type };
 }
 
-const FETCHERS = { saturn: saturnEpisodes, unity: unityEpisodes, world: worldEpisodes };
+const FETCHERS = { saturn: saturnEpisodes, world: worldEpisodes };
 
 function save(catalog) {
   fs.mkdirSync(OUT, { recursive: true });

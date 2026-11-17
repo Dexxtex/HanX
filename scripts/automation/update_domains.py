@@ -41,17 +41,17 @@ SOURCE_ONLY_HOSTS = {'animesaturn.me', 'animeworlditalia.com'}
 BLOCKED_HOSTS = {'animeunity.at', 'animeunity.io'}
 
 # Fallback usati solo se il pastebin non offre un host raggiungibile.
-# Verificati manualmente: animeunity.so è morto, animeunity.co è attivo e senza
-# rate-limit sull'IP di casa.
+# Verificati manualmente: animeunity.so è morto, animeunity.co fa 301 su .cx e il
+# sito nuovo vive lì (17/11/2026).
 KNOWN_HOSTS = {
     'animesaturn': ['animesaturn.net', 'animemars.org', 'animesaturn.cx', 'animesaturn.cc', 'animesaturn.com'],
-    'animeunity': ['animeunity.co'],
+    'animeunity': ['animeunity.cx'],
     'animeworld': ['animeworld.ac', 'animeworld.so', 'animeworld.tv'],
 }
 
 DEFAULT_DOMAINS = {
     'animesaturn': 'animesaturn.net',
-    'animeunity': 'animeunity.co',
+    'animeunity': 'animeunity.cx',
     'animeworld': 'animeworld.ac',
 }
 

@@ -17,7 +17,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { parseSaturnAnimeSitemap, parseCardDetails } from '../../dist/catalog/sync.js';
+import { parseAnimeSitemap, parseCardDetails } from '../../dist/catalog/sync.js';
 
 const REPO = process.env.GITHUB_REPO || 'Dexxtex/HanX';
 const RAW = `https://raw.githubusercontent.com/${REPO}`;
@@ -73,7 +73,7 @@ const index = await get(`${BASE}/sitemap.xml`);
 const parts = [...index.body.matchAll(/<loc>([^<]*sitemap-anime-\d+\.xml)<\/loc>/g)].map((m) => m[1]);
 if (!parts.length) throw new Error('sitemap index senza parti /sitemap-anime-*.xml');
 const sitemap = [];
-for (const part of parts) sitemap.push(...parseSaturnAnimeSitemap((await get(part)).body));
+for (const part of parts) sitemap.push(...parseAnimeSitemap((await get(part)).body));
 console.log(`sitemap: ${sitemap.length} schede, ${new Set(sitemap.map((e) => e.lastmod)).size} date distinte`);
 
 // 2. Chi rileggere.

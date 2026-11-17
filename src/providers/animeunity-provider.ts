@@ -172,8 +172,8 @@ interface AnimeUnitySearchResult {
   name_it?: string; // Titolo italiano (opzionale)
   name_eng?: string; // Titolo inglese (opzionale)
   episodes_count: number;
-  type?: string; // Solo .co: TV / Movie / Special
-  /** Solo .co: `dub` del sito. Senza, una scheda ITA si etichetta SUB. */
+  type?: string; // Solo .cx: `tv`, `movie`, `tv_short` (minuscolo, come lo manda il sito)
+  /** Solo .cx: la scheda ha una variante `ita` fra le `variants[]`. */
   language?: 'ITA';
   /** Dal catalogo: coppie [numero, id] degli episodi, evita la pagina scheda. */
   ep?: [number, number | string][];
@@ -191,18 +191,16 @@ interface AnimeUnityStreamData {
 }
 
 /**
- * L'apex di animeunity.co è rotto lato server (403 su `/`, 404 su /archivio),
- * mentre www serve il sito: si forza www per i .co. L'updater dei domini
- * continua a scrivere l'apex, quindi la regola vive qui.
+ * `www.animeunity.cx` non esiste (connessione fallita): il dominio buono è
+ * l'apex. Il vecchio `.co` è un guscio che fa 301 su `.cx`, quindi un config
+ * fermo lì si riporta al sito nuovo invece di pagare due redirect per richiesta.
  */
 export function unityBaseFrom(raw: string): string {
   const value = String(raw || '').trim().replace(/\/+$/, '');
   const withScheme = /^https?:\/\//i.test(value) ? value : `https://${value}`;
   try {
     const u = new URL(withScheme);
-    if (/(^|\.)animeunity\.co$/i.test(u.hostname) && !/^www\./i.test(u.hostname)) {
-      u.hostname = `www.${u.hostname}`;
-    }
+    if (/(^|\.)animeunity\.co$/i.test(u.hostname)) u.hostname = 'animeunity.cx';
     return u.origin;
   } catch {
     const host = value.replace(/^https?:\/\//i, '');
@@ -217,16 +215,49 @@ function getUnityBaseUrl(): string {
 }
 
 /**
- * AnimeUnity.co è un backend diverso (server-rendered, senza /ajax): ricerca su
- * /archivio?title=, episodi nell'attributo `episodes`, embed per episodio su
- * /anime/<id>-<slug>/<episodeId>. Tutto il resto del provider resta uguale.
+ * `.cx` è il sito nuovo (Laravel + Inertia): ricerca su `api/archive?query=`,
+ * episodi su `api/anime/{id}/episodes`, embed con una richiesta parziale
+ * Inertia. Tutto il resto del provider resta uguale.
  */
-function isUnityCoBase(): boolean {
+function isUnityCx(): boolean {
   try {
-    return /(^|\.)animeunity\.co$/i.test(new URL(getUnityBaseUrl()).hostname);
+    return /(^|\.)animeunity\.cx$/i.test(new URL(getUnityBaseUrl()).hostname);
   } catch {
     return false;
   }
+}
+
+/**
+ * La `X-Inertia-Version` è obbligatoria per le richieste parziali: senza, il
+ * sito risponde 409. Cambia a ogni deploy, quindi si cacha e si rinnova una
+ * volta sola quando il 409 arriva.
+ */
+let inertiaVersion = '';
+let inertiaVersionAt = 0;
+const INERTIA_VERSION_TTL = 6 * 60 * 60 * 1000;
+
+async function getInertiaVersion(force = false): Promise<string> {
+  if (!force && inertiaVersion && Date.now() - inertiaVersionAt < INERTIA_VERSION_TTL) return inertiaVersion;
+  // `/login` è la pagina Inertia più piccola (62 KB) che porta la version nel
+  // `data-page`: una scheda ne costa 226.
+  const key = 'au-cx-version';
+  if (force) invalidateCached(caches, key);
+  try {
+    const html = String(await auFetchResource(`${getUnityBaseUrl()}/login`, caches, {
+      ttlMs: 60_000,
+      cacheKey: key,
+      timeoutMs: FETCH_TIMEOUT,
+    }) || '');
+    const raw = html.match(/data-page="([^"]+)"/)?.[1];
+    const version = raw ? String(JSON.parse(decodeHtmlAttribute(raw))?.version || '') : '';
+    if (version) {
+      inertiaVersion = version;
+      inertiaVersionAt = Date.now();
+    }
+  } catch (error: any) {
+    console.warn('[AnimeUnity][cx] version Inertia non letta:', error?.message || String(error));
+  }
+  return inertiaVersion;
 }
 
 function normalizeAnimePath(pathOrUrl: string | null | undefined): string | null {
@@ -268,7 +299,7 @@ function extractAnimeIdSlugFromPath(animePath: string): { animeId: number | null
 let searchCooldownUntil = 0;
 
 async function searchEndpoint(query: string): Promise<AnimeUnitySearchResult[]> {
-  if (isUnityCoBase()) return searchUnityCo(query);
+  if (isUnityCx()) return searchUnityCx(query);
   if (searchCooldownUntil > Date.now()) {
     // Il cooldown locale azzera la ricerca per 60 s: senza questa riga il log a
     // valle diceva "Nessun risultato trovato", cioè la causa sbagliata.
@@ -327,105 +358,133 @@ async function searchEndpoint(query: string): Promise<AnimeUnitySearchResult[]> 
   }));
 }
 
-async function searchUnityCo(query: string): Promise<AnimeUnitySearchResult[]> {
+/**
+ * `api/archive?query=` è la ricerca vera del sito nuovo: JSON, paginata, e
+ * attraversa romaji, inglese e italiano (gli accenti non contano). `api/search`
+ * si ferma a 20 risultati e non pagina, quindi non si usa.
+ */
+async function searchUnityCx(query: string): Promise<AnimeUnitySearchResult[]> {
   try {
-    const html = String(await auFetchResource(
-      `${getUnityBaseUrl()}/archivio?title=${encodeURIComponent(query)}`,
+    const payload = await auFetchResource(
+      `${getUnityBaseUrl()}/api/archive?query=${encodeURIComponent(query)}`,
       caches,
       {
+        as: 'json',
         ttlMs: TTL.http,
-        cacheKey: `au-co-search:${query}`,
+        cacheKey: `au-cx-search:${query}`,
         timeoutMs: FETCH_TIMEOUT,
-        headers: { 'Referer': `${getUnityBaseUrl()}/` },
+        headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
       }
-    ) || '');
+    ) as any;
 
-    const raw = html.match(/\brecords="([^"]+)"/)?.[1];
-    if (!raw) {
-      // Stessa regola: la ricerca vuota non resta 12 ore in cache.
-      invalidateCached(caches, `au-co-search:${query}`);
+    const records: any[] = Array.isArray(payload?.data) ? payload.data : [];
+    if (!records.length) {
+      // La ricerca vuota non resta 12 ore in cache: il titolo appena aggiunto
+      // al sito deve comparire.
+      invalidateCached(caches, `au-cx-search:${query}`, 'json');
       return [];
     }
 
-    const records = JSON.parse(decodeHtmlAttribute(raw)) as any[];
     return records
       .filter((record) => record && record.id && record.slug)
       .map((record) => ({
         id: Number(record.id),
         slug: String(record.slug),
-        name: String(record.title || record.title_it || record.title_eng || '').trim(),
+        name: String(record.title || record.title_it || record.title_ja || '').trim(),
         name_it: record.title_it ? String(record.title_it) : undefined,
-        name_eng: record.title_eng ? String(record.title_eng) : undefined,
-        episodes_count: Number(record.episodes_count) || 0,
+        episodes_count: Number(record.total_episodes) || 0,
         type: record.type ? String(record.type) : undefined,
-        ...(Number(record.dub) === 1 ? { language: 'ITA' as const } : {}),
+        ...(Array.isArray(record.variants) &&
+        record.variants.some((variant: any) => String(variant?.language || '').toLowerCase() === 'ita')
+          ? { language: 'ITA' as const }
+          : {}),
       }))
       .filter((record) => record.name);
   } catch (error: any) {
-    console.warn('[AnimeUnity][co] ricerca fallita:', error?.message || error);
+    console.warn('[AnimeUnity][cx] ricerca fallita:', error?.message || error);
     return [];
   }
 }
 
+interface AnimeUnityCxEpisode {
+  number: number;
+  /** Un video per lingua: l'id nell'URL dell'episodio è quello del video. */
+  videos: { id: number; language: 'sub' | 'dub' }[];
+}
+
 /**
- * Gli episodi di una scheda .co in una richiesta da ~3,8 KB: la scheda HTML ne
- * costa ~90. Il server rifiuta i range oltre 120 episodi e risponde vuoto oltre
- * la fine, quindi si chiede sempre un blocco intero che contiene l'episodio.
+ * `api/anime/{id}/episodes?start=N` dà 120 episodi per blocco (271 B su una
+ * serie da 1, 37 KB su One Piece), ognuno con i video per lingua. `page`,
+ * `offset` e `tab_size` sono ignorati dal sito: l'unico parametro è `start`.
  */
-async function fetchUnityCoEpisodes(animeId: number, episode: number | null): Promise<AnimeUnityPageEpisode[]> {
-  const start = episode && episode > 120 ? Math.max(1, episode - 60) : 1;
+async function fetchUnityCxEpisodes(animeId: number, episode: number | null): Promise<AnimeUnityCxEpisode[]> {
+  const start = episode && episode > 120 ? Math.max(1, episode - 119) : 1;
   try {
     const payload = await auFetchResource(
-      `${getUnityBaseUrl()}/info_api/${animeId}/${episode || 1}?start_range=${start}&end_range=${start + 119}`,
+      `${getUnityBaseUrl()}/api/anime/${animeId}/episodes?start=${start}`,
       caches,
       {
         as: 'json',
         ttlMs: TTL.animePage,
-        cacheKey: `au-co-episodes:${animeId}:${start}`,
+        cacheKey: `au-cx-episodes:${animeId}:${start}`,
         timeoutMs: FETCH_TIMEOUT,
-        headers: {
-          'X-Requested-With': 'XMLHttpRequest',
-          'Accept': 'application/json, text/javascript, */*; q=0.01',
-          'Referer': `${getUnityBaseUrl()}/`,
-        },
+        headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
       }
     ) as any;
 
-    return (payload?.episodes || []).map((entry: any) => ({
-      id: Number(entry?.id) || 0,
-      number: parseEpisodeNumber(entry?.number, 0),
-    })).filter((entry: AnimeUnityPageEpisode) => entry.id > 0);
+    return (payload?.episodes || [])
+      .map((entry: any) => ({
+        number: parseEpisodeNumber(entry?.number, 0),
+        videos: (entry?.videos || [])
+          .map((video: any) => ({
+            id: Number(video?.id) || 0,
+            // `jpn` è la traccia sottotitolata, `ita` quella doppiata.
+            language: (String(video?.language || '').toLowerCase() === 'ita' ? 'dub' : 'sub') as 'sub' | 'dub',
+          }))
+          .filter((video: { id: number }) => video.id > 0),
+      }))
+      .filter((entry: AnimeUnityCxEpisode) => entry.number > 0 && entry.videos.length > 0);
   } catch (error: any) {
-    console.warn('[AnimeUnity][co] info_api episodi fallita:', error?.message || error);
+    console.warn('[AnimeUnity][cx] episodi non recuperati:', error?.message || error);
     return [];
   }
 }
 
-/** Su .co ogni scheda è una sola lingua: il flag `dub` dell'anime dice quale. */
-function isUnityCoDubPage(html: string): boolean {
-  const raw = String(html || '').match(/\banime="([^"]+)"/)?.[1];
-  if (!raw) return false;
-  try {
-    // Il JSON contiene anche `related[]`, ognuno col proprio `dub`: serve il campo top-level.
-    return JSON.parse(decodeHtmlAttribute(raw))?.dub === 1;
-  } catch {
-    return false;
-  }
-}
-
 /**
- * .co tiene la versione ITA della stessa serie su una scheda separata
- * ("<slug>-ita"), che l'archivio a volte non restituisce (es. One Piece):
- * il link sta nella pagina della versione SUB.
+ * L'embed URL di un episodio. La pagina `/anime/<id>-<slug>/<videoId>` costa
+ * 226 KB, ma con gli header Inertia e `Partial-Data: embedUrl` la stessa URL
+ * risponde **314 B** di JSON. Il token dentro l'URL cambia a ogni richiesta
+ * (misurato: due token diversi a un minuto di distanza), quindi la cache resta
+ * quella delle altre pagine, 6 h.
  */
-function findUnityCoItaSibling(html: string, currentPath: string): string | null {
-  const current = String(currentPath || '').match(/^\/anime\/(\d+)-([a-z0-9-]+)$/i);
-  if (!current) return null;
-  const baseSlug = current[2].toLowerCase();
-  if (/-ita$/i.test(baseSlug)) return null;
-  const target = `${baseSlug}-ita`;
-  for (const link of String(html || '').matchAll(/\/anime\/(\d+)-([a-z0-9-]+)/gi)) {
-    if (link[2].toLowerCase() === target) return `/anime/${link[1]}-${link[2]}`;
+async function fetchUnityCxEmbed(animeId: number, animeSlug: string, videoId: number): Promise<string | null> {
+  const pageUrl = `${getUnityBaseUrl()}/anime/${animeId}-${animeSlug}/${videoId}`;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const version = await getInertiaVersion(attempt > 0);
+    try {
+      const payload = await auFetchResource(pageUrl, caches, {
+        as: 'json',
+        ttlMs: TTL.streamPage,
+        cacheKey: `au-cx-embed:${videoId}`,
+        timeoutMs: FETCH_TIMEOUT,
+        headers: {
+          'X-Inertia': 'true',
+          'X-Inertia-Version': version,
+          'X-Inertia-Partial-Component': 'Anime',
+          'X-Inertia-Partial-Data': 'embedUrl',
+          Accept: 'application/json, text/html;q=0.9',
+        },
+      }) as any;
+      const embed = String(payload?.props?.embedUrl || '').trim();
+      if (/^https?:\/\//i.test(embed)) return embed;
+      return null;
+    } catch (error: any) {
+      // 409 = version cambiata a ogni deploy: si rinnova una volta e si ritenta.
+      const message = String(error?.message || error);
+      if (/\b409\b/.test(message) && attempt === 0) continue;
+      console.warn('[AnimeUnity][cx] embed non recuperato:', message);
+      return null;
+    }
   }
   return null;
 }
@@ -541,7 +600,7 @@ async function getStreamData(
   language: 'sub' | 'dub',
   needVariant = true
 ): Promise<AnimeUnityStreamData> {
-  if (isUnityCoBase()) return getUnityCoStreamData(animeId, animeSlug, episodeId, needVariant);
+  if (isUnityCx()) return getUnityCxStreamData(animeId, animeSlug, episodeId, needVariant);
   const episodePage = `${getUnityBaseUrl()}/anime/${animeId}-${animeSlug}/ep-${episodeId}`;
   const empty: AnimeUnityStreamData = { episode_page: episodePage, embed_url: null, hls_url: null, mp4_url: null, height: null };
 
@@ -580,37 +639,18 @@ async function getStreamData(
   }
 }
 
-async function getUnityCoStreamData(
+async function getUnityCxStreamData(
   animeId: number,
   animeSlug: string,
-  episodeId: number,
+  videoId: number,
   needVariant = true
 ): Promise<AnimeUnityStreamData> {
-  const episodePage = `${getUnityBaseUrl()}/anime/${animeId}-${animeSlug}/${episodeId}`;
+  const episodePage = `${getUnityBaseUrl()}/anime/${animeId}-${animeSlug}/${videoId}`;
   const empty: AnimeUnityStreamData = { episode_page: episodePage, embed_url: null, hls_url: null, mp4_url: null, height: null };
-
-  try {
-    // /embed-url/<episodeId> risponde in 103 byte col solo URL del player: la
-    // pagina episodio ne costa ~90 KB per lo stesso dato.
-    const raw = String(await auFetchResource(`${getUnityBaseUrl()}/embed-url/${episodeId}`, caches, {
-      ttlMs: TTL.streamPage,
-      cacheKey: `au-co-embed:${episodeId}`,
-      timeoutMs: FETCH_TIMEOUT,
-      headers: { Referer: episodePage },
-    }).catch((error: any) => {
-      console.warn('[AnimeUnity] embed-url (.co) non recuperato:', error?.message || String(error));
-      return '';
-    }) || '').trim();
-
-    if (!/^https?:\/\//i.test(raw)) return empty;
-
-    const embedUrl = raw;
-    const media = await resolveEmbedMedia(embedUrl, episodePage, needVariant);
-    return { ...empty, embed_url: embedUrl, ...media };
-  } catch (error: any) {
-    console.warn('[AnimeUnity][co] getStreamData failed:', error?.message || error);
-    return empty;
-  }
+  const embedUrl = await fetchUnityCxEmbed(animeId, animeSlug, videoId);
+  if (!embedUrl) return empty;
+  const media = await resolveEmbedMedia(embedUrl, episodePage, needVariant);
+  return { ...empty, embed_url: embedUrl, ...media };
 }
 
 /** Catalogo locale: zero richieste quando il titolo c'è. */
@@ -765,9 +805,7 @@ export class AnimeUnityProvider {
     isMovie: boolean,
     titleOverride?: string,
     /** Dal catalogo: coppie [numero, id] che evitano la pagina della scheda. */
-    catalogEp?: [number, number | string][],
-    /** Dal catalogo: lingua della scheda, quando la pagina non si scarica. */
-    catalogLanguage?: string
+    catalogEp?: [number, number | string][]
   ): Promise<StreamForStremio[]> {
     const normalizedPath = normalizeAnimePath(animePath);
     if (!normalizedPath) return [];
@@ -780,8 +818,9 @@ export class AnimeUnityProvider {
     if (!animeId || !animeSlug) return [];
 
     // Catalogo: con le coppie [numero, id] la pagina della scheda non serve.
-    // E' un hop sull'host AnimeUnity, cioe' 2 s di pacing.
-    const catalogEpisodes = catalogEp?.length
+    // E' un hop sull'host AnimeUnity, cioe' 2 s di pacing. Su .cx non si usa:
+    // quegli id sono id episodio, mentre l'URL vuole l'id del video.
+    const catalogEpisodes = !isUnityCx() && catalogEp?.length
       ? normalizeEpisodesList(
           catalogEp.map(([num, id]) => ({ num, episodeId: id, link: null, fileName: null, embedUrl: null })),
           getUnityBaseUrl()
@@ -792,37 +831,60 @@ export class AnimeUnityProvider {
     let displayTitle = titleOverride || '';
     let selected = fromCatalog;
     let html = '';
+    /** Solo .cx: l'id del video per lingua, cioè quello che va nell'URL. */
+    let videoIds: Partial<Record<'sub' | 'dub', number>> | null = null;
 
-    if (!selected?.episodeId) {
-      // .co: gli episodi arrivano da /info_api (3,8 KB) e la scheda (~90 KB) serve
-      // solo per il titolo, che il chiamante di solito ha già.
-      if (!isUnityCoBase() || !titleOverride) {
-        html = String(await auFetchResource(animeUrl, caches, {
-          ttlMs: TTL.animePage,
-          cacheKey: `au-anime:${normalizedPath}`,
-          timeoutMs: FETCH_TIMEOUT,
-        }).catch((error: any) => {
-          console.warn('[AnimeUnity] pagina scheda non recuperata:', error?.message || String(error));
-          return '';
-        }) || '');
+    if (isUnityCx()) {
+      const pageEpisodes = await fetchUnityCxEpisodes(animeId, requestedEpisode);
+      const match = pageEpisodes.find((entry) => entry.number === requestedEpisode);
+      if (!match) {
+        console.warn(
+          `[AnimeUnity][cx] episodio ${requestedEpisode} non presente (scheda ${animeId}, ${pageEpisodes.length} episodi letti)`
+        );
+        return [];
+      }
+      videoIds = {};
+      for (const video of match.videos) videoIds[video.language] = video.id;
+      selected = pickEpisodeEntry(
+        normalizeEpisodesList(
+          [{
+            num: match.number,
+            episodeId: videoIds.sub || videoIds.dub || 0,
+            link: null,
+            fileName: null,
+            embedUrl: null,
+          }],
+          getUnityBaseUrl()
+        ),
+        requestedEpisode,
+        isMovie ? 'movie' : 'tv'
+      );
+      displayTitle = displayTitle || 'Unknown Title';
+    } else if (!selected?.episodeId) {
+      // `.at` (il sito vecchio, ancora vivo): la scheda porta episodi e titolo.
+      html = String(await auFetchResource(animeUrl, caches, {
+        ttlMs: TTL.animePage,
+        cacheKey: `au-anime:${normalizedPath}`,
+        timeoutMs: FETCH_TIMEOUT,
+      }).catch((error: any) => {
+        console.warn('[AnimeUnity] pagina scheda non recuperata:', error?.message || String(error));
+        return '';
+      }) || '');
 
-        if (!html) return [];
+      if (!html) return [];
 
-        // Il DOM serve solo a leggere il titolo, e il titolo arriva quasi sempre
-        // dal chiamante: costruirlo comunque costa ~46 ms su una pagina da 500 KB.
-        if (!titleOverride) {
-          const $ = cheerio.load(String(html));
-          const pageTitle =
-            $('meta[property="og:title"]').attr('content') ||
-            $('title').first().text().trim() ||
-            null;
-          displayTitle = sanitizeAnimeTitle(pageTitle) || 'Unknown Title';
-        }
+      // Il DOM serve solo a leggere il titolo, e il titolo arriva quasi sempre
+      // dal chiamante: costruirlo comunque costa ~46 ms su una pagina da 500 KB.
+      if (!titleOverride) {
+        const $ = cheerio.load(String(html));
+        const pageTitle =
+          $('meta[property="og:title"]').attr('content') ||
+          $('title').first().text().trim() ||
+          null;
+        displayTitle = sanitizeAnimeTitle(pageTitle) || 'Unknown Title';
       }
 
-      const pageEpisodes = isUnityCoBase()
-        ? await fetchUnityCoEpisodes(animeId, requestedEpisode)
-        : parseEpisodesFromAnimeHtml(String(html));
+      const pageEpisodes = parseEpisodesFromAnimeHtml(String(html));
 
       const normalizedEpisodes = normalizeEpisodesList(
         pageEpisodes.map((entry, index) => ({
@@ -869,11 +931,10 @@ export class AnimeUnityProvider {
     // un hop (2 s di pacing) e consuma il token vixcloud legato al nostro IP.
     const needVariant = !(proxyWanted && this.config.proxyUrl.trim());
 
-    // .at espone SUB e ITA nello stesso episodio; .co ha schede separate per lingua.
-    // Senza pagina scheda (id dal catalogo) la lingua viene dal catalogo.
-    const dubPage = html ? isUnityCoDubPage(String(html)) : catalogLanguage === 'ITA';
-    const languages: ('sub' | 'dub')[] = isUnityCoBase()
-      ? [dubPage ? 'dub' : 'sub']
+    // `.cx` dichiara le lingue nei `videos[]` dell'episodio: si servono quelle che
+    // ci sono. `.at` le espone tutte e due sullo stesso episodio.
+    const languages: ('sub' | 'dub')[] = isUnityCx()
+      ? (['sub', 'dub'] as const).filter((language) => videoIds?.[language])
       : ['sub', 'dub'];
     // SUB e DUB in parallelo: gli hop sull'host AnimeUnity restano in fila per il
     // pacing, ma embed e manifest (host diversi) si sovrappongono. Il budget WAF
@@ -881,8 +942,13 @@ export class AnimeUnityProvider {
     const episodeId = selected.episodeId;
     const streamResults = await Promise.all(
       languages.map((language) =>
-        getStreamData(animeId, animeSlug, episodeId, language, needVariant)
-          .catch(() => null)
+        getStreamData(
+          animeId,
+          animeSlug,
+          isUnityCx() ? videoIds![language]! : episodeId,
+          language,
+          needVariant
+        ).catch(() => null)
       )
     );
     for (const [index, streamResult] of streamResults.entries()) {
@@ -1076,7 +1142,7 @@ export class AnimeUnityProvider {
     // Anche il romaji passa dalla normalizzazione ("... Season 2" -> "... 2").
     const altRaw = titleAlt ? normalizeTitleForSearch(titleAlt) : '';
     const altQuery = sameQuery(altRaw, normalizedTitle) ? '' : altRaw;
-    // Titolo italiano (TMDB): molti record di .co hanno solo name_it/name_eng
+    // Titolo italiano (TMDB): molti record del sito hanno solo name_it
     // italiani, che l'inglese non tocca. Se coincide con la query italiana non
     // aggiunge nulla (es. "Cyberpunk: Edgerunners" ha lo stesso nome in it-IT).
     const itQueryRaw = italianSeasonQuery(titleIt, titleItSeason ?? seasonNumber, normalizedTitle, isMovie);
@@ -1179,14 +1245,18 @@ export class AnimeUnityProvider {
     }
     const streams: StreamForStremio[] = [];
     const seenLinks = new Set();
-    for (const { version, language_type: versionLanguage } of animeVersions) {
-      // .co tipizza le schede: un film non è l'episodio di una serie.
-      if (!isMovie && version.type === 'Movie') continue;
+    for (const { version } of animeVersions) {
+      // Il sito tipizza le schede: un film non è l'episodio di una serie.
+      // `/i`: il sito nuovo manda `movie` minuscolo, il catalogo `Movie`.
+      if (!isMovie && /^movie$/i.test(String(version.type || ''))) continue;
+      // `\b` e non `/ITA/gi`: senza il confine di parola "Attack on Titan"
+      // diventava "Attack on Tn".
       const cleanName = version.name
         .replace(/\s*\(ITA\)/i, '')
         .replace(/\s*\(CR\)/i, '')
-        .replace(/ITA/gi, '')
-        .replace(/CR/gi, '')
+        .replace(/\bITA\b/gi, '')
+        .replace(/\bCR\b/gi, '')
+        .replace(/\s{2,}/g, ' ')
         .trim();
       // L'etichetta deve dire la stagione: se la query mappata la porta ("… 2")
       // e la scheda del sito no, vince la query (AnimeSaturn fa già così).
@@ -1200,8 +1270,7 @@ export class AnimeUnityProvider {
         seasonNumber,
         isMovie,
         labelTitle,
-        version.ep,
-        versionLanguage
+        version.ep
       );
       for (const st of perVersion) {
         if (!st || !st.url) continue;
@@ -1211,41 +1280,6 @@ export class AnimeUnityProvider {
       }
     }
 
-    // .co: se l'archivio non ha restituito la scheda ITA della stessa serie
-    // (es. One Piece), il link è nella pagina SUB appena letta (cache, 0 fetch).
-    if (isUnityCoBase() && !isMovie && !streams.some(s => /ITA/.test(String(s.title || '')))) {
-      const subVersion = animeVersions.find(v => !/-ita$/i.test(v.version.slug || ''));
-      if (subVersion) {
-        const subPath = normalizeAnimePath(`/anime/${subVersion.version.id}-${subVersion.version.slug}`);
-        const subUrl = subPath ? buildUnityUrl(subPath) : null;
-        if (subPath && subUrl) {
-          const html = String(await auFetchResource(subUrl, caches, {
-            ttlMs: TTL.animePage,
-            cacheKey: `au-anime:${subPath}`,
-            timeoutMs: FETCH_TIMEOUT,
-          }).catch((error: any) => {
-            debug(1, 'AnimeUnity', 'scheda SUB non recuperata per il blocco ITA', { error: error?.message || String(error) });
-            return '';
-          }) || '');
-          const itaPath = findUnityCoItaSibling(html, subPath);
-          if (itaPath) {
-            const cleanName = subVersion.version.name
-              .replace(/\s*\(ITA\)/i, '')
-              .replace(/\s*\(CR\)/i, '')
-              .replace(/ITA/gi, '')
-              .replace(/CR/gi, '')
-              .trim();
-            const extra = await this.extractStreamsFromAnimePath(itaPath, episodeNumber, seasonNumber, isMovie, cleanName);
-            for (const st of extra) {
-              if (!st || !st.url || seenLinks.has(st.url)) continue;
-              streams.push(st);
-              seenLinks.add(st.url);
-            }
-            if (extra.length) debug(2, 'AnimeUnity', `[AnimeUnity] Scheda ITA recuperata dalla pagina SUB: ${itaPath}`);
-          }
-        }
-      }
-    }
     debug(1, 'AnimeUnity', 'streams', {
       title: normalizedTitle,
       count: streams.length,
