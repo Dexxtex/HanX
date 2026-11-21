@@ -417,8 +417,17 @@ interface AnimeUnityCxEpisode {
  * serie da 1, 37 KB su One Piece), ognuno con i video per lingua. `page`,
  * `offset` e `tab_size` sono ignorati dal sito: l'unico parametro è `start`.
  */
-async function fetchUnityCxEpisodes(animeId: number, episode: number | null): Promise<AnimeUnityCxEpisode[]> {
+async function fetchUnityCxEpisodes(
+  animeId: number,
+  episode: number | null,
+  /** `true` scarta la voce in cache: un episodio uscito dopo la lettura non c'è. */
+  force = false
+): Promise<AnimeUnityCxEpisode[]> {
   const start = episode && episode > 120 ? Math.max(1, episode - 119) : 1;
+  const cacheKey = `au-cx-episodes:${animeId}:${start}`;
+  // La lista cambia a ogni episodio, il resto delle pagine no: la cache resta
+  // 6 h, ma sul miss si rilegge (vedi `extractStreamsFromAnimePath`).
+  if (force) invalidateCached(caches, cacheKey, 'json');
   try {
     const payload = await auFetchResource(
       `${getUnityBaseUrl()}/api/anime/${animeId}/episodes?start=${start}`,
@@ -426,7 +435,7 @@ async function fetchUnityCxEpisodes(animeId: number, episode: number | null): Pr
       {
         as: 'json',
         ttlMs: TTL.animePage,
-        cacheKey: `au-cx-episodes:${animeId}:${start}`,
+        cacheKey,
         timeoutMs: FETCH_TIMEOUT,
         headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
       }
@@ -835,8 +844,16 @@ export class AnimeUnityProvider {
     let videoIds: Partial<Record<'sub' | 'dub', number>> | null = null;
 
     if (isUnityCx()) {
-      const pageEpisodes = await fetchUnityCxEpisodes(animeId, requestedEpisode);
-      const match = pageEpisodes.find((entry) => entry.number === requestedEpisode);
+      let pageEpisodes = await fetchUnityCxEpisodes(animeId, requestedEpisode);
+      let match = pageEpisodes.find((entry) => entry.number === requestedEpisode);
+      if (!match) {
+        // La lista viene dalla cache (6 h): l'episodio può essere uscito nel
+        // frattempo. Si rilegge una volta sola prima di arrendersi, come su
+        // AnimeWorld: senza, un episodio nuovo resta invisibile fino a scadenza.
+        // Costo: una richiesta per play, e il fan-out negativo di 5 min la limita.
+        pageEpisodes = await fetchUnityCxEpisodes(animeId, requestedEpisode, true);
+        match = pageEpisodes.find((entry) => entry.number === requestedEpisode);
+      }
       if (!match) {
         console.warn(
           `[AnimeUnity][cx] episodio ${requestedEpisode} non presente (scheda ${animeId}, ${pageEpisodes.length} episodi letti)`
