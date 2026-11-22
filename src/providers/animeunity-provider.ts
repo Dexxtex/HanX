@@ -412,6 +412,12 @@ interface AnimeUnityCxEpisode {
   videos: { id: number; language: 'sub' | 'dub' }[];
 }
 
+interface AnimeUnityCxEpisodesResult {
+  episodes: AnimeUnityCxEpisode[];
+  /** `false` quando la richiesta è fallita: la lista vuota non vuol dire "nessun episodio". */
+  ok: boolean;
+}
+
 /**
  * `api/anime/{id}/episodes?start=N` dà 120 episodi per blocco (271 B su una
  * serie da 1, 37 KB su One Piece), ognuno con i video per lingua. `page`,
@@ -422,7 +428,7 @@ async function fetchUnityCxEpisodes(
   episode: number | null,
   /** `true` scarta la voce in cache: un episodio uscito dopo la lettura non c'è. */
   force = false
-): Promise<AnimeUnityCxEpisode[]> {
+): Promise<AnimeUnityCxEpisodesResult> {
   const start = episode && episode > 120 ? Math.max(1, episode - 119) : 1;
   const cacheKey = `au-cx-episodes:${animeId}:${start}`;
   // La lista cambia a ogni episodio, il resto delle pagine no: la cache resta
@@ -441,21 +447,24 @@ async function fetchUnityCxEpisodes(
       }
     ) as any;
 
-    return (payload?.episodes || [])
-      .map((entry: any) => ({
-        number: parseEpisodeNumber(entry?.number, 0),
-        videos: (entry?.videos || [])
-          .map((video: any) => ({
-            id: Number(video?.id) || 0,
-            // `jpn` è la traccia sottotitolata, `ita` quella doppiata.
-            language: (String(video?.language || '').toLowerCase() === 'ita' ? 'dub' : 'sub') as 'sub' | 'dub',
-          }))
-          .filter((video: { id: number }) => video.id > 0),
-      }))
-      .filter((entry: AnimeUnityCxEpisode) => entry.number > 0 && entry.videos.length > 0);
+    return {
+      ok: true,
+      episodes: (payload?.episodes || [])
+        .map((entry: any) => ({
+          number: parseEpisodeNumber(entry?.number, 0),
+          videos: (entry?.videos || [])
+            .map((video: any) => ({
+              id: Number(video?.id) || 0,
+              // `jpn` è la traccia sottotitolata, `ita` quella doppiata.
+              language: (String(video?.language || '').toLowerCase() === 'ita' ? 'dub' : 'sub') as 'sub' | 'dub',
+            }))
+            .filter((video: { id: number }) => video.id > 0),
+        }))
+        .filter((entry: AnimeUnityCxEpisode) => entry.number > 0 && entry.videos.length > 0),
+    };
   } catch (error: any) {
     console.warn('[AnimeUnity][cx] episodi non recuperati:', error?.message || error);
-    return [];
+    return { episodes: [], ok: false };
   }
 }
 
@@ -844,16 +853,15 @@ export class AnimeUnityProvider {
     let videoIds: Partial<Record<'sub' | 'dub', number>> | null = null;
 
     if (isUnityCx()) {
-      let pageEpisodes = await fetchUnityCxEpisodes(animeId, requestedEpisode);
-      let match = pageEpisodes.find((entry) => entry.number === requestedEpisode);
-      if (!match) {
-        // La lista viene dalla cache (6 h): l'episodio può essere uscito nel
-        // frattempo. Si rilegge una volta sola prima di arrendersi, come su
-        // AnimeWorld: senza, un episodio nuovo resta invisibile fino a scadenza.
-        // Costo: una richiesta per play, e il fan-out negativo di 5 min la limita.
-        pageEpisodes = await fetchUnityCxEpisodes(animeId, requestedEpisode, true);
-        match = pageEpisodes.find((entry) => entry.number === requestedEpisode);
+      let fetched = await fetchUnityCxEpisodes(animeId, requestedEpisode);
+      let match = fetched.episodes.find((entry) => entry.number === requestedEpisode);
+      // Si rilegge **solo** se la lista è arrivata e l'episodio non c'è (uscito
+      // dopo la lettura). Su un errore no: un 403/429 ripetuto rinnova il blocco.
+      if (!match && fetched.ok) {
+        fetched = await fetchUnityCxEpisodes(animeId, requestedEpisode, true);
+        match = fetched.episodes.find((entry) => entry.number === requestedEpisode);
       }
+      const pageEpisodes = fetched.episodes;
       if (!match) {
         console.warn(
           `[AnimeUnity][cx] episodio ${requestedEpisode} non presente (scheda ${animeId}, ${pageEpisodes.length} episodi letti)`
